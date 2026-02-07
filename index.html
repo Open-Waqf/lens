@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0b1220"/>
+
+    <!-- Baseline CSP (tighten later if you add more capabilities) -->
+    <meta
+            http-equiv="Content-Security-Policy"
+            content="default-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self';"
+    />
+
+    <title>Sahifah Lens</title>
+    <link rel="icon" href="/icons/icon-192.png"/>
+    <link rel="stylesheet" href="/src/style.css"/>
+</head>
+<body class="bg-slate-950 text-slate-100">
+<app-root></app-root>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
