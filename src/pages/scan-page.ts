@@ -938,7 +938,7 @@ export class ScanPage extends LitElement {
                             class="relative shrink-0 rounded-lg border ${selected === it.id ? 'border-emerald-500' : 'border-slate-800'} overflow-hidden"
                             style="width: 76px; height: 96px;"
                             title="Edit page"
-                            @click=${() => void this.openExistingPageInEditor(it.id)}
+                            @click=${it.isNew ? () => void this.openExistingPageInEditor(it.id) : undefined}
                     >
                         <img src=${it.url} class="w-full h-full object-cover" alt="thumb"/>
                         ${it.isNew ? html`
