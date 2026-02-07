@@ -3,9 +3,9 @@ import {customElement, state} from 'lit/decorators.js';
 import {live} from 'lit/directives/live.js';
 
 import {db} from '../services/db';
+import {getFileStore} from '../services/filestore';
+import {bytesToBlob} from '../lib/bytes';
 import type {DocRecord} from '../domain/types';
-
-const APPEND_DOC_KEY = 'sahifah.appendToDocId';
 
 @customElement('library-page')
 export class LibraryPage extends LitElement {
@@ -16,75 +16,120 @@ export class LibraryPage extends LitElement {
     @state() private docs: DocRecord[] = [];
     @state() private q = '';
 
+    @state() private thumbs: Record<string, string> = {};
     private _timer: number | null = null;
+    private _sig = '';
 
     connectedCallback(): void {
         super.connectedCallback();
         void this.refresh();
-
-        // MVP: poll lightly so the list updates after scans without needing hooks/events
-        this._timer = window.setInterval(() => void this.refresh(), 1200);
+        this._timer = window.setInterval(() => void this.refresh(), 2000);
     }
 
     disconnectedCallback(): void {
         if (this._timer) window.clearInterval(this._timer);
         this._timer = null;
+        this.revokeThumbs();
         super.disconnectedCallback();
+    }
+
+    private revokeThumbs() {
+        for (const u of Object.values(this.thumbs)) URL.revokeObjectURL(u);
+        this.thumbs = {};
     }
 
     private async refresh(): Promise<void> {
         const all = await db.docs.orderBy('updatedAt').reverse().toArray();
         const q = this.q.trim().toLowerCase();
 
-        this.docs = q
+        const filtered = q
             ? all.filter(d =>
                 d.title.toLowerCase().includes(q) ||
                 d.tags.some(t => t.toLowerCase().includes(q)) ||
                 (d.folder ?? '').toLowerCase().includes(q)
             )
             : all;
+
+        this.docs = filtered;
+
+        // signature to avoid reloading thumbs every poll
+        const sig = filtered.map(d => `${d.id}:${d.updatedAt}:${d.pageIds[0] ?? ''}`).join('|');
+        if (sig === this._sig) return;
+        this._sig = sig;
+
+        await this.refreshThumbs(filtered);
     }
 
-    private goScanNew(): void {
-        // Ensure we're not in append mode
-        try {
-            localStorage.removeItem(APPEND_DOC_KEY);
-        } catch {
+    private async refreshThumbs(docs: DocRecord[]): Promise<void> {
+        // rebuild only for visible docs (cap to keep it fast)
+        const cap = 30;
+        const list = docs.slice(0, cap);
+
+        const store = getFileStore();
+        const next: Record<string, string> = {};
+
+        // revoke previous (simple + safe)
+        this.revokeThumbs();
+
+        for (const d of list) {
+            const firstId = d.pageIds[0];
+            if (!firstId) continue;
+
+            const page = await db.pages.get(firstId);
+            if (!page) continue;
+
+            try {
+                const bytes = await store.get(page.thumbPath);
+                const blob = bytesToBlob(bytes, 'image/jpeg');
+                next[d.id] = URL.createObjectURL(blob);
+            } catch {
+                // ignore missing thumb
+            }
         }
-        location.hash = '#/scan';
+
+        this.thumbs = next;
     }
 
-    private goImportNew(): void {
-        // Ensure we're not in append mode
-        try {
-            localStorage.removeItem(APPEND_DOC_KEY);
-        } catch {
+    private async deleteDoc(docId: string): Promise<void> {
+        const ok = confirm('Delete this document and all pages? This cannot be undone.');
+        if (!ok) return;
+
+        const doc = await db.docs.get(docId);
+        if (!doc) return;
+
+        const store = getFileStore();
+        const pages = await db.pages.where('docId').equals(docId).toArray();
+
+        for (const p of pages) {
+            try {
+                await store.del(p.imagePath);
+            } catch {
+            }
+            try {
+                await store.del(p.thumbPath);
+            } catch {
+            }
         }
-        location.hash = '#/scan?import=1';
+
+        if (doc.pdfPath) {
+            try {
+                await store.del(doc.pdfPath);
+            } catch {
+            }
+        }
+
+        await db.pages.where('docId').equals(docId).delete();
+        await db.docs.delete(docId);
+
+        void this.refresh();
     }
 
     render() {
         return html`
             <div class="space-y-4">
-                <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center justify-between">
                     <div class="text-lg font-semibold">Library</div>
-
-                    <div class="flex gap-2">
-                        <button
-                                class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700"
-                                @click=${() => this.goImportNew()}
-                                title="Create a new document from photos"
-                        >
-                            Import
-                        </button>
-                        <button
-                                class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold"
-                                @click=${() => this.goScanNew()}
-                                title="Scan a new document"
-                        >
-                            Scan
-                        </button>
-                    </div>
+                    <a class="text-sm text-emerald-400 hover:underline" href="#/scan">Scan +</a>
                 </div>
 
                 <input
@@ -100,36 +145,59 @@ export class LibraryPage extends LitElement {
                 <div class="space-y-2">
                     ${this.docs.length === 0
                             ? html`
-                                <div class="text-slate-500 text-sm">No documents yet. Tap <span
-                                        class="text-slate-300 font-medium">Scan</span> to create one.
-                                </div>`
+                                <div class="text-slate-500 text-sm">No documents yet.</div>`
                             : this.docs.map(d => html`
                                 <a
-                                        class="block p-4 rounded-xl border border-slate-800 bg-slate-950 hover:bg-slate-900"
+                                        class="block p-3 rounded-xl border border-slate-800 bg-slate-950 hover:bg-slate-900"
                                         href=${`#/doc/${d.id}`}
                                 >
-                                    <div class="flex items-start justify-between gap-3">
-                                        <div>
-                                            <div class="font-medium">${d.title}</div>
-                                            <div class="text-xs text-slate-500 mt-1">
-                                                ${new Date(d.updatedAt).toLocaleString()} • ${d.pageIds.length} page(s)
-                                                ${d.folder ? html` • <span
-                                                        class="text-slate-300">${d.folder}</span>` : null}
-                                            </div>
-
-                                            ${d.tags.length ? html`
-                                                <div class="mt-2 flex flex-wrap gap-1">
-                                                    ${d.tags.map(t => html`
-                                                        <span class="text-xs px-2 py-1 rounded-full bg-slate-800 text-slate-200">${t}</span>
-                                                    `)}
-                                                </div>
-                                            ` : null}
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-14 h-18 rounded-lg overflow-hidden border border-slate-800 bg-black shrink-0">
+                                            ${this.thumbs[d.id]
+                                                    ? html`<img src=${this.thumbs[d.id]}
+                                                                class="w-full h-full object-cover" alt="thumb"/>`
+                                                    : html`
+                                                        <div class="w-full h-full"></div>`
+                                            }
                                         </div>
 
-                                        <div class="text-slate-400">›</div>
+                                        <div class="flex-1 min-w-0">
+                                            <div class="flex items-start justify-between gap-2">
+                                                <div class="min-w-0">
+                                                    <div class="font-medium truncate">${d.title}</div>
+                                                    <div class="text-xs text-slate-500 mt-1">
+                                                        ${new Date(d.updatedAt).toLocaleString()} • ${d.pageIds.length}
+                                                        page(s)
+                                                        ${d.folder ? html` • <span
+                                                                class="text-slate-300">${d.folder}</span>` : null}
+                                                    </div>
+                                                </div>
+
+                                                <button
+                                                        class="px-2 py-1 rounded-lg bg-red-900/40 border border-red-900 hover:bg-red-900/60 text-red-200 text-xs"
+                                                        title="Delete"
+                                                        @click=${(ev: Event) => {
+                                                            ev.preventDefault();
+                                                            ev.stopPropagation();
+                                                            void this.deleteDoc(d.id);
+                                                        }}
+                                                >Delete
+                                                </button>
+                                            </div>
+
+                                            ${d.tags.length
+                                                    ? html`
+                                                        <div class="mt-2 flex flex-wrap gap-1">
+                                                            ${d.tags.map(t => html`
+                                                                <span class="text-xs px-2 py-1 rounded-full bg-slate-800 text-slate-200">${t}</span>
+                                                            `)}
+                                                        </div>`
+                                                    : null}
+                                        </div>
                                     </div>
                                 </a>
-                            `)}
+                            `)
+                    }
                 </div>
             </div>
         `;

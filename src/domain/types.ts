@@ -21,4 +21,5 @@ export interface PageRecord {
     height: number;
     rotation: 0 | 90 | 180 | 270;
     createdAt: number;
+    reviewed?: 0 | 1;
 }

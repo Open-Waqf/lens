@@ -11,6 +11,8 @@ export async function processPhoto(opts: {
     crop?: { x: number; y: number; w: number; h: number };
     rotation: Rotation;
     filter: FilterMode;
+    masterJpegQuality?: number;
+    thumbMax?: number;
 }): Promise<{
     master: { bytes: Uint8Array; width: number; height: number };
     thumb: { bytes: Uint8Array; width: number; height: number };
@@ -22,8 +24,8 @@ export async function processPhoto(opts: {
         crop: opts.crop,
         rotation: opts.rotation,
         filter: opts.filter,
-        masterJpegQuality: 0.82,
-        thumbMax: 360
+        masterJpegQuality: opts.masterJpegQuality ?? 0.82,
+        thumbMax: opts.thumbMax ?? 360
     };
 
     return await new Promise((resolve, reject) => {
