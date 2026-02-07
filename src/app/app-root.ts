@@ -12,9 +12,23 @@ type Route =
     | { name: 'doc'; id: string }
     | { name: 'settings' };
 
+/**
+ * Supports hashes like:
+ *  - #/scan
+ *  - #/scan?new=1
+ *  - #/doc/ABC123
+ */
 function parseHash(): Route {
-    const raw = (location.hash || '#/library').replace(/^#/, '');
-    const parts = raw.split('/').filter(Boolean);
+    const rawHash = location.hash || '#/library';
+
+    // split off querystring inside the hash
+    // e.g. "#/scan?new=1" -> "#/scan"
+    const [hashPath] = rawHash.split('?');
+
+    // remove leading "#"
+    const path = hashPath.replace(/^#/, '');
+
+    const parts = path.split('/').filter(Boolean);
 
     if (parts[0] === 'scan') return {name: 'scan'};
     if (parts[0] === 'settings') return {name: 'settings'};
@@ -68,7 +82,7 @@ export class AppRoot extends LitElement {
                         <div class="font-semibold tracking-tight">Sahifah Lens</div>
                         <nav class="flex gap-2">
                             ${this.navLink('#/library', 'Library', active('library'))}
-                            ${this.navLink('#/scan', 'Scan', active('scan'))}
+                            ${this.navLink('#/scan?new=1', 'Scan', active('scan'))}
                             ${this.navLink('#/settings', 'Settings', active('settings'))}
                         </nav>
                     </div>

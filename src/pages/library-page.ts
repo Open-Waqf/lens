@@ -7,6 +7,8 @@ import {getFileStore} from '../services/filestore';
 import {bytesToBlob} from '../lib/bytes';
 import type {DocRecord} from '../domain/types';
 
+const JUST_SAVED_DOC_KEY = 'sahifah.justSavedDocId';
+
 @customElement('library-page')
 export class LibraryPage extends LitElement {
     createRenderRoot() {
@@ -17,11 +19,14 @@ export class LibraryPage extends LitElement {
     @state() private q = '';
 
     @state() private thumbs: Record<string, string> = {};
+    @state() private justSavedDocId: string | null = null;
+
     private _timer: number | null = null;
     private _sig = '';
 
     connectedCallback(): void {
         super.connectedCallback();
+        this.loadJustSaved();
         void this.refresh();
         this._timer = window.setInterval(() => void this.refresh(), 2000);
     }
@@ -31,6 +36,26 @@ export class LibraryPage extends LitElement {
         this._timer = null;
         this.revokeThumbs();
         super.disconnectedCallback();
+    }
+
+    private loadJustSaved() {
+        try {
+            this.justSavedDocId = sessionStorage.getItem(JUST_SAVED_DOC_KEY);
+        } catch {
+            this.justSavedDocId = null;
+        }
+    }
+
+    private clearJustSaved() {
+        try {
+            sessionStorage.removeItem(JUST_SAVED_DOC_KEY);
+        } catch {
+        }
+        this.justSavedDocId = null;
+    }
+
+    private clearJustSavedIfMatch(docId: string) {
+        if (this.justSavedDocId === docId) this.clearJustSaved();
     }
 
     private revokeThumbs() {
@@ -51,6 +76,11 @@ export class LibraryPage extends LitElement {
             : all;
 
         this.docs = filtered;
+
+        // If the "just saved" doc no longer exists, clear the marker
+        if (this.justSavedDocId && !filtered.some(d => d.id === this.justSavedDocId)) {
+            this.clearJustSaved();
+        }
 
         // signature to avoid reloading thumbs every poll
         const sig = filtered.map(d => `${d.id}:${d.updatedAt}:${d.pageIds[0] ?? ''}`).join('|');
@@ -121,6 +151,7 @@ export class LibraryPage extends LitElement {
         await db.pages.where('docId').equals(docId).delete();
         await db.docs.delete(docId);
 
+        if (this.justSavedDocId === docId) this.clearJustSaved();
         void this.refresh();
     }
 
@@ -129,7 +160,7 @@ export class LibraryPage extends LitElement {
             <div class="space-y-4">
                 <div class="flex items-center justify-between">
                     <div class="text-lg font-semibold">Library</div>
-                    <a class="text-sm text-emerald-400 hover:underline" href="#/scan">Scan +</a>
+                    <a class="text-sm text-emerald-400 hover:underline" href="#/scan?new=1">Scan +</a>
                 </div>
 
                 <input
@@ -137,67 +168,76 @@ export class LibraryPage extends LitElement {
                         placeholder="Search title, tags, folder…"
                         .value=${live(this.q)}
                         @input=${(e: Event) => {
-                            this.q = (e.target as HTMLInputElement).value;
-                            void this.refresh();
-                        }}
+            this.q = (e.target as HTMLInputElement).value;
+            void this.refresh();
+        }}
                 />
 
                 <div class="space-y-2">
                     ${this.docs.length === 0
-                            ? html`
-                                <div class="text-slate-500 text-sm">No documents yet.</div>`
-                            : this.docs.map(d => html`
-                                <a
-                                        class="block p-3 rounded-xl border border-slate-800 bg-slate-950 hover:bg-slate-900"
-                                        href=${`#/doc/${d.id}`}
-                                >
-                                    <div class="flex items-center gap-3">
-                                        <div class="w-14 h-18 rounded-lg overflow-hidden border border-slate-800 bg-black shrink-0">
-                                            ${this.thumbs[d.id]
-                                                    ? html`<img src=${this.thumbs[d.id]}
-                                                                class="w-full h-full object-cover" alt="thumb"/>`
-                                                    : html`
-                                                        <div class="w-full h-full"></div>`
-                                            }
-                                        </div>
+            ? html`<div class="text-slate-500 text-sm">No documents yet.</div>`
+            : this.docs.map(d => {
+                const isNew = this.justSavedDocId === d.id;
 
-                                        <div class="flex-1 min-w-0">
-                                            <div class="flex items-start justify-between gap-2">
-                                                <div class="min-w-0">
-                                                    <div class="font-medium truncate">${d.title}</div>
-                                                    <div class="text-xs text-slate-500 mt-1">
-                                                        ${new Date(d.updatedAt).toLocaleString()} • ${d.pageIds.length}
-                                                        page(s)
-                                                        ${d.folder ? html` • <span
-                                                                class="text-slate-300">${d.folder}</span>` : null}
-                                                    </div>
-                                                </div>
-
-                                                <button
-                                                        class="px-2 py-1 rounded-lg bg-red-900/40 border border-red-900 hover:bg-red-900/60 text-red-200 text-xs"
-                                                        title="Delete"
-                                                        @click=${(ev: Event) => {
-                                                            ev.preventDefault();
-                                                            ev.stopPropagation();
-                                                            void this.deleteDoc(d.id);
-                                                        }}
-                                                >Delete
-                                                </button>
+                return html`
+                                    <a
+                                            class=${[
+                    'block p-3 rounded-xl border bg-slate-950 hover:bg-slate-900',
+                    isNew ? 'border-emerald-600/70 shadow-[0_0_0_1px_rgba(16,185,129,0.25)]' : 'border-slate-800'
+                ].join(' ')}
+                                            href=${`#/doc/${d.id}`}
+                                            @click=${() => this.clearJustSavedIfMatch(d.id)}
+                                    >
+                                        <div class="flex items-center gap-3">
+                                            <div class="w-14 h-18 rounded-lg overflow-hidden border border-slate-800 bg-black shrink-0">
+                                                ${this.thumbs[d.id]
+                    ? html`<img src=${this.thumbs[d.id]} class="w-full h-full object-cover" alt="thumb"/>`
+                    : html`<div class="w-full h-full"></div>`
+                }
                                             </div>
 
-                                            ${d.tags.length
-                                                    ? html`
-                                                        <div class="mt-2 flex flex-wrap gap-1">
-                                                            ${d.tags.map(t => html`
-                                                                <span class="text-xs px-2 py-1 rounded-full bg-slate-800 text-slate-200">${t}</span>
-                                                            `)}
-                                                        </div>`
-                                                    : null}
+                                            <div class="flex-1 min-w-0">
+                                                <div class="flex items-start justify-between gap-2">
+                                                    <div class="min-w-0">
+                                                        <div class="flex items-center gap-2 min-w-0">
+                                                            <div class="font-medium truncate">${d.title}</div>
+                                                            ${isNew ? html`
+                                                                <span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-semibold shrink-0">
+                                                                    NEW
+                                                                </span>
+                                                            ` : null}
+                                                        </div>
+
+                                                        <div class="text-xs text-slate-500 mt-1">
+                                                            ${new Date(d.updatedAt).toLocaleString()} • ${d.pageIds.length} page(s)
+                                                            ${d.folder ? html` • <span class="text-slate-300">${d.folder}</span>` : null}
+                                                        </div>
+                                                    </div>
+
+                                                    <button
+                                                            class="px-2 py-1 rounded-lg bg-red-900/40 border border-red-900 hover:bg-red-900/60 text-red-200 text-xs"
+                                                            title="Delete"
+                                                            @click=${(ev: Event) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    void this.deleteDoc(d.id);
+                }}
+                                                    >Delete</button>
+                                                </div>
+
+                                                ${d.tags.length ? html`
+                                                    <div class="mt-2 flex flex-wrap gap-1">
+                                                        ${d.tags.map(t => html`
+                                                            <span class="text-xs px-2 py-1 rounded-full bg-slate-800 text-slate-200">${t}</span>
+                                                        `)}
+                                                    </div>
+                                                ` : null}
+                                            </div>
                                         </div>
-                                    </div>
-                                </a>
-                            `)
-                    }
+                                    </a>
+                                `;
+            })
+        }
                 </div>
             </div>
         `;
