@@ -19,7 +19,8 @@
     "@capacitor/core": "^8.0.2",
     "@capacitor/filesystem": "^8.1.0",
     "@capacitor/share": "^8.0.0",
-    "lit": "^3.3.1"
+    "lit": "^3.3.1",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.0.2",
