@@ -1,5 +1,5 @@
 export type DocId = string;
-export type FilterMode = 'original' | 'grayscale' | 'bw';
+export type FilterMode = 'original' | 'grayscale' | 'bw' | 'magic';
 
 export interface DocRecord {
     id: DocId;
