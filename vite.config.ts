@@ -3,7 +3,11 @@ import tailwindcss from '@tailwindcss/vite';
 import {VitePWA} from 'vite-plugin-pwa';
 
 export default defineConfig({
-    // Good default for static hosting + Capacitor webview
+    build: {
+        outDir: 'dist',
+        sourcemap: false,
+        chunkSizeWarningLimit: 1000, // Increase warning limit to 1MB (optional but cleaner logs)
+    },
     base: './',
     plugins: [
         tailwindcss(),
@@ -24,7 +28,8 @@ export default defineConfig({
             },
             workbox: {
                 navigateFallback: 'index.html',
-                globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2}']
+                maximumFileSizeToCacheInBytes: 6000000,
+                globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2,wasm}']
             }
         })
     ]

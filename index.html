@@ -1,12 +1,12 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="en" class="dark">
 <head>
     <meta charset="UTF-8"/>
-    <meta
-            name="viewport"
-            content="width=device-width, initial-scale=1.0, viewport-fit=cover"
-    />
-    <meta name="theme-color" content="#0b1220"/>
+    <link rel="icon" type="image/svg+xml" href="favicon.ico"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+    <title>Sahifah Lens</title>
+    <meta name="description" content="Private, local-first document scanner"/>
+    <meta name="theme-color" content="#020617"/>
 
     <meta http-equiv="Content-Security-Policy" content="
         default-src 'self';
@@ -19,12 +19,11 @@
         base-uri 'self';
     ">
 
-    <title>Sahifah Lens</title>
-    <link rel="icon" href="/icons/icon-192.png"/>
-    <link rel="stylesheet" href="/src/style.css"/>
+    <link rel="manifest" href="manifest.webmanifest"/>
 </head>
-<body class="bg-slate-950 text-slate-100">
+<body class="bg-slate-950 text-slate-100 antialiased selection:bg-emerald-500/30">
 <app-root></app-root>
-<script type="module" src="/src/main.ts"></script>
+
+<script type="module" src="src/main.ts"></script>
 </body>
 </html>

@@ -7,9 +7,9 @@ async function getWorker(): Promise<Worker> {
     if (!workerPromise) {
         workerPromise = (async () => {
             const w = await createWorker('eng', 1, {
-                workerPath: '/tesseract/worker.min.js',
-                corePath: '/tesseract/tesseract-core.wasm.js',
-                langPath: '/tesseract/',
+                workerPath: new URL('/tesseract/worker.min.js', import.meta.url).href,
+                corePath: new URL('/tesseract/tesseract-core.wasm.js', import.meta.url).href,
+                langPath: new URL('/tesseract/', import.meta.url).href,
             });
             await w.setParameters({
                 tessedit_pageseg_mode: PSM.AUTO,

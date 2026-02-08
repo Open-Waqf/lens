@@ -20,7 +20,11 @@
     "@capacitor/core": "^8.0.2",
     "@capacitor/filesystem": "^8.1.0",
     "@capacitor/share": "^8.0.0",
+    "dexie": "4.3.0",
+    "fflate": "0.8.2",
     "lit": "^3.3.1",
+    "nanoid": "5.1.6",
+    "pdf-lib": "1.17.1",
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
