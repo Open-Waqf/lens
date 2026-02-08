@@ -1,6 +1,8 @@
 import {html, LitElement} from 'lit';
 import {customElement, query, state} from 'lit/decorators.js';
 import {keyed} from 'lit/directives/keyed.js';
+import {Capacitor} from '@capacitor/core';
+import {DocumentScanner} from '@capacitor-mlkit/document-scanner';
 
 import type {DetectedQuad, Point, Quad} from '../lib/scan/quad';
 import {lerpQuad, quadArea} from '../lib/scan/quad';
@@ -10,7 +12,7 @@ import {takePendingImport} from '../services/pending-import';
 import {bytesToBlob} from '../lib/bytes';
 import {processPhoto} from '../lib/image/pipeline';
 import {DetectGovernor} from '../lib/scan/detect-governor';
-
+import {getPlatformCaps} from '../services/platform'; // Imported for platform check
 import '../components/scan-overlay';
 import '../components/page-editor';
 import type {PageEditorSaveDetail} from '../components/page-editor';
@@ -36,10 +38,10 @@ export class ScanPage extends LitElement {
     private camera = new CameraManager();
     private session = new ScanSessionState(() => this.requestUpdate());
     private repo = new ScanRepo();
+    private caps = getPlatformCaps(); // Cache capabilities
 
     @state() private busy = false;
     @state() private error: string | null = null;
-    @state() private feedback: string | null = null; // New: Feedback UI
 
     @state() private docTitle: string | null = null;
     @state() private targetDocTitle: string | null = null;
@@ -55,7 +57,7 @@ export class ScanPage extends LitElement {
     @state() private importReviewIndex = 0;
     private importReviewQueue: string[] = [];
 
-    @state() private autoCapture = readBool(AUTO_KEY, true); // Default to true for "Lens" feel
+    @state() private autoCapture = readBool(AUTO_KEY, false);
 
     @state() private videoW = 0;
     @state() private videoH = 0;
@@ -120,7 +122,6 @@ export class ScanPage extends LitElement {
 
         this.error = null;
         this.busy = false;
-        this.feedback = null;
 
         this.clearEditor();
         this.newPageIds.clear();
@@ -348,10 +349,19 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
         this.strip = items;
     }
 
+    // --- Core "Eye Transplant" Logic ---
+
     private beginCameraFromGesture(): void {
         this.error = null;
-        this.session.setStage('camera');
 
+        // If native, invoke the "Lens-class" system scanner
+        if (this.caps.isCapacitor) {
+            void this.invokeNativeScanner();
+            return;
+        }
+
+        // Fallback: Web Camera
+        this.session.setStage('camera');
         if (this.camera.isRunning) return;
 
         void (async () => {
@@ -368,6 +378,41 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
         })();
     }
 
+    private async invokeNativeScanner(): Promise<void> {
+        this.busy = true;
+        try {
+            // Trigger the native UI (ML Kit / VisionKit)
+            const {scannedImages} = await DocumentScanner.scanDocument({
+                pageLimit: 24, // Fix 1: Correct property name
+            });
+
+            // Fix 2: Check if scannedImages exists
+            if (scannedImages && scannedImages.length > 0) {
+                // Convert file URIs to Blobs for our pipeline
+                const files: File[] = [];
+                for (const uri of scannedImages) {
+                    // Safe fetch for Capacitor local files
+                    const webPath = Capacitor.convertFileSrc(uri);
+                    const res = await fetch(webPath);
+                    const blob = await res.blob();
+                    files.push(new File([blob], 'scan.jpg', {type: 'image/jpeg'}));
+                }
+
+                // Inject into existing batch pipeline
+                if (files.length === 1) {
+                    await this.openNewBlobInEditor(files[0]);
+                } else {
+                    await this.batchImport(files);
+                }
+            }
+        } catch (e) {
+            // User cancelled or error
+            // console.warn(e);
+        } finally {
+            this.busy = false;
+        }
+    }
+
     private async stopCamera(): Promise<void> {
         await this.camera.stop();
     }
@@ -376,7 +421,6 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
         this.error = null;
         if (this.captureInFlight) return;
         this.captureInFlight = true;
-        this.feedback = fromAuto ? 'Capturing...' : null;
 
         try {
             const v = this.videoEl;
@@ -428,7 +472,6 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
             if (fromAuto) this.cooldownUntil = Date.now() + 1500;
         } finally {
             this.captureInFlight = false;
-            this.feedback = null;
         }
     }
 
@@ -500,6 +543,7 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
             if (msg?.type !== 'result') return;
 
             this.detecting = false;
+
             const tMs = Number(msg.tMs ?? 0);
             if (tMs > 0) this.detGov.onResult(tMs);
 
@@ -539,6 +583,7 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
                 this.detectLoopTimer = window.setTimeout(tick, 250);
                 return;
             }
+
             if (document.hidden) {
                 this.detectLoopTimer = window.setTimeout(tick, 800);
                 return;
@@ -555,31 +600,39 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
         this.detectLoopToken++;
         if (this.detectLoopTimer) window.clearTimeout(this.detectLoopTimer);
         this.detectLoopTimer = null;
+
         this.worker?.terminate();
         this.worker = null;
+
         this.offscreen = null;
         this.offCtx = null;
         this.detecting = false;
+
         this.lastDetect = null;
         this.smoothedQuad = null;
+
         this.stableSince = 0;
         this.cooldownUntil = 0;
-        this.feedback = null;
     }
 
     private grabAndDetect(): void {
         if (!this.worker || !this.offCtx || !this.offscreen) return;
         if (this.detecting) return;
+
         const v = this.videoEl;
         if (!v || v.videoWidth === 0 || v.videoHeight === 0) return;
+
         const maxDim = this.detGov.maxDim;
         const scale = Math.min(1, maxDim / Math.max(v.videoWidth, v.videoHeight));
         const w = Math.max(1, Math.round(v.videoWidth * scale));
         const h = Math.max(1, Math.round(v.videoHeight * scale));
+
         this.offscreen.width = w;
         this.offscreen.height = h;
+
         this.offCtx.drawImage(v, 0, 0, w, h);
         const img = this.offCtx.getImageData(0, 0, w, h);
+
         this.detecting = true;
         this.worker.postMessage({type: 'detect', width: w, height: h, rgba: img.data});
     }
@@ -595,26 +648,17 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
     }
 
     private maybeAutoCapture(): void {
-        if (!this.autoCapture) {
-            this.feedback = null;
-            return;
-        }
+        if (!this.autoCapture) return;
         if (this.captureInFlight) return;
-        if (Date.now() < this.cooldownUntil) {
-            this.feedback = null;
-            return;
-        }
+        if (Date.now() < this.cooldownUntil) return;
         if (this.session.stage !== 'camera') return;
 
-        // Feedback Logic
         if (this.detGov.isTooSlowForAutoCapture) {
-            this.feedback = null; // Don't annoy users on slow devices
             this.stableSince = 0;
             return;
         }
 
         if (!this.lastDetect?.quad || !this.smoothedQuad) {
-            this.feedback = 'Looking for document...';
             this.stableSince = 0;
             return;
         }
@@ -622,38 +666,28 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
         const det = this.lastDetect;
         const q = this.smoothedQuad;
 
-        // Check 1: Confidence
         if (det.confidence < 0.72) {
-            this.feedback = 'Looking for document...';
             this.stableSince = 0;
             return;
         }
 
-        // Check 2: Size (Too small = bad resolution)
         const area = quadArea(q) / (det.width * det.height);
         if (area < 0.18) {
-            this.feedback = 'Move closer';
             this.stableSince = 0;
             return;
         }
 
-        // Check 3: Stability
         const jitter = this.quadStabilityScore(q, det);
         if (jitter > 0.012) {
-            this.feedback = 'Hold steady';
             this.stableSince = 0;
             return;
         }
-
-        // Ready state
-        this.feedback = 'Hold steady...';
 
         if (this.stableSince === 0) this.stableSince = Date.now();
         if (Date.now() - this.stableSince > 650) {
             void this.capturePhoto(true);
             this.cooldownUntil = Date.now() + 1200;
             this.stableSince = 0;
-            this.feedback = 'Capturing!';
         }
     }
 
@@ -668,11 +702,18 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
                         <div class="text-xs text-slate-500">${this.session.pageCount} page(s)</div>
                     </div>
                     <div class="flex gap-2">
-                        <button class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
-                                ?disabled=${this.session.pageCount === 0} @click=${() => this.openDocument()}>Open
+                        <button
+                                class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
+                                ?disabled=${this.session.pageCount === 0}
+                                @click=${() => this.openDocument()}
+                        >
+                            Open
                         </button>
-                        <button class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
-                                @click=${() => void this.exitScan()}>${this.session.exitLabel}
+                        <button
+                                class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
+                                @click=${() => void this.exitScan()}
+                        >
+                            ${this.session.exitLabel}
                         </button>
                     </div>
                 </div>
@@ -680,6 +721,7 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
         }
 
         if (!this.session.hasPages) return null;
+
         const title = this.docTitle ?? 'Document';
         return html`
             <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 flex items-center justify-between gap-3">
@@ -689,11 +731,18 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
                     <div class="text-xs text-slate-500">${this.session.pageCount} page(s)</div>
                 </div>
                 <div class="flex gap-2">
-                    <button class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
-                            ?disabled=${this.session.pageCount === 0} @click=${() => this.openDocument()}>Open
+                    <button
+                            class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
+                            ?disabled=${this.session.pageCount === 0}
+                            @click=${() => this.openDocument()}
+                    >
+                        Open
                     </button>
-                    <button class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
-                            @click=${() => void this.exitScan()}>${this.session.exitLabel}
+                    <button
+                            class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
+                            @click=${() => void this.exitScan()}
+                    >
+                        ${this.session.exitLabel}
                     </button>
                 </div>
             </div>
@@ -703,140 +752,208 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
     private renderStrip() {
         if (!this.strip.length) return null;
         const selected = this.editingPageId;
+
         return html`
             <div class="flex gap-2 overflow-x-auto py-1">
-                ${this.strip.map((it) => html`
-                    <button class="relative shrink-0 rounded-lg border ${selected === it.id ? 'border-emerald-500' : 'border-slate-800'} overflow-hidden ${it.isNew ? '' : 'opacity-60'}"
-                            style="width: 76px; height: 96px;"
-                            @click=${() => {
-                                if (it.isNew) void this.openExistingPageInEditor(it.id);
-                            }}>
-                        <img src=${it.url} class="w-full h-full object-cover" alt="thumb"/>
-                        ${it.isNew ? html`<span
-                                class="absolute top-1 left-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-semibold">NEW</span>` : null}
-                    </button>
-                `)}
+                ${this.strip.map(
+                        (it) => html`
+                            <button
+                                    class="relative shrink-0 rounded-lg border ${selected === it.id ? 'border-emerald-500' : 'border-slate-800'} overflow-hidden ${it.isNew ? '' : 'opacity-60'}"
+                                    style="width: 76px; height: 96px;"
+                                    title=${it.isNew ? 'Edit page' : 'Locked (already saved)'}
+                                    @click=${() => {
+                                        if (!it.isNew) return;
+                                        void this.openExistingPageInEditor(it.id);
+                                    }}
+                            >
+                                <img src=${it.url} class="w-full h-full object-cover" alt="thumb"/>
+                                ${it.isNew
+                                        ? html`<span
+                                                class="absolute top-1 left-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-semibold">NEW</span>`
+                                        : null}
+                            </button>
+                        `,
+                )}
             </div>
         `;
     }
 
     render() {
         const stage: ScanStage = this.session.stage;
+
         return html`
             <div class="space-y-4">
                 <div class="flex items-center justify-between">
                     <div class="text-lg font-semibold">${this.session.isAppend ? 'Add pages' : 'Scan'}</div>
-                    <label class="text-xs text-slate-400 flex items-center gap-2 select-none">
-                        <input type="checkbox" .checked=${this.autoCapture}
-                               @change=${(e: Event) => {
-                                   const v = (e.target as HTMLInputElement).checked;
-                                   this.autoCapture = v;
-                                   try {
-                                       localStorage.setItem(AUTO_KEY, v ? '1' : '0');
-                                   } catch {
-                                   }
-                               }}/>
-                        Auto-capture
-                    </label>
+                    ${!this.caps.isCapacitor ? html`
+                        <label class="text-xs text-slate-400 flex items-center gap-2 select-none">
+                            <input
+                                    type="checkbox"
+                                    .checked=${this.autoCapture}
+                                    @change=${(e: Event) => {
+                                        const v = (e.target as HTMLInputElement).checked;
+                                        this.autoCapture = v;
+                                        try {
+                                            localStorage.setItem(AUTO_KEY, v ? '1' : '0');
+                                        } catch {
+                                        }
+                                    }}
+                            />
+                            Auto-capture
+                        </label>` : null}
                 </div>
 
-                ${this.error ? html`
-                    <div class="p-3 rounded-lg bg-red-950/40 border border-red-900 text-red-200">${this.error}
-                    </div>` : null}
+                ${this.error
+                        ? html`
+                            <div class="p-3 rounded-lg bg-red-950/40 border border-red-900 text-red-200">${this.error}
+                            </div>`
+                        : null}
 
                 ${this.renderBanner()} ${this.renderStrip()}
 
-                ${stage === 'idle' ? html`
-                    <div class="p-4 rounded-xl border border-slate-800 bg-slate-950 space-y-3">
-                        <div class="text-sm text-slate-300">
-                            ${this.session.isAppend ? `Adding pages to: ${this.targetDocTitle ?? 'Document'}` : 'Start a new document'}
-                        </div>
-                        <div class="flex gap-2">
-                            <button class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold"
-                                    @click=${() => this.beginCameraFromGesture()}>Open camera
-                            </button>
-                            ${this.camera.torchSupported ? html`
-                                <button class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
-                                        ?disabled=${this.busy || !this.camera.isRunning}
+                ${stage === 'idle'
+                        ? html`
+                            <div class="p-4 rounded-xl border border-slate-800 bg-slate-950 space-y-3">
+                                <div class="text-sm text-slate-300">
+                                    ${this.session.isAppend ? `Adding pages to: ${this.targetDocTitle ?? 'Document'}` : 'Start a new document'}
+                                </div>
+
+                                <div class="flex gap-2">
+                                    <button
+                                            class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold"
+                                            @click=${() => this.beginCameraFromGesture()}
+                                    >
+                                        ${this.caps.isCapacitor ? 'Start Scanner' : 'Open Camera'}
+                                    </button>
+
+                                    ${this.camera.torchSupported && !this.caps.isCapacitor
+                                            ? html`
+                                                <button
+                                                        class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
+                                                        ?disabled=${this.busy || !this.camera.isRunning}
+                                                        @click=${async () => {
+                                                            this.error = null;
+                                                            try {
+                                                                await this.camera.toggleTorch();
+                                                                this.requestUpdate();
+                                                            } catch (e) {
+                                                                this.error = (e as Error).message ?? String(e);
+                                                            }
+                                                        }}
+                                                >
+                                                    ${this.camera.torchOn ? 'Torch on' : 'Torch off'}
+                                                </button>`
+                                            : null}
+
+                                    <button
+                                            class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
+                                            ?disabled=${this.busy}
+                                            @click=${() => this.pickFiles({multiple: true})}
+                                    >
+                                        Import
+                                    </button>
+
+                                    <button
+                                            class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800"
+                                            @click=${() => void this.exitScan()}
+                                    >
+                                        ${this.session.exitLabel}
+                                    </button>
+                                </div>
+                            </div>
+                        `
+                        : null}
+
+                ${stage === 'camera'
+                        ? html`
+                            <div class="space-y-3">
+                                <div class="rounded-xl overflow-hidden border border-slate-800 bg-black relative">
+                                    <video class="w-full h-[60vh] object-cover" autoplay playsinline muted></video>
+
+                                    <scan-overlay
+                                            .detected=${this.lastDetect}
+                                            .quad=${this.smoothedQuad}
+                                            .videoW=${this.videoW}
+                                            .videoH=${this.videoH}
+                                    ></scan-overlay>
+                                </div>
+
+                                <div class="flex gap-2">
+                                    <button
+                                            class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold disabled:opacity-60"
+                                            ?disabled=${this.busy}
+                                            @click=${() => void this.capturePhoto(false)}
+                                    >
+                                        Capture
+                                    </button>
+
+                                    <button
+                                            class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
+                                            ?disabled=${this.busy}
+                                            @click=${() => this.pickFiles({multiple: true})}
+                                    >
+                                        Import
+                                    </button>
+
+                                    <button
+                                            class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800"
+                                            @click=${() => void this.exitScan()}
+                                    >
+                                        ${this.session.exitLabel}
+                                    </button>
+                                </div>
+
+                                <button
+                                        class="text-sm text-slate-300 hover:underline"
                                         @click=${async () => {
-                                            try {
-                                                await this.camera.toggleTorch();
-                                                this.requestUpdate();
-                                            } catch (e) {
-                                                this.error = String(e);
-                                            }
-                                        }}>
-                                    ${this.camera.torchOn ? 'Torch on' : 'Torch off'}
-                                </button>` : null}
-                            <button class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
-                                    ?disabled=${this.busy} @click=${() => this.pickFiles({multiple: true})}>Import
-                            </button>
-                            <button class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800"
-                                    @click=${() => void this.exitScan()}>${this.session.exitLabel}
-                            </button>
-                        </div>
-                    </div>
-                ` : null}
+                                            await this.stopCamera();
+                                            this.stopDetector();
+                                            this.session.setStage('idle');
+                                        }}
+                                >
+                                    ← Back
+                                </button>
+                            </div>
+                        `
+                        : null}
 
-                ${stage === 'camera' ? html`
-                    <div class="space-y-3 relative">
-                        <div class="rounded-xl overflow-hidden border border-slate-800 bg-black relative">
-                            <video class="w-full h-[60vh] object-cover" autoplay playsinline muted></video>
-                            <scan-overlay .detected=${this.lastDetect} .quad=${this.smoothedQuad} .videoW=${this.videoW}
-                                          .videoH=${this.videoH}></scan-overlay>
+                ${stage === 'edit'
+                        ? html`
+                            <div class="space-y-3">
+                                ${this.importReviewTotal > 0
+                                        ? html`
+                                            <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 text-slate-200 flex items-center justify-between gap-3">
+                                                <div class="text-sm">
+                                                    Reviewing imported pages
+                                                    <span class="text-slate-400">${this.importReviewIndex}
+                                                        /${this.importReviewTotal}</span>
+                                                </div>
+                                                <div class="text-xs text-slate-400">Save to continue</div>
+                                            </div>`
+                                        : null}
+                                ${keyed(
+                                        this.editorKey,
+                                        html`
+                                            <page-editor
+                                                    .blob=${this.captured!}
+                                                    @page-editor-save=${this.onEditorSave}
+                                                    @page-editor-cancel=${this.onEditorCancel}
+                                            ></page-editor>
+                                        `,
+                                )}
 
-                            ${this.feedback ? html`
-                                <div class="absolute bottom-6 left-0 right-0 flex justify-center pointer-events-none">
-                                    <div class="px-4 py-2 rounded-full bg-slate-950/70 text-emerald-400 font-semibold text-sm backdrop-blur-md shadow-lg border border-emerald-900/50">
-                                        ${this.feedback}
-                                    </div>
+                                <div class="flex justify-end">
+                                    <button
+                                            class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 disabled:opacity-60"
+                                            ?disabled=${this.busy}
+                                            @click=${() => void this.exitScan()}
+                                    >
+                                        ${this.session.exitLabel}
+                                    </button>
                                 </div>
-                            ` : null}
-                        </div>
-
-                        <div class="flex gap-2">
-                            <button class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold disabled:opacity-60"
-                                    ?disabled=${this.busy} @click=${() => void this.capturePhoto(false)}>Capture
-                            </button>
-                            <button class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
-                                    ?disabled=${this.busy} @click=${() => this.pickFiles({multiple: true})}>Import
-                            </button>
-                            <button class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800"
-                                    @click=${() => void this.exitScan()}>${this.session.exitLabel}
-                            </button>
-                        </div>
-                        <button class="text-sm text-slate-300 hover:underline"
-                                @click=${async () => {
-                                    await this.stopCamera();
-                                    this.stopDetector();
-                                    this.session.setStage('idle');
-                                }}>← Back
-                        </button>
-                    </div>
-                ` : null}
-
-                ${stage === 'edit' ? html`
-                    <div class="space-y-3">
-                        ${this.importReviewTotal > 0 ? html`
-                            <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 text-slate-200 flex items-center justify-between gap-3">
-                                <div class="text-sm">
-                                    Reviewing imported pages
-                                    <span class="text-slate-400 font-mono ml-2">${this.importReviewIndex} / ${this.importReviewTotal}</span>
-                                </div>
-                                <div class="text-xs text-slate-400">Save to next</div>
-                            </div>` : null}
-                        ${keyed(this.editorKey, html`
-                            <page-editor .blob=${this.captured!} @page-editor-save=${this.onEditorSave}
-                                         @page-editor-cancel=${this.onEditorCancel}></page-editor>
-                        `)}
-                        <div class="flex justify-end">
-                            <button class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 disabled:opacity-60"
-                                    ?disabled=${this.busy} @click=${() => void this.exitScan()}>
-                                ${this.session.exitLabel}
-                            </button>
-                        </div>
-                    </div>
-                ` : null}
+                            </div>
+                        `
+                        : null}
             </div>
         `;
     }
