@@ -1,7 +1,3 @@
-export type CameraStartOptions = {
-    constraints?: MediaStreamConstraints;
-};
-
 export type CameraStartResult = {
     stream: MediaStream;
     width: number;
@@ -10,119 +6,91 @@ export type CameraStartResult = {
 
 export class CameraManager {
     private _stream: MediaStream | null = null;
-    private _video: HTMLVideoElement | null = null;
-
-    get stream(): MediaStream | null {
-        return this._stream;
-    }
 
     get isRunning(): boolean {
         return !!this._stream;
     }
 
-    /**
-     * Starts camera, attaches to video element, waits for metadata, and starts playback.
-     * Resolves with video dimensions once ready.
-     */
-    async start(videoEl: HTMLVideoElement, opts: CameraStartOptions = {}): Promise<CameraStartResult> {
-        if (this._stream) return this._readyResult(videoEl, this._stream);
+    async start(video: HTMLVideoElement): Promise<CameraStartResult> {
+        if (!navigator.mediaDevices?.getUserMedia) {
+            throw new Error('Camera not supported in this browser.');
+        }
 
-        const constraints =
-            opts.constraints ?? ({
-                video: {facingMode: {ideal: 'environment'}},
-                audio: false
-            } as MediaStreamConstraints);
+        const tries: MediaStreamConstraints[] = [
+            {
+                audio: false,
+                video: {
+                    facingMode: {ideal: 'environment'},
+                    width: {ideal: 1280},
+                    height: {ideal: 720},
+                },
+            },
+            {audio: false, video: {facingMode: 'environment'}},
+            {audio: false, video: true},
+        ];
 
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        let lastErr: unknown = null;
 
-        this._stream = stream;
-        this._video = videoEl;
+        for (const c of tries) {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia(c);
+                // attach
+                video.srcObject = stream;
 
-        videoEl.srcObject = stream;
-
-        await new Promise<void>((resolve, reject) => {
-            const onLoaded = async () => {
-                cleanup();
+                // Some browsers require explicit play()
                 try {
-                    await videoEl.play();
+                    await video.play();
                 } catch {
-                    // ignore play() failures; still usable for capture in some browsers
+                    // ignore; we still verify metadata next
                 }
-                resolve();
-            };
 
-            const onError = () => {
-                cleanup();
-                reject(new Error('Camera metadata load failed'));
-            };
+                await waitForVideoReady(video, 1500);
 
-            const cleanup = () => {
-                videoEl.removeEventListener('loadedmetadata', onLoaded);
-                videoEl.removeEventListener('error', onError as any);
-            };
+                // success
+                this._stream = stream;
+                return {stream, width: video.videoWidth, height: video.videoHeight};
+            } catch (e) {
+                lastErr = e;
+                // cleanup any partial stream
+                const s = video.srcObject as MediaStream | null;
+                if (s) stopStream(s);
+                video.srcObject = null;
+            }
+        }
 
-            videoEl.addEventListener('loadedmetadata', onLoaded, {once: true});
-            videoEl.addEventListener('error', onError as any, {once: true});
-        });
-
-        return this._readyResult(videoEl, stream);
+        const msg = (lastErr as Error)?.message ?? String(lastErr);
+        throw new Error(`Failed to start camera: ${msg}`);
     }
 
     async stop(): Promise<void> {
-        const s = this._stream;
+        if (!this._stream) return;
+        stopStream(this._stream);
         this._stream = null;
-
-        if (s) {
-            for (const t of s.getTracks()) {
-                try {
-                    t.stop();
-                } catch {
-                    // ignore
-                }
-            }
-        }
-
-        if (this._video) {
-            try {
-                this._video.srcObject = null;
-            } catch {
-                // ignore
-            }
-        }
-
-        this._video = null;
     }
+}
 
-    /**
-     * Captures current frame into a canvas, already scaled to maxDim.
-     * Does NOT do any warping/cropping; ScanPage can apply quad warp after.
-     */
-    captureFrameCanvas(maxDim = 1800): HTMLCanvasElement {
-        if (!this._video) throw new Error('No video element attached');
-        const v = this._video;
-
-        if (!v.videoWidth || !v.videoHeight) {
-            throw new Error('Video not ready');
+function stopStream(stream: MediaStream) {
+    for (const t of stream.getTracks()) {
+        try {
+            t.stop();
+        } catch {
         }
-
-        const scale = Math.min(1, maxDim / Math.max(v.videoWidth, v.videoHeight));
-        const w = Math.max(1, Math.round(v.videoWidth * scale));
-        const h = Math.max(1, Math.round(v.videoHeight * scale));
-
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d')!;
-        ctx.drawImage(v, 0, 0, w, h);
-
-        return canvas;
     }
+}
 
-    private _readyResult(videoEl: HTMLVideoElement, stream: MediaStream): CameraStartResult {
-        return {
-            stream,
-            width: videoEl.videoWidth || 0,
-            height: videoEl.videoHeight || 0
+function waitForVideoReady(video: HTMLVideoElement, timeoutMs: number): Promise<void> {
+    // must get non-zero dimensions
+    return new Promise((resolve, reject) => {
+        const t0 = Date.now();
+
+        const tick = () => {
+            if (video.videoWidth > 0 && video.videoHeight > 0) return resolve();
+            if (Date.now() - t0 > timeoutMs) return reject(new Error('Camera started but no frames were delivered.'));
+            setTimeout(tick, 50);
         };
-    }
+
+        // ensure metadata starts loading
+        if (video.readyState >= 1) tick();
+        else video.addEventListener('loadedmetadata', tick, {once: true});
+    });
 }

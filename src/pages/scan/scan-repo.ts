@@ -1,14 +1,23 @@
 import {nanoid} from 'nanoid';
 
 import type {DocRecord, PageRecord} from '../../domain/types';
+import type {PageEditorSaveDetail} from '../../components/page-editor';
+
 import {db} from '../../services/db';
 import {getFileStore} from '../../services/filestore';
 
-type Encoded = { bytes: Uint8Array; width: number; height: number };
+export type DocStripItem = { id: string; thumbBytes: Uint8Array };
+
+export type DocStripInfo = {
+    id: string;
+    title: string;
+    pageCount: number;
+    items: DocStripItem[];
+};
 
 export class ScanRepo {
-    async getDoc(docId: string): Promise<DocRecord | null> {
-        return (await db.docs.get(docId)) ?? null;
+    async getDoc(docId: string): Promise<DocRecord | undefined> {
+        return await db.docs.get(docId);
     }
 
     async createDoc(title: string): Promise<DocRecord> {
@@ -22,102 +31,104 @@ export class ScanRepo {
             tags: [],
             createdAt: now,
             updatedAt: now,
-            pageIds: []
-        };
+            pageIds: [],
+        } as any;
 
         await db.docs.add(doc);
         return doc;
     }
 
-    async getPage(pageId: string): Promise<PageRecord | null> {
-        return (await db.pages.get(pageId)) ?? null;
+    async getDocStrip(docId: string, limit = 16): Promise<DocStripInfo | null> {
+        const doc = await db.docs.get(docId);
+        if (!doc) return null;
+
+        const ids = doc.pageIds.slice(-limit);
+        if (ids.length === 0) {
+            return {id: doc.id, title: doc.title, pageCount: doc.pageIds.length, items: []};
+        }
+
+        // Fetch all pages for doc and map by id
+        const pages = await db.pages.where('docId').equals(docId).toArray();
+        const pageMap = new Map(pages.map((p) => [p.id, p]));
+        const store = getFileStore();
+
+        const items: DocStripItem[] = [];
+        for (const id of ids) {
+            const p = pageMap.get(id);
+            if (!p) continue;
+            const thumbBytes = await store.get(p.thumbPath);
+            items.push({id: p.id, thumbBytes});
+        }
+
+        return {id: doc.id, title: doc.title, pageCount: doc.pageIds.length, items};
     }
 
     async getPageImageBytes(pageId: string): Promise<Uint8Array | null> {
-        const page = await this.getPage(pageId);
+        const page = await db.pages.get(pageId);
         if (!page) return null;
+
         const store = getFileStore();
         return await store.get(page.imagePath);
     }
 
-    async addNewPage(docId: string, master: Encoded, thumb: Encoded): Promise<string> {
+    async addNewPage(docId: string, master: PageEditorSaveDetail['master'], thumb: PageEditorSaveDetail['thumb']): Promise<string> {
         const store = getFileStore();
         const pageId = nanoid();
 
         const imagePath = `docs/${docId}/pages/${pageId}.jpg`;
         const thumbPath = `docs/${docId}/thumbs/${pageId}.jpg`;
 
-        await store.put(imagePath, master.bytes, 'image/jpeg');
-        await store.put(thumbPath, thumb.bytes, 'image/jpeg');
+        await db.transaction('rw', db.docs, db.pages, async () => {
+            const doc = await db.docs.get(docId);
+            if (!doc) throw new Error('Doc missing');
 
-        const page: PageRecord = {
-            id: pageId,
-            docId,
-            imagePath,
-            thumbPath,
-            width: master.width,
-            height: master.height,
-            rotation: 0,
-            createdAt: Date.now()
-        };
+            await store.put(imagePath, master.bytes, 'image/jpeg');
+            await store.put(thumbPath, thumb.bytes, 'image/jpeg');
 
-        await db.pages.add(page);
+            const page: PageRecord = {
+                id: pageId,
+                docId,
+                imagePath,
+                thumbPath,
+                width: master.width,
+                height: master.height,
+                rotation: 0,
+                createdAt: Date.now(),
+            } as any;
 
-        const doc = await db.docs.get(docId);
-        if (!doc) throw new Error('Doc missing');
-        doc.pageIds = [...doc.pageIds, pageId];
-        doc.updatedAt = Date.now();
-        await db.docs.put(doc);
+            await db.pages.add(page);
+
+            doc.pageIds = [...doc.pageIds, pageId];
+            doc.updatedAt = Date.now();
+            await db.docs.put(doc);
+        });
 
         return pageId;
     }
 
-    async updateExistingPage(pageId: string, master: Encoded, thumb: Encoded): Promise<void> {
+    async updateExistingPage(pageId: string, master: PageEditorSaveDetail['master'], thumb: PageEditorSaveDetail['thumb']): Promise<void> {
         const store = getFileStore();
-        const page = await db.pages.get(pageId);
-        if (!page) throw new Error('Page missing');
 
-        await store.put(page.imagePath, master.bytes, 'image/jpeg');
-        await store.put(page.thumbPath, thumb.bytes, 'image/jpeg');
+        await db.transaction('rw', db.docs, db.pages, async () => {
+            const page = await db.pages.get(pageId);
+            if (!page) throw new Error('Page missing');
 
-        await db.pages.put({
-            ...page,
-            width: master.width,
-            height: master.height,
-            rotation: 0
-        });
+            const doc = await db.docs.get(page.docId);
+            if (!doc) throw new Error('Doc missing');
 
-        const doc = await db.docs.get(page.docId);
-        if (doc) {
+            await store.put(page.imagePath, master.bytes, 'image/jpeg');
+            await store.put(page.thumbPath, thumb.bytes, 'image/jpeg');
+
+            await db.pages.put({
+                ...page,
+                width: master.width,
+                height: master.height,
+                rotation: 0,
+            });
+
             doc.updatedAt = Date.now();
             await db.docs.put(doc);
-        }
-    }
-
-    async getDocStrip(docId: string, lastN = 16): Promise<{
-        title: string;
-        pageCount: number;
-        items: Array<{ id: string; thumbBytes: Uint8Array }>;
-    } | null> {
-        const doc = await db.docs.get(docId);
-        if (!doc) return null;
-
-        const pageCount = doc.pageIds.length;
-        const ids = doc.pageIds.slice(-lastN);
-
-        const pages = await db.pages.where('docId').equals(docId).toArray();
-        const pageMap = new Map(pages.map((p) => [p.id, p]));
-        const store = getFileStore();
-
-        const items: Array<{ id: string; thumbBytes: Uint8Array }> = [];
-        for (const id of ids) {
-            const p = pageMap.get(id);
-            if (!p) continue;
-            const bytes = await store.get(p.thumbPath);
-            items.push({id, thumbBytes: bytes});
-        }
-
-        return {title: doc.title, pageCount, items};
+        });
     }
 
     async deleteDocCompletely(docId: string): Promise<void> {
@@ -135,7 +146,9 @@ export class ScanRepo {
             }
         }
 
-        await db.pages.where('docId').equals(docId).delete();
-        await db.docs.delete(docId);
+        await db.transaction('rw', db.docs, db.pages, async () => {
+            await db.pages.where('docId').equals(docId).delete();
+            await db.docs.delete(docId);
+        });
     }
 }

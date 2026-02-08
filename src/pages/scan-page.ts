@@ -33,38 +33,30 @@ export class ScanPage extends LitElement {
 
     @query('video') private videoEl!: HTMLVideoElement;
 
-    // managers
     private camera = new CameraManager();
     private session = new ScanSessionState(() => this.requestUpdate());
     private repo = new ScanRepo();
 
-    // ui
     @state() private busy = false;
     @state() private error: string | null = null;
 
-    // doc ui
     @state() private docTitle: string | null = null;
     @state() private targetDocTitle: string | null = null;
 
     @state() private strip: StripItem[] = [];
     private newPageIds = new Set<string>();
 
-    // editor
     @state() private captured: Blob | null = null;
     @state() private editingPageId: string | null = null;
     @state() private editorKey = 0;
 
-    // auto capture toggle
     @state() private autoCapture = readBool(AUTO_KEY, false);
 
-    // overlay sizing (for <scan-overlay/>)
     @state() private videoW = 0;
     @state() private videoH = 0;
 
-    // capture guard
     private captureInFlight = false;
 
-    // detection
     private worker: Worker | null = null;
     private offscreen: HTMLCanvasElement | null = null;
     private offCtx: CanvasRenderingContext2D | null = null;
@@ -76,14 +68,9 @@ export class ScanPage extends LitElement {
     private stableSince = 0;
     private cooldownUntil = 0;
 
-    // dynamic detection governor + timer
     private detGov = new DetectGovernor();
-    private detectTimer: number | null = null;
-
-    // stage transition tracking to stop detector when leaving camera
-    private _prevStage: ScanStage | null = null;
-
-    // ----------------- lifecycle -----------------
+    private detectLoopTimer: number | null = null;
+    private detectLoopToken = 0;
 
     async connectedCallback(): Promise<void> {
         super.connectedCallback();
@@ -93,26 +80,20 @@ export class ScanPage extends LitElement {
 
         const pending = takePendingImport();
         if (pending?.length) {
-            // pending import always means new-doc flow (avoid append leakage)
+            // pending import always => new doc flow
             this.clearAppendKey();
-            this.session.setAppend(null);
-            this.session.setCurrentDocId(null);
+            this.session.resetAll();
 
             this.targetDocTitle = null;
             this.docTitle = null;
 
-            if (pending.length === 1) {
-                await this.openNewBlobInEditor(pending[0]);
-            } else {
-                await this.batchImport(pending);
-            }
+            if (pending.length === 1) await this.openNewBlobInEditor(pending[0]);
+            else await this.batchImport(pending);
         }
     }
 
     disconnectedCallback(): void {
         window.removeEventListener('hashchange', this.onHashChange);
-
-        // prevent append leak
         if (this.session.isAppend) this.clearAppendKey();
 
         void this.stopCamera();
@@ -122,32 +103,12 @@ export class ScanPage extends LitElement {
         super.disconnectedCallback();
     }
 
-    updated(): void {
-        const stage = this.session.stage;
-        if (stage === this._prevStage) return;
-
-        // when leaving camera stage, stop detector (but keep camera if you want)
-        if (this._prevStage === 'camera' && stage !== 'camera') {
-            this.stopDetector();
-        }
-
-        // when entering camera stage, start detector only if camera is running
-        if (stage === 'camera' && this.camera.isRunning) {
-            this.startDetector();
-        }
-
-        this._prevStage = stage;
-    }
-
     private onHashChange = () => {
         const h = location.hash || '';
         if (h.startsWith('#/scan')) void this.loadMode();
     };
 
-    // ----------------- mode/load -----------------
-
     private async loadMode(): Promise<void> {
-        // reset (safe even if re-entered)
         await this.stopCamera();
         this.stopDetector();
         this.revokeStrip();
@@ -161,19 +122,15 @@ export class ScanPage extends LitElement {
         this.lastDetect = null;
         this.smoothedQuad = null;
 
-        this.stableSince = 0;
-        this.cooldownUntil = 0;
-
         const params = this.getHashParams();
 
-        // library scan => force new
         const forceNew = params.get('new') === '1';
         if (forceNew) this.clearAppendKey();
 
         const appendId = forceNew ? null : safeGet(APPEND_DOC_KEY);
 
         this.session.resetAll();
-        this.session.setAppend(appendId); // also sets currentDocId
+        this.session.setAppend(appendId);
         this.session.setStage('idle');
 
         this.targetDocTitle = null;
@@ -183,10 +140,7 @@ export class ScanPage extends LitElement {
             const doc = await this.repo.getDoc(appendId);
             this.targetDocTitle = doc?.title ?? 'Document';
             this.docTitle = doc?.title ?? 'Document';
-
-            // append is always committed/kept
-            this.session.markCommitted();
-
+            this.session.markCommitted(); // append always kept
             await this.refreshDocInfo();
         } else {
             this.session.setPageCount(0);
@@ -196,8 +150,6 @@ export class ScanPage extends LitElement {
             setTimeout(() => void this.pickFiles({multiple: true}), 0);
         }
     }
-
-    // ----------------- exit policy -----------------
 
     private async exitScan(): Promise<void> {
         await this.stopCamera();
@@ -245,12 +197,9 @@ export class ScanPage extends LitElement {
         if (!id || this.session.pageCount === 0) return;
 
         if (!this.session.isAppend) this.session.markCommitted();
-
         this.clearAppendKey();
         location.hash = `#/doc/${id}`;
     }
-
-    // ----------------- editor -----------------
 
     private clearEditor() {
         this.captured = null;
@@ -291,7 +240,6 @@ export class ScanPage extends LitElement {
 
         try {
             const {master, thumb} = ev.detail;
-
             const docId = await this.ensureDocId();
 
             if (this.editingPageId) {
@@ -315,8 +263,6 @@ export class ScanPage extends LitElement {
         }
     };
 
-    // ----------------- doc bookkeeping -----------------
-
     private revokeStrip() {
         for (const it of this.strip) URL.revokeObjectURL(it.url);
         this.strip = [];
@@ -329,8 +275,8 @@ export class ScanPage extends LitElement {
         const title = `Scan ${new Date(now).toLocaleString()}`;
 
         const doc = await this.repo.createDoc(title);
-
         this.docTitle = doc.title;
+
         this.session.setCurrentDocId(doc.id);
         this.session.setPageCount(0);
 
@@ -357,8 +303,6 @@ export class ScanPage extends LitElement {
         this.strip = items;
     }
 
-    // ----------------- camera -----------------
-
     private beginCameraFromGesture(): void {
         this.error = null;
         this.session.setStage('camera');
@@ -367,12 +311,10 @@ export class ScanPage extends LitElement {
 
         void (async () => {
             try {
-                await this.updateComplete; // ensure <video> exists
+                await this.updateComplete;
                 const res = await this.camera.start(this.videoEl);
-
                 this.videoW = res.width;
                 this.videoH = res.height;
-
                 this.startDetector();
             } catch (e) {
                 this.error = (e as Error).message ?? String(e);
@@ -383,7 +325,6 @@ export class ScanPage extends LitElement {
 
     private async stopCamera(): Promise<void> {
         await this.camera.stop();
-        this.stopDetector(); // ensure worker loop is down when camera stops
     }
 
     private async capturePhoto(fromAuto = false): Promise<void> {
@@ -444,8 +385,6 @@ export class ScanPage extends LitElement {
         }
     }
 
-    // ----------------- import -----------------
-
     private async pickFiles(opts: { multiple: boolean }): Promise<void> {
         this.error = null;
         try {
@@ -478,32 +417,25 @@ export class ScanPage extends LitElement {
 
         try {
             const docId = await this.ensureDocId();
-
             const importedPageIds: string[] = [];
 
             for (const file of files) {
                 const {master, thumb} = await processPhoto({blob: file, rotation: 0, filter: 'original'} as any);
                 const pageId = await this.repo.addNewPage(docId, master, thumb);
-
                 importedPageIds.push(pageId);
                 this.newPageIds.add(pageId);
             }
 
             await this.refreshDocInfo();
 
-            if (importedPageIds.length > 0) {
-                await this.openExistingPageInEditor(importedPageIds[0]);
-            } else {
-                this.session.setStage(this.camera.isRunning ? 'camera' : 'idle');
-            }
+            if (importedPageIds.length > 0) await this.openExistingPageInEditor(importedPageIds[0]);
+            else this.session.setStage(this.camera.isRunning ? 'camera' : 'idle');
         } catch (e) {
             this.error = (e as Error).message ?? String(e);
         } finally {
             this.busy = false;
         }
     }
-
-    // ----------------- detector (Governor + transfer) -----------------
 
     private startDetector(): void {
         if (this.worker) return;
@@ -519,7 +451,7 @@ export class ScanPage extends LitElement {
             const tMs = Number(msg.tMs ?? 0);
             if (tMs > 0) this.detGov.onResult(tMs);
 
-            // if too slow, reset stability so auto-capture won’t fire randomly
+            // If detection too slow, avoid stability accumulation (prevents misfires)
             if (this.detGov.isTooSlowForAutoCapture) {
                 this.stableSince = 0;
             }
@@ -529,13 +461,7 @@ export class ScanPage extends LitElement {
             const w = Number(msg.width ?? 0);
             const h = Number(msg.height ?? 0);
 
-            const det: DetectedQuad = {
-                quad: quad ? (quad as any) : null,
-                confidence,
-                width: w,
-                height: h,
-            };
-
+            const det: DetectedQuad = {quad: quad ? (quad as any) : null, confidence, width: w, height: h};
             this.lastDetect = det;
 
             if (det.quad && det.confidence >= 0.35) {
@@ -552,25 +478,39 @@ export class ScanPage extends LitElement {
         this.offscreen = document.createElement('canvas');
         this.offCtx = this.offscreen.getContext('2d', {willReadFrequently: true});
 
+        // Dynamic loop (uses governor intervalMs each tick)
+        const token = ++this.detectLoopToken;
+
         const tick = () => {
+            if (token !== this.detectLoopToken) return;
             if (!this.worker) return;
 
-            // don’t burn CPU when not on camera stage
+            // If not in active camera stage, just reschedule later.
             if (!this.camera.isRunning || this.session.stage !== 'camera') {
-                this.detectTimer = window.setTimeout(tick, 250);
+                this.detectLoopTimer = window.setTimeout(tick, 250);
+                return;
+            }
+
+            // Optional: be nice when tab is hidden
+            if (document.hidden) {
+                this.detectLoopTimer = window.setTimeout(tick, 800);
                 return;
             }
 
             this.grabAndDetect();
-            this.detectTimer = window.setTimeout(tick, this.detGov.intervalMs);
+
+            // Key part: use *current* governor interval
+            this.detectLoopTimer = window.setTimeout(tick, this.detGov.intervalMs);
         };
 
         tick();
     }
 
     private stopDetector(): void {
-        if (this.detectTimer) window.clearTimeout(this.detectTimer);
-        this.detectTimer = null;
+        // cancel loop
+        this.detectLoopToken++;
+        if (this.detectLoopTimer) window.clearTimeout(this.detectLoopTimer);
+        this.detectLoopTimer = null;
 
         this.worker?.terminate();
         this.worker = null;
@@ -586,6 +526,7 @@ export class ScanPage extends LitElement {
         this.cooldownUntil = 0;
     }
 
+
     private grabAndDetect(): void {
         if (!this.worker || !this.offCtx || !this.offscreen) return;
         if (this.detecting) return;
@@ -593,7 +534,7 @@ export class ScanPage extends LitElement {
         const v = this.videoEl;
         if (!v || v.videoWidth === 0 || v.videoHeight === 0) return;
 
-        const maxDim = this.detGov.maxDim;
+        const maxDim = this.detGov.maxDim; // ✅ governor-driven
         const scale = Math.min(1, maxDim / Math.max(v.videoWidth, v.videoHeight));
         const w = Math.max(1, Math.round(v.videoWidth * scale));
         const h = Math.max(1, Math.round(v.videoHeight * scale));
@@ -605,12 +546,7 @@ export class ScanPage extends LitElement {
         const img = this.offCtx.getImageData(0, 0, w, h);
 
         this.detecting = true;
-
-        // ✅ zero-copy: transfer the underlying buffer to the worker
-        this.worker.postMessage(
-            {type: 'detect', width: w, height: h, rgba: img.data},
-            [img.data.buffer],
-        );
+        this.worker.postMessage({type: 'detect', width: w, height: h, rgba: img.data});
     }
 
     private quadStabilityScore(q: Quad, det: DetectedQuad): number {
@@ -625,10 +561,14 @@ export class ScanPage extends LitElement {
 
     private maybeAutoCapture(): void {
         if (!this.autoCapture) return;
-        if (this.detGov.isTooSlowForAutoCapture) return; // ✅ governor gate
         if (this.captureInFlight) return;
         if (Date.now() < this.cooldownUntil) return;
         if (this.session.stage !== 'camera') return;
+
+        if (this.detGov.isTooSlowForAutoCapture) {
+            this.stableSince = 0;
+            return;
+        }
 
         if (!this.lastDetect?.quad || !this.smoothedQuad) {
             this.stableSince = 0;
@@ -663,8 +603,6 @@ export class ScanPage extends LitElement {
         }
     }
 
-    // ----------------- UI helpers -----------------
-
     private renderBanner() {
         if (this.session.isAppend) {
             const title = this.docTitle ?? this.targetDocTitle ?? 'Document';
@@ -683,7 +621,6 @@ export class ScanPage extends LitElement {
                         >
                             Open
                         </button>
-
                         <button
                                 class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
                                 @click=${() => void this.exitScan()}
@@ -713,7 +650,6 @@ export class ScanPage extends LitElement {
                     >
                         Open
                     </button>
-
                     <button
                             class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
                             @click=${() => void this.exitScan()}
@@ -734,8 +670,7 @@ export class ScanPage extends LitElement {
                 ${this.strip.map(
                         (it) => html`
                             <button
-                                    class="relative shrink-0 rounded-lg border ${selected === it.id ? 'border-emerald-500' : 'border-slate-800'}
-                overflow-hidden ${it.isNew ? '' : 'opacity-60'}"
+                                    class="relative shrink-0 rounded-lg border ${selected === it.id ? 'border-emerald-500' : 'border-slate-800'} overflow-hidden ${it.isNew ? '' : 'opacity-60'}"
                                     style="width: 76px; height: 96px;"
                                     title=${it.isNew ? 'Edit page' : 'Locked (already saved)'}
                                     @click=${() => {
@@ -746,9 +681,7 @@ export class ScanPage extends LitElement {
                                 <img src=${it.url} class="w-full h-full object-cover" alt="thumb"/>
                                 ${it.isNew
                                         ? html`<span
-                                                class="absolute top-1 left-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-semibold"
-                                        >NEW</span
-                                        >`
+                                                class="absolute top-1 left-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-semibold">NEW</span>`
                                         : null}
                             </button>
                         `,
@@ -756,8 +689,6 @@ export class ScanPage extends LitElement {
             </div>
         `;
     }
-
-    // ----------------- render -----------------
 
     render() {
         const stage: ScanStage = this.session.stage;
@@ -786,7 +717,7 @@ export class ScanPage extends LitElement {
                 ${this.error
                         ? html`
                             <div class="p-3 rounded-lg bg-red-950/40 border border-red-900 text-red-200">${this.error}
-                            </div> `
+                            </div>`
                         : null}
 
                 ${this.renderBanner()} ${this.renderStrip()}
@@ -795,9 +726,7 @@ export class ScanPage extends LitElement {
                         ? html`
                             <div class="p-4 rounded-xl border border-slate-800 bg-slate-950 space-y-3">
                                 <div class="text-sm text-slate-300">
-                                    ${this.session.isAppend
-                                            ? `Adding pages to: ${this.targetDocTitle ?? 'Document'}`
-                                            : 'Start a new document'}
+                                    ${this.session.isAppend ? `Adding pages to: ${this.targetDocTitle ?? 'Document'}` : 'Start a new document'}
                                 </div>
 
                                 <div class="flex gap-2">
@@ -870,6 +799,7 @@ export class ScanPage extends LitElement {
                                         class="text-sm text-slate-300 hover:underline"
                                         @click=${async () => {
                                             await this.stopCamera();
+                                            this.stopDetector();
                                             this.session.setStage('idle');
                                         }}
                                 >
@@ -908,8 +838,6 @@ export class ScanPage extends LitElement {
             </div>
         `;
     }
-
-    // ----------------- storage helpers -----------------
 
     private clearAppendKey() {
         try {
