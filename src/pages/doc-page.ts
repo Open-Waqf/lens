@@ -32,9 +32,7 @@ export class DocPage extends LitElement {
     @state() private busy = false;
     @state() private error: string | null = null;
 
-    // #18 PDF Quality State
     @state() private pdfQuality: PdfQuality = 'original';
-    // #21 Progress State
     @state() private exportProgress = 0;
     @state() private exportTotal = 0;
 
@@ -49,6 +47,9 @@ export class DocPage extends LitElement {
     // Editor States
     @state() private editingPage: PageRecord | null = null;
     @state() private editingBlob: Blob | null = null;
+
+    // Search State
+    @state() private searchQuery = '';
 
     async connectedCallback(): Promise<void> {
         super.connectedCallback();
@@ -95,8 +96,6 @@ export class DocPage extends LitElement {
         this.thumbs = thumbs;
     }
 
-    // --- RE-EDITING LOGIC ---
-
     private async editPage(page: PageRecord): Promise<void> {
         this.busy = true;
         try {
@@ -128,13 +127,12 @@ export class DocPage extends LitElement {
         }
     }
 
-    // --- VIEWER LOGIC ---
-
     private async openViewerAt(index: number): Promise<void> {
         if (index < 0 || index >= this.pages.length) return;
         this.viewerIndex = index;
         this.viewerOpen = true;
-        this.showOcrOverlay = false;
+        // Auto-show OCR if searching
+        if (this.searchQuery) this.showOcrOverlay = true;
         await this.loadViewerImage();
     }
 
@@ -157,8 +155,6 @@ export class DocPage extends LitElement {
         }
     }
 
-    // --- ACTIONS ---
-
     private async saveMeta(patch: Partial<DocRecord>): Promise<void> {
         if (!this.doc) return;
         this.doc = {...this.doc, ...patch, updatedAt: Date.now()};
@@ -173,8 +169,6 @@ export class DocPage extends LitElement {
 
         try {
             const store = getFileStore();
-
-            // Wait a tick to show loading UI
             await new Promise(r => setTimeout(r, 50));
 
             const pdfBytes = await buildPdfForDoc(store, this.pages, {
@@ -189,8 +183,6 @@ export class DocPage extends LitElement {
             const filename = `${safeName(this.doc.title)}.pdf`;
             await shareOrDownload(pdfBytes, filename, 'application/pdf');
 
-            // Only save high-res exports to storage to save space, or if needed
-            // For now, we update the path only if it succeeds
             const pdfPath = `docs/${this.doc.id}/exports/${Date.now()}.pdf`;
             await store.put(pdfPath, pdfBytes, 'application/pdf');
             await this.saveMeta({pdfPath});
@@ -240,12 +232,10 @@ export class DocPage extends LitElement {
                 await store.del(page.thumbPath);
                 await db.pages.delete(pageId);
             }
-
             if (this.doc) {
                 const newIds = this.doc.pageIds.filter(id => id !== pageId);
                 await this.saveMeta({pageIds: newIds});
             }
-
             await this.load();
         } catch (e) {
             this.error = (e as Error).message;
@@ -259,7 +249,7 @@ export class DocPage extends LitElement {
         const ok = await ConfirmModal.ask({
             title: 'Delete Document?',
             description: `Permanently delete "${this.doc.title}" and all ${this.pages.length} pages?`,
-            confirm: 'Delete Document', // Updated wording
+            confirm: 'Delete Document',
             destructive: true
         });
         if (!ok) return;
@@ -280,7 +270,6 @@ export class DocPage extends LitElement {
         if (idx < 0) return;
         const j = idx + dir;
         if (j < 0 || j >= ids.length) return;
-
         [ids[idx], ids[j]] = [ids[j], ids[idx]];
         await this.saveMeta({pageIds: ids});
         await this.load();
@@ -293,9 +282,15 @@ export class DocPage extends LitElement {
         location.hash = '#/scan';
     }
 
-    // --- RENDER HELPERS ---
+    private get filteredPages() {
+        const q = this.searchQuery.trim().toLowerCase();
+        if (!q) return this.pages;
+        return this.pages.filter(p => {
+            if (!p.words) return false;
+            return p.words.some(w => w.text.toLowerCase().includes(q));
+        });
+    }
 
-    // #21 Progress Modal
     private renderProgress() {
         if (!this.busy || this.exportProgress === 0) return null;
         const pct = Math.round((this.exportProgress / this.exportTotal) * 100);
@@ -309,9 +304,6 @@ export class DocPage extends LitElement {
                     </div>
                     <div class="h-2 bg-slate-800 rounded-full overflow-hidden">
                         <div class="h-full bg-emerald-500 transition-all duration-200" style="width: ${pct}%"></div>
-                    </div>
-                    <div class="text-xs text-slate-500 text-center">
-                        Processing page ${this.exportProgress} of ${this.exportTotal}
                     </div>
                 </div>
             </div>
@@ -337,7 +329,9 @@ export class DocPage extends LitElement {
             `;
         }
 
+        const visiblePages = this.filteredPages;
         const currentPage = this.pages[this.viewerIndex];
+        const q = this.searchQuery.trim().toLowerCase();
 
         return html`
             <div class="space-y-4 pb-20">
@@ -384,9 +378,27 @@ export class DocPage extends LitElement {
                     </div>
 
                     <div class="space-y-1">
-                        <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Search Index</div>
-                        <div class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-500 h-16 overflow-y-auto">
-                            ${this.doc.searchIndex || 'No text indexed yet.'}
+                        <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Find in document
+                        </div>
+                        <div class="relative">
+                            <input class="w-full bg-slate-900 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
+                                   placeholder="Search text..."
+                                   .value=${live(this.searchQuery)}
+                                   @input=${(e: InputEvent) => this.searchQuery = (e.target as HTMLInputElement).value}/>
+                            <svg class="w-4 h-4 text-slate-500 absolute left-3 top-2.5" fill="none"
+                                 stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                            </svg>
+                            ${this.searchQuery ? html`
+                                <button class="absolute right-2 top-2 text-slate-500 hover:text-white"
+                                        @click=${() => this.searchQuery = ''}>
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                              d="M6 18L18 6M6 6l12 12"></path>
+                                    </svg>
+                                </button>
+                            ` : null}
                         </div>
                     </div>
 
@@ -428,76 +440,85 @@ export class DocPage extends LitElement {
                 </div>
 
                 <div class="space-y-2">
-                    <div class="text-sm font-semibold text-slate-400 uppercase tracking-wider">Pages
-                            (${this.pages.length})
+                    <div class="text-sm font-semibold text-slate-400 uppercase tracking-wider flex justify-between">
+                        <span>Pages (${visiblePages.length})</span>
+                        ${this.searchQuery && visiblePages.length < this.pages.length ? html`
+                            <span class="text-emerald-500 text-xs">Filtered by search</span>
+                        ` : null}
                     </div>
                     <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                        ${this.pages.map((p, idx) => html`
-                            <div class="group relative rounded-xl border border-slate-800 bg-slate-950 overflow-hidden shadow-sm hover:border-slate-600 transition-colors">
-                                <div class="aspect-[3/4] bg-slate-900 cursor-pointer relative"
-                                     @click=${() => this.openViewerAt(idx)}>
-                                    ${this.thumbs[p.id]
-                                            ? html`<img src=${this.thumbs[p.id]} class="w-full h-full object-cover">`
-                                            : html`
-                                                <div class="w-full h-full flex items-center justify-center text-slate-700">
-                                                    ?
-                                                </div>`
-                                    }
-                                    ${p.words?.length ? html`
-                                        <div class="absolute top-2 right-2 px-1.5 py-0.5 bg-black/60 backdrop-blur text-emerald-400 text-[10px] font-bold rounded">
-                                            TXT
-                                        </div>` : null}
-                                </div>
+                        ${visiblePages.map((p) => {
+                            // find index in full list for viewer
+                            const realIdx = this.pages.indexOf(p);
+                            return html`
+                                <div class="group relative rounded-xl border border-slate-800 bg-slate-950 overflow-hidden shadow-sm hover:border-slate-600 transition-colors">
+                                    <div class="aspect-[3/4] bg-slate-900 cursor-pointer relative"
+                                         @click=${() => this.openViewerAt(realIdx)}>
+                                        ${this.thumbs[p.id]
+                                                ? html`<img src=${this.thumbs[p.id]}
+                                                            class="w-full h-full object-cover">`
+                                                : html`
+                                                    <div class="w-full h-full flex items-center justify-center text-slate-700">
+                                                        ?
+                                                    </div>`
+                                        }
+                                        ${p.words?.length ? html`
+                                            <div class="absolute top-2 right-2 px-1.5 py-0.5 bg-black/60 backdrop-blur text-emerald-400 text-[10px] font-bold rounded">
+                                                TXT
+                                            </div>` : null}
+                                    </div>
 
-                                <div class="p-2 flex items-center justify-between gap-1 bg-slate-950 border-t border-slate-900">
-                                    <span class="text-xs text-slate-500 font-mono w-5">#${idx + 1}</span>
-
-                                    <div class="flex items-center gap-1">
-                                        <button class="p-2 rounded hover:bg-slate-800 text-slate-400 hover:text-emerald-400 min-h-[36px] min-w-[36px]"
-                                                title="Edit"
-                                                @click=${() => this.editPage(p)}>
-                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                      d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
-                                            </svg>
-                                        </button>
-
-                                        <button class="p-2 rounded hover:bg-slate-800 text-slate-400 hover:text-amber-400 min-h-[36px] min-w-[36px]"
-                                                title="Retake"
-                                                @click=${() => this.retakePage(p.id)}>
-                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                      d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path>
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                      d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                                            </svg>
-                                        </button>
-
-                                        <button class="p-2 rounded hover:bg-slate-800 text-slate-400 min-h-[36px] min-w-[36px]"
-                                                @click=${() => this.movePage(p.id, -1)} ?disabled=${idx === 0}>↑
-                                        </button>
-                                        <button class="p-2 rounded hover:bg-slate-800 text-slate-400 min-h-[36px] min-w-[36px]"
-                                                @click=${() => this.movePage(p.id, 1)}
-                                                ?disabled=${idx === this.pages.length - 1}>↓
-                                        </button>
-                                        <button class="p-2 rounded hover:bg-red-900/30 text-slate-400 hover:text-red-400 min-h-[36px] min-w-[36px]"
-                                                @click=${() => this.deletePage(p.id)}>
-                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                      d="M6 18L18 6M6 6l12 12"></path>
-                                            </svg>
-                                        </button>
+                                    <div class="p-2 flex items-center justify-between gap-1 bg-slate-950 border-t border-slate-900">
+                                        <span class="text-xs text-slate-500 font-mono w-5">#${realIdx + 1}</span>
+                                        <div class="flex items-center gap-1">
+                                            <button class="p-2 rounded hover:bg-slate-800 text-slate-400 hover:text-emerald-400 min-h-[36px] min-w-[36px]"
+                                                    title="Edit" @click=${() => this.editPage(p)}>
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor"
+                                                     viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                          stroke-width="2"
+                                                          d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
+                                                </svg>
+                                            </button>
+                                            <button class="p-2 rounded hover:bg-slate-800 text-slate-400 hover:text-amber-400 min-h-[36px] min-w-[36px]"
+                                                    title="Retake" @click=${() => this.retakePage(p.id)}>
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor"
+                                                     viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                          stroke-width="2"
+                                                          d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path>
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                          stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                                </svg>
+                                            </button>
+                                            <button class="p-2 rounded hover:bg-slate-800 text-slate-400 min-h-[36px] min-w-[36px]"
+                                                    @click=${() => this.movePage(p.id, -1)} ?disabled=${realIdx === 0}>↑
+                                            </button>
+                                            <button class="p-2 rounded hover:bg-slate-800 text-slate-400 min-h-[36px] min-w-[36px]"
+                                                    @click=${() => this.movePage(p.id, 1)}
+                                                    ?disabled=${realIdx === this.pages.length - 1}>↓
+                                            </button>
+                                            <button class="p-2 rounded hover:bg-red-900/30 text-slate-400 hover:text-red-400 min-h-[36px] min-w-[36px]"
+                                                    @click=${() => this.deletePage(p.id)}>
+                                                <svg class="w-4 h-4" fill="none" stroke="currentColor"
+                                                     viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                          stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                                </svg>
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        `)}
+                            `
+                        })}
                     </div>
                 </div>
 
                 ${this.viewerOpen ? html`
                     <div class="fixed inset-0 z-50 bg-black/95 backdrop-blur flex flex-col"
                          @click=${(e: Event) => e.target === e.currentTarget && (this.viewerOpen = false)}>
-                        <div class="px-4 py-3 flex items-center justify-between bg-black/50 border-b border-white/10">
+
+                        <div class="px-4 py-3 flex items-center justify-between bg-black/50 border-b border-white/10 z-50 shrink-0">
                             <div class="text-sm font-medium text-slate-200">Page ${this.viewerIndex + 1}</div>
                             <div class="flex items-center gap-4">
                                 <label class="flex items-center gap-2 cursor-pointer select-none">
@@ -517,26 +538,32 @@ export class DocPage extends LitElement {
                         </div>
 
                         ${this.viewerErr ? html`
-                            <div class="bg-red-950/80 text-red-200 p-2 text-center text-sm border-b border-red-900">
+                            <div class="bg-red-950/80 text-red-200 p-2 text-center text-sm border-b border-red-900 shrink-0">
                                 ${this.viewerErr}
                             </div>
                         ` : null}
 
-                        <div class="flex-1 flex items-center justify-center p-4 overflow-hidden relative">
-                            ${this.viewerBusy ? html`
-                                <div class="text-slate-500">Loading...</div>` : this.viewerUrl ? html`
-                                <div class="relative shadow-2xl max-w-full max-h-full">
-                                    <img src=${this.viewerUrl} class="block max-w-full max-h-full object-contain">
+                        <div class="flex-1 overflow-auto relative flex items-start justify-center p-4"
+                             @click=${(e: Event) => e.target === e.currentTarget && (this.viewerOpen = false)}>
 
-                                    ${this.showOcrOverlay && currentPage?.words ? currentPage.words.map(w => html`
-                                        <div class="absolute border border-red-500/50 bg-red-500/10 hover:bg-red-500/30"
-                                             style="left: ${w.box[0] * 100}%; top: ${w.box[1] * 100}%; width: ${w.box[2] * 100}%; height: ${w.box[3] * 100}%;"
-                                             title="${w.text}"></div>
-                                    `) : null}
+                            ${this.viewerBusy ? html`
+                                <div class="text-slate-500 mt-20">Loading...</div>` : this.viewerUrl ? html`
+                                <div class="relative shadow-2xl shrink-0">
+                                    <img src=${this.viewerUrl}
+                                         class="block w-full max-w-4xl h-auto shadow-2xl border border-white/10">
+
+                                    ${this.showOcrOverlay && currentPage?.words ? currentPage.words.map(w => {
+                                        const isMatch = q && w.text.toLowerCase().includes(q);
+                                        return html`
+                                            <div class="absolute ${isMatch ? 'bg-yellow-500/30 border-yellow-400' : 'bg-red-500/10 border-red-500/50 hover:bg-red-500/30'} border transition-colors"
+                                                 style="left: ${w.box[0] * 100}%; top: ${w.box[1] * 100}%; width: ${w.box[2] * 100}%; height: ${w.box[3] * 100}%;"
+                                                 title="${w.text}">
+                                            </div>`;
+                                    }) : null}
                                 </div>
                             ` : null}
 
-                            <button class="absolute left-4 p-4 rounded-full bg-black/50 hover:bg-black/80 text-white"
+                            <button class="fixed left-4 top-1/2 -translate-y-1/2 p-4 rounded-full bg-black/50 hover:bg-black/80 text-white z-50 transition-colors"
                                     ?disabled=${this.viewerIndex === 0}
                                     @click=${(e: Event) => {
                                         e.stopPropagation();
@@ -547,7 +574,7 @@ export class DocPage extends LitElement {
                                           d="M15 19l-7-7 7-7"></path>
                                 </svg>
                             </button>
-                            <button class="absolute right-4 p-4 rounded-full bg-black/50 hover:bg-black/80 text-white"
+                            <button class="fixed right-4 top-1/2 -translate-y-1/2 p-4 rounded-full bg-black/50 hover:bg-black/80 text-white z-50 transition-colors"
                                     ?disabled=${this.viewerIndex === this.pages.length - 1}
                                     @click=${(e: Event) => {
                                         e.stopPropagation();
