@@ -45,13 +45,13 @@ export class AppRoot extends LitElement {
         super.connectedCallback();
         window.addEventListener('hashchange', this._onHash);
 
-        // Global crash catcher (prevents white screen)
+        // Global crash catcher
         window.addEventListener('error', this._onGlobalError);
         window.addEventListener('unhandledrejection', this._onUnhandled);
 
         if (!location.hash) location.hash = '#/library';
 
-        // Storage persistence check (best effort)
+        // Storage persistence check
         void (async () => {
             try {
                 this.persist = await getPersistenceStatus();
@@ -60,23 +60,19 @@ export class AppRoot extends LitElement {
             }
         })();
 
-        // Best-effort OPFS orphan GC (runs once)
+        // Best-effort OPFS orphan GC
         try {
             const run = async () => {
                 try {
                     await garbageCollectOpfsDocs();
                 } catch {
-                    // ignore
                 }
             };
-
-            // Prefer idle time if available
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const ric: any = (window as any).requestIdleCallback;
             if (typeof ric === 'function') ric(() => void run(), {timeout: 2500});
             else setTimeout(() => void run(), 800);
         } catch {
-            // ignore
         }
     }
 
@@ -87,10 +83,6 @@ export class AppRoot extends LitElement {
         super.disconnectedCallback();
     }
 
-    /**
-     * Lit-friendly render/update catcher.
-     * Some render exceptions don't always surface via window.onerror.
-     */
     protected performUpdate(): void {
         try {
             super.performUpdate();
@@ -109,6 +101,9 @@ export class AppRoot extends LitElement {
 
     private _onGlobalError = (ev: Event) => {
         const e = ev as ErrorEvent;
+        // Ignore benign ResizeObserver errors
+        if (e.message?.includes('ResizeObserver')) return;
+
         const message = e.message || 'Unexpected error';
         const detail = e.error?.stack ? String(e.error.stack) : undefined;
         this.fatal = {message, detail};
@@ -123,19 +118,15 @@ export class AppRoot extends LitElement {
 
     private navLink(href: string, label: string, active: boolean) {
         return html`
-            <a
-                    class=${[
-                        'px-3 py-2 rounded-lg text-sm',
-                        active ? 'bg-slate-800 text-slate-50' : 'text-slate-300 hover:bg-slate-900',
-                    ].join(' ')}
-                    href=${href}
-            >
+            <a class=${['px-3 py-2 rounded-lg text-sm', active ? 'bg-slate-800 text-slate-50' : 'text-slate-300 hover:bg-slate-900'].join(' ')}
+               href=${href}>
                 ${label}
             </a>
         `;
     }
 
-    private async doReset(): Promise<void> {
+    // UPDATED: Renamed to match the new UI call and added safety check
+    private async resetAndReload(): Promise<void> {
         const ok = confirm(
             'Reset storage will erase ALL local documents, pages, and settings on this device.\n\nThis cannot be undone.',
         );
@@ -144,56 +135,54 @@ export class AppRoot extends LitElement {
         this.resetting = true;
         try {
             await resetAllStorage();
-        } catch {
-            // ignore
-        } finally {
-            // Reload to re-init DB/store cleanly
             location.reload();
+        } catch (e) {
+            alert('Reset failed: ' + String(e));
+            this.resetting = false;
         }
     }
 
+    // UPDATED: Better Fatal Error UI (Safe Reload)
     private renderFatal() {
         if (!this.fatal) return null;
 
         return html`
-            <div class="p-4 rounded-xl border border-red-900 bg-red-950/40 text-red-200 space-y-3">
-                <div class="font-semibold">Something went wrong</div>
-                <div class="text-sm">${this.fatal.message}</div>
-
-                ${this.fatal.detail
-                        ? html`
-                            <pre class="text-xs overflow-auto max-h-56 p-3 rounded-lg bg-black/40 border border-red-900/40">${this.fatal.detail}</pre>`
-                        : null}
-
-                <div class="flex flex-wrap gap-2">
-                    <button
-                            class="px-4 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800"
-                            @click=${() => {
-                                this.fatal = null;
-                                location.hash = '#/library';
-                            }}
-                    >
-                        Go to Library
-                    </button>
-
-                    <button
-                            class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold"
-                            @click=${() => location.reload()}
-                    >
-                        Reload
-                    </button>
-
-                    <button
-                            class="px-4 py-2 rounded-xl bg-red-700 hover:bg-red-600 text-slate-950 font-semibold disabled:opacity-60"
-                            ?disabled=${this.resetting}
-                            @click=${() => void this.doReset()}
-                    >
-                        Reset storage
-                    </button>
+            <div class="fixed inset-0 z-[9999] bg-slate-950 flex flex-col items-center justify-center p-6 text-center space-y-6">
+                <div class="p-4 rounded-full bg-red-900/20 text-red-500">
+                    <svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                    </svg>
+                </div>
+                <div class="space-y-2">
+                    <h1 class="text-xl font-bold text-slate-100">Something went wrong</h1>
+                    <p class="text-sm text-slate-400 max-w-xs mx-auto">
+                        The application encountered an unexpected error. Your data is likely safe.
+                    </p>
+                    <div class="text-[10px] text-red-400 bg-black/50 p-4 rounded-lg overflow-x-auto max-w-sm mx-auto text-left whitespace-pre-wrap max-h-48">
+                        ${this.fatal.message} ${this.fatal.detail || ''}
+                    </div>
                 </div>
 
-                <div class="text-xs text-red-200/70">
-                    If this keeps happening, try “Reset storage”. You can restore later from an exported encrypted backup.
+                <div class="flex flex-col gap-3 w-full max-w-xs">
+                    <button class="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+                            @click=${() => location.reload()}>
+                        Reload Application
+                    </button>
+
+                    <div class="relative py-2">
+                        <div class="absolute inset-0 flex items-center">
+                            <div class="w-full border-t border-slate-800"></div>
+                        </div>
+                        <div class="relative flex justify-center"><span
+                                class="bg-slate-950 px-2 text-xs text-slate-500">If reloading fails</span></div>
+                    </div>
+
+                    <button class="w-full py-3 rounded-xl bg-slate-900 border border-red-900/30 text-red-400 hover:bg-red-950/30 text-sm disabled:opacity-50"
+                            ?disabled=${this.resetting}
+                            @click=${() => this.resetAndReload()}>
+                        ${this.resetting ? 'Erasing...' : 'Factory Reset (Erase Data)'}
+                    </button>
                 </div>
             </div>
         `;
@@ -213,10 +202,8 @@ export class AppRoot extends LitElement {
                         stay safe.
                     </div>
                 </div>
-                <a
-                        class="shrink-0 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
-                        href="#/settings"
-                >
+                <a class="shrink-0 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
+                   href="#/settings">
                     Open Settings
                 </a>
             </div>
@@ -224,6 +211,9 @@ export class AppRoot extends LitElement {
     }
 
     render() {
+        // Fatal error takes over everything
+        if (this.fatal) return this.renderFatal();
+
         const r = this.route;
         const active = (name: Route['name']) => r.name === name;
 
@@ -242,16 +232,15 @@ export class AppRoot extends LitElement {
 
                 <main class="flex-1 max-w-3xl mx-auto w-full px-4 py-4 space-y-3">
                     ${this.renderPersistenceBanner()}
-                    ${this.renderFatal()}
 
-                    ${!this.fatal
-                            ? html`
-                                ${r.name === 'library' ? html`<library-page></library-page>` : null}
-                                ${r.name === 'scan' ? html`<scan-page></scan-page>` : null}
-                                ${r.name === 'doc' ? html`<doc-page .docId=${r.id}></doc-page>` : null}
-                                ${r.name === 'settings' ? html`<settings-page></settings-page>` : null}
-                            `
-                            : null}
+                    ${r.name === 'library' ? html`
+                        <library-page></library-page>` : null}
+                    ${r.name === 'scan' ? html`
+                        <scan-page></scan-page>` : null}
+                    ${r.name === 'doc' ? html`
+                        <doc-page .docId=${r.id}></doc-page>` : null}
+                    ${r.name === 'settings' ? html`
+                        <settings-page></settings-page>` : null}
                 </main>
             </div>
         `;

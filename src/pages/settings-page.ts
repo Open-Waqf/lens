@@ -9,12 +9,12 @@ import {shareOrDownload} from '../services/share';
 import {jsonFile, makeZip} from '../lib/zip';
 import {decryptBytesWithPassword, encryptBytesWithPassword, isEncryptedBackup} from '../lib/crypto/pbe';
 import {opfsRemoveTree} from '../services/filestore/opfs-store';
-// Fix: Correct import name
 import {resetAllStorage} from '../services/reset-storage';
 
 import {strFromU8, unzipSync} from 'fflate';
 import type {DocRecord, PageRecord} from '../domain/types';
 
+// Kept this type as it is used in askRestoreMode
 type RestoreMode = 'merge' | 'erase';
 
 @customElement('settings-page')
@@ -31,6 +31,35 @@ export class SettingsPage extends LitElement {
     // Safety Interlock State
     @state() private showDangerZone = false;
     @state() private deleteConfirmation = '';
+
+    // NEW: Storage Stats
+    @state() private storageUsed = 0;
+    @state() private storageQuota = 0;
+
+    async connectedCallback() {
+        super.connectedCallback();
+        void this.loadStorageStats();
+    }
+
+    private async loadStorageStats() {
+        if (navigator.storage && navigator.storage.estimate) {
+            try {
+                const est = await navigator.storage.estimate();
+                this.storageUsed = est.usage || 0;
+                this.storageQuota = est.quota || 0;
+            } catch (e) {
+                console.warn('Storage estimate failed', e);
+            }
+        }
+    }
+
+    private formatBytes(bytes: number): string {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
 
     private async exportBackup(): Promise<void> {
         this.busy = true;
@@ -94,8 +123,8 @@ export class SettingsPage extends LitElement {
             if (isEncryptedBackup(buf)) {
                 const pw = prompt('Enter backup password');
                 if (!pw) throw new Error('Restore cancelled.');
-                // Fix: Ensure type compatibility
-                zipBytes = await decryptBytesWithPassword(buf, pw);
+                // FIX: Type cast to fix TypeScript error
+                zipBytes = (await decryptBytesWithPassword(buf, pw)) as Uint8Array;
             }
 
             // 2) unzip
@@ -192,6 +221,7 @@ export class SettingsPage extends LitElement {
             this.err = (e as Error).message;
         } finally {
             this.busy = false;
+            void this.loadStorageStats();
         }
     }
 
@@ -222,7 +252,7 @@ export class SettingsPage extends LitElement {
         this.busy = true;
         this.msg = 'Wiping data...';
         try {
-            await resetAllStorage(); // Fix: Call correct function name
+            await resetAllStorage();
             location.reload();
         } catch (e) {
             this.msg = `Failed to reset: ${e}`;
@@ -231,6 +261,10 @@ export class SettingsPage extends LitElement {
     }
 
     render() {
+        // Calculate percentage for bar
+        const pct = this.storageQuota > 0 ? (this.storageUsed / this.storageQuota) * 100 : 0;
+        const color = pct > 90 ? 'bg-red-500' : (pct > 70 ? 'bg-amber-500' : 'bg-emerald-500');
+
         return html`
             <div class="space-y-6">
                 <div class="flex items-center gap-3">
@@ -249,6 +283,20 @@ export class SettingsPage extends LitElement {
                 ${this.err ? html`
                     <div class="p-4 rounded-lg bg-red-950/40 text-red-200 border border-red-900">${this.err}
                     </div>` : null}
+
+                <section class="space-y-2">
+                    <div class="flex items-center justify-between text-xs text-slate-400 uppercase tracking-wider font-semibold">
+                        <span>Storage</span>
+                        <span>${this.formatBytes(this.storageUsed)} / ${this.formatBytes(this.storageQuota)}</span>
+                    </div>
+                    <div class="h-4 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                        <div class="h-full ${color} transition-all duration-500"
+                             style="width: ${Math.max(2, pct)}%"></div>
+                    </div>
+                    <div class="text-[10px] text-slate-500">
+                        Space managed by browser. If space runs low, the OS may clear data.
+                    </div>
+                </section>
 
                 <section class="space-y-3">
                     <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">Data Management</h2>
