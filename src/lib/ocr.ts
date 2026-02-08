@@ -10,15 +10,10 @@ async function getWorker(): Promise<Worker> {
                 workerPath: '/tesseract/worker.min.js',
                 corePath: '/tesseract/tesseract-core.wasm.js',
                 langPath: '/tesseract/',
-                logger: (m) => {
-                    if (m.status === 'recognizing text') {
-                        // Keep progress logs if you want
-                        console.debug(m.progress);
-                    }
-                }
             });
             await w.setParameters({
                 tessedit_pageseg_mode: PSM.AUTO,
+                tessedit_create_tsv: '1',
                 user_defined_dpi: '300',
             });
             return w;
@@ -37,34 +32,68 @@ export async function recognizeText(
         const w = await getWorker();
         url = URL.createObjectURL(imageBlob);
 
+        console.log(`OCR: Recognizing... (${width}x${height})`);
         const ret = await w.recognize(url);
-        console.log('OCR Raw Result:', ret.data); // DEBUG: See what Tesseract actually found
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const data = ret.data as any;
         const words: OcrWord[] = [];
 
-        // Strategy 1: Try Lines (Structure preserved)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const lines = (ret.data as any).lines || [];
+        // STRATEGY: Parse TSV (Tab Separated Values)
+        if (data.tsv) {
+            const tsvRaw = data.tsv as string;
+            // DEBUG: See the first 200 chars to confirm format
+            console.log('OCR TSV Preview:', tsvRaw.substring(0, 200).replace(/\n/g, '\\n'));
 
-        if (lines.length > 0) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            for (const line of lines as any[]) {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                for (const word of (line.words || []) as any[]) {
-                    addWordIfValid(word, words, width, height);
+            // Handle both \n and \r\n
+            const lines = tsvRaw.split(/\r?\n/);
+
+            for (let i = 0; i < lines.length; i++) {
+                const row = lines[i].split('\t');
+                // TSV Standard: level|page_num|block_num|par_num|line_num|word_num|left|top|width|height|conf|text
+                // That is 12 columns.
+                if (row.length < 12) continue;
+
+                // We want level 5 (Word)
+                if (row[0] !== '5') continue;
+
+                const conf = parseFloat(row[10]);
+                const text = row[11].trim();
+
+                // Relaxed confidence check (some words might be 0 but valid)
+                if (text.length > 0) {
+                    const x = parseInt(row[6]);
+                    const y = parseInt(row[7]);
+                    const w = parseInt(row[8]);
+                    const h = parseInt(row[9]);
+
+                    words.push({
+                        text: text,
+                        box: [
+                            x / width,
+                            y / height,
+                            w / width,
+                            h / height
+                        ],
+                        confidence: conf
+                    });
                 }
             }
         }
-            // Strategy 2: Fallback to flat words list
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        else if ((ret.data as any).words && (ret.data as any).words.length > 0) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            for (const word of (ret.data as any).words) {
-                addWordIfValid(word, words, width, height);
-            }
+
+        // EMERGENCY FALLBACK:
+        // If parsing failed but we have text, return the whole text as one big block.
+        // This ensures SEARCH works, even if the red boxes are missing.
+        if (words.length === 0 && data.text && data.text.length > 0) {
+            console.warn('OCR: Coordinate parsing failed. Falling back to full-page text.');
+            words.push({
+                text: data.text,
+                box: [0, 0, 1, 1], // The whole page
+                confidence: 100
+            });
         }
 
-        console.log(`OCR Final: Extracted ${words.length} valid words.`);
+        console.log(`OCR Final: Extracted ${words.length} words.`);
         return words;
 
     } catch (e) {
@@ -73,31 +102,6 @@ export async function recognizeText(
     } finally {
         if (url) URL.revokeObjectURL(url);
     }
-}
-
-// Helper to normalize and filter
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function addWordIfValid(word: any, list: OcrWord[], imgW: number, imgH: number) {
-    // Lower threshold to 30 to catch faint text
-    if (word.confidence < 30) return;
-
-    const text = word.text.trim();
-    if (text.length === 0) return;
-
-    const bbox = word.bbox;
-    const bw = bbox.x1 - bbox.x0;
-    const bh = bbox.y1 - bbox.y0;
-
-    list.push({
-        text: text,
-        box: [
-            bbox.x0 / imgW,
-            bbox.y0 / imgH,
-            bw / imgW,
-            bh / imgH
-        ],
-        confidence: word.confidence
-    });
 }
 
 export function terminateOcr() {
