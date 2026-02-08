@@ -25,6 +25,8 @@ import {ScanRepo} from './scan/scan-repo';
 const APPEND_DOC_KEY = 'sahifah.appendToDocId';
 const AUTO_KEY = 'sahifah.autoCapture';
 const JUST_SAVED_DOC_KEY = 'sahifah.justSavedDocId';
+const REPLACE_PAGE_KEY = 'sahifah.replacePageId';
+const WELCOME_KEY = 'sahifah.welcomeSeen';
 
 type StripItem = { id: string; url: string; isNew: boolean };
 
@@ -43,6 +45,7 @@ export class ScanPage extends LitElement {
 
     @state() private busy = false;
     @state() private error: string | null = null;
+    @state() private showWelcome = false;
 
     @state() private docTitle: string | null = null;
     @state() private targetDocTitle: string | null = null;
@@ -52,6 +55,7 @@ export class ScanPage extends LitElement {
 
     @state() private captured: Blob | null = null;
     @state() private editingPageId: string | null = null;
+    @state() private replacePageId: string | null = null;
     @state() private editorKey = 0;
 
     @state() private importReviewTotal = 0;
@@ -84,7 +88,12 @@ export class ScanPage extends LitElement {
         super.connectedCallback();
         window.addEventListener('hashchange', this.onHashChange);
 
-        await this.loadMode();
+        // #1 Pre-permission Onboarding Check
+        if (!localStorage.getItem(WELCOME_KEY)) {
+            this.showWelcome = true;
+        } else {
+            await this.loadMode();
+        }
 
         const pending = takePendingImport();
         if (pending?.length) {
@@ -102,6 +111,7 @@ export class ScanPage extends LitElement {
     disconnectedCallback(): void {
         window.removeEventListener('hashchange', this.onHashChange);
         if (this.session.isAppend) this.clearAppendKey();
+        localStorage.removeItem(REPLACE_PAGE_KEY);
 
         void this.stopCamera();
         this.stopDetector();
@@ -115,6 +125,14 @@ export class ScanPage extends LitElement {
         const h = location.hash || '';
         if (h.startsWith('#/scan')) void this.loadMode();
     };
+
+    private async finishWelcome() {
+        localStorage.setItem(WELCOME_KEY, '1');
+        this.showWelcome = false;
+        await this.loadMode();
+        // Auto-start camera after welcome
+        this.beginCameraFromGesture();
+    }
 
     private async loadMode(): Promise<void> {
         await this.stopCamera();
@@ -133,9 +151,13 @@ export class ScanPage extends LitElement {
 
         const params = this.getHashParams();
         const forceNew = params.get('new') === '1';
-        if (forceNew) this.clearAppendKey();
+        if (forceNew) {
+            this.clearAppendKey();
+            localStorage.removeItem(REPLACE_PAGE_KEY);
+        }
 
         const appendId = forceNew ? null : safeGet(APPEND_DOC_KEY);
+        this.replacePageId = forceNew ? null : safeGet(REPLACE_PAGE_KEY);
 
         this.session.resetAll();
         this.session.setAppend(appendId);
@@ -155,13 +177,19 @@ export class ScanPage extends LitElement {
         }
 
         if (params.get('import') === '1') {
-            setTimeout(() => void this.pickFiles({multiple: true}), 0);
+            setTimeout(() => void this.pickFiles({multiple: !this.replacePageId}), 0);
         }
     }
 
     private async exitScan(): Promise<void> {
         await this.stopCamera();
         this.stopDetector();
+
+        // If we were just replacing a page, go back to doc immediately
+        if (this.replacePageId && this.session.docId) {
+            location.hash = `#/doc/${this.session.docId}`;
+            return;
+        }
 
         const decision = this.session.decideExit();
 
@@ -263,11 +291,21 @@ export class ScanPage extends LitElement {
         try {
             const {master, thumb} = ev.detail;
             const docId = await this.ensureDocId();
-            const editedId = this.editingPageId;
 
-            if (editedId) {
-                await this.repo.updateExistingPage(editedId, master, thumb);
-                this.newPageIds.delete(editedId);
+            // Logic for Retake (#8) or Edit existing
+            const targetId = this.editingPageId || this.replacePageId;
+
+            if (targetId) {
+                await this.repo.updateExistingPage(targetId, master, thumb);
+                if (this.editingPageId) this.newPageIds.delete(this.editingPageId);
+
+                // If this was a retake, we are done
+                if (this.replacePageId) {
+                    this.replacePageId = null;
+                    localStorage.removeItem(REPLACE_PAGE_KEY);
+                    await this.exitScan(); // Return to doc
+                    return;
+                }
             } else {
                 const pageId = await this.repo.addNewPage(docId, master, thumb);
                 this.newPageIds.add(pageId);
@@ -276,7 +314,7 @@ export class ScanPage extends LitElement {
             this.session.markCommitted();
             await this.refreshDocInfo();
 
-            if (editedId && this.importReviewQueue.length > 0 && this.importReviewQueue[0] === editedId) {
+            if (this.editingPageId && this.importReviewQueue.length > 0 && this.importReviewQueue[0] === this.editingPageId) {
                 this.importReviewQueue.shift();
                 const nextId = this.importReviewQueue[0] ?? null;
 
@@ -305,8 +343,13 @@ export class ScanPage extends LitElement {
 
     private async ensureDocId(): Promise<string> {
         if (this.session.docId) return this.session.docId;
-        const now = Date.now();
-        const title = `Scan ${new Date(now).toLocaleString()}`;
+
+        // #13 Smart Naming
+        const now = new Date();
+        const dateStr = now.toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
+        const timeStr = now.toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'});
+        const title = `Scan ${dateStr} ${timeStr}`;
+
         const doc = await this.repo.createDoc(title);
         this.docTitle = doc.title;
         this.session.setCurrentDocId(doc.id);
@@ -355,7 +398,8 @@ export class ScanPage extends LitElement {
     private async invokeNativeScanner(): Promise<void> {
         this.busy = true;
         try {
-            const {scannedImages} = await DocumentScanner.scanDocument({pageLimit: 24});
+            const limit = this.replacePageId ? 1 : 24;
+            const {scannedImages} = await DocumentScanner.scanDocument({pageLimit: limit});
             if (scannedImages && scannedImages.length > 0) {
                 const files: File[] = [];
                 for (const uri of scannedImages) {
@@ -455,6 +499,17 @@ export class ScanPage extends LitElement {
         this.error = null;
         try {
             const docId = await this.ensureDocId();
+
+            // Retake mode support for imports
+            if (this.replacePageId && files.length > 0) {
+                const {master, thumb} = await processPhoto({blob: files[0], rotation: 0, filter: 'original'} as any);
+                await this.repo.updateExistingPage(this.replacePageId, master, thumb);
+                this.replacePageId = null;
+                localStorage.removeItem(REPLACE_PAGE_KEY);
+                await this.exitScan();
+                return;
+            }
+
             const importedPageIds: string[] = [];
             for (const file of files) {
                 const {master, thumb} = await processPhoto({blob: file, rotation: 0, filter: 'original'} as any);
@@ -606,6 +661,21 @@ export class ScanPage extends LitElement {
     }
 
     private renderBanner() {
+        if (this.replacePageId) {
+            return html`
+                <div class="p-3 rounded-xl border border-amber-900 bg-amber-950 flex items-center justify-between gap-3">
+                    <div class="min-w-0">
+                        <div class="text-sm font-bold text-amber-100">Retake Mode</div>
+                        <div class="text-xs text-amber-200/70">Capture will replace the selected page</div>
+                    </div>
+                    <button class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
+                            @click=${() => void this.exitScan()}>
+                        Cancel
+                    </button>
+                </div>
+            `;
+        }
+
         if (this.session.isAppend) {
             const title = this.docTitle ?? this.targetDocTitle ?? 'Document';
             return html`
@@ -661,56 +731,105 @@ export class ScanPage extends LitElement {
                             style="width: 76px; height: 96px;"
                             title=${it.isNew ? 'Edit page' : 'Locked (already saved)'}
                             @click=${() => {
-            if (it.isNew) void this.openExistingPageInEditor(it.id);
-        }}>
+                                if (it.isNew) void this.openExistingPageInEditor(it.id);
+                            }}>
                         <img src=${it.url} class="w-full h-full object-cover" alt="thumb"/>
-                        ${it.isNew ? html`<span class="absolute top-1 left-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-semibold">NEW</span>` : null}
+                        ${it.isNew ? html`<span
+                                class="absolute top-1 left-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-semibold">NEW</span>` : null}
                     </button>
                 `)}
             </div>
         `;
     }
 
+    // #1 Welcome Screen
+    private renderWelcome() {
+        return html`
+            <div class="min-h-[80vh] flex flex-col items-center justify-center p-6 text-center space-y-8">
+                <div class="space-y-4">
+                    <div class="w-20 h-20 bg-slate-800 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                        <svg class="w-10 h-10 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                        </svg>
+                    </div>
+                    <h1 class="text-3xl font-bold text-slate-100">Welcome to Lens</h1>
+                    <p class="text-slate-400 max-w-xs mx-auto text-lg">
+                        Private, offline document scanning.
+                    </p>
+                </div>
+
+                <div class="space-y-4 max-w-xs w-full">
+                    <div class="flex items-start gap-3 text-left text-sm text-slate-300 bg-slate-900/50 p-4 rounded-xl">
+                        <svg class="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" fill="none" stroke="currentColor"
+                             viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                        </svg>
+                        <span>Your documents are stored <strong>only on this device</strong>. No clouds, no accounts.</span>
+                    </div>
+
+                    <button class="w-full py-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-lg shadow-lg shadow-emerald-900/20"
+                            @click=${() => this.finishWelcome()}>
+                        Start Scanning
+                    </button>
+                </div>
+
+                <p class="text-xs text-slate-500">We need camera access to scan documents.</p>
+            </div>
+        `;
+    }
+
     render() {
+        if (this.showWelcome) return this.renderWelcome();
+
         const stage: ScanStage = this.session.stage;
         return html`
             <div class="space-y-4">
                 <div class="flex items-center justify-between">
-                    <div class="text-lg font-semibold">${this.session.isAppend ? 'Add pages' : 'Scan'}</div>
+                    <div class="text-lg font-semibold">
+                        ${this.replacePageId ? 'Retake Page' : (this.session.isAppend ? 'Add pages' : 'Scan')}
+                    </div>
                     ${!this.caps.isCapacitor ? html`
-                    <label class="text-xs text-slate-400 flex items-center gap-2 select-none">
-                        <input type="checkbox" .checked=${this.autoCapture}
-                               @change=${(e: Event) => {
-            const v = (e.target as HTMLInputElement).checked;
-            this.autoCapture = v;
-            try {
-                localStorage.setItem(AUTO_KEY, v ? '1' : '0');
-            } catch {
-            }
-        }} />
-                        Auto-capture
-                    </label>` : null}
+                        <label class="text-xs text-slate-400 flex items-center gap-2 select-none min-h-[44px]">
+                            <input type="checkbox" .checked=${this.autoCapture}
+                                   @change=${(e: Event) => {
+                                       const v = (e.target as HTMLInputElement).checked;
+                                       this.autoCapture = v;
+                                       try {
+                                           localStorage.setItem(AUTO_KEY, v ? '1' : '0');
+                                       } catch {
+                                       }
+                                   }}/>
+                            Auto-capture
+                        </label>` : null}
                 </div>
 
-                ${this.error ? html`<div class="p-3 rounded-lg bg-red-950/40 border border-red-900 text-red-200">${this.error}</div>` : null}
+                ${this.error ? html`
+                    <div class="p-3 rounded-lg bg-red-950/40 border border-red-900 text-red-200">${this.error}
+                    </div>` : null}
 
                 ${this.renderBanner()} ${this.renderStrip()}
 
                 ${stage === 'idle' ? html`
                     <div class="p-4 rounded-xl border border-slate-800 bg-slate-950 space-y-3">
                         <div class="text-sm text-slate-300">
-                            ${this.session.isAppend ? `Adding pages to: ${this.targetDocTitle ?? 'Document'}` : 'Start a new document'}
+                            ${this.replacePageId ? 'Take a new photo to replace the existing page.' :
+                                    (this.session.isAppend ? `Adding pages to: ${this.targetDocTitle ?? 'Document'}` : 'Start a new document')}
                         </div>
                         <div class="flex gap-2">
-                            <button class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold"
+                            <button class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold min-h-[44px]"
                                     @click=${() => this.beginCameraFromGesture()}>
                                 ${this.caps.isCapacitor ? 'Start Scanner' : 'Open Camera'}
                             </button>
-                            <button class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
-                                    ?disabled=${this.busy} @click=${() => this.pickFiles({multiple: true})}>
+                            <button class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60 min-h-[44px]"
+                                    ?disabled=${this.busy}
+                                    @click=${() => this.pickFiles({multiple: !this.replacePageId})}>
                                 Import
                             </button>
-                            <button class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800"
+                            <button class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 min-h-[44px]"
                                     @click=${() => void this.exitScan()}>
                                 ${this.session.exitLabel}
                             </button>
@@ -722,44 +841,48 @@ export class ScanPage extends LitElement {
                     <div class="space-y-3">
                         <div class="rounded-xl overflow-hidden border border-slate-800 bg-black relative">
                             <video class="w-full h-[60vh] object-cover" autoplay playsinline muted></video>
-                            <scan-overlay .detected=${this.lastDetect} .quad=${this.smoothedQuad} .videoW=${this.videoW} .videoH=${this.videoH}></scan-overlay>
-                            
+                            <scan-overlay .detected=${this.lastDetect} .quad=${this.smoothedQuad} .videoW=${this.videoW}
+                                          .videoH=${this.videoH}></scan-overlay>
+
                             ${this.camera.torchSupported ? html`
-                                <button class="absolute top-4 right-4 p-3 rounded-full bg-black/50 hover:bg-black/70 text-white z-20"
+                                <button class="absolute top-4 right-4 p-3 rounded-full bg-black/50 hover:bg-black/70 text-white z-20 min-h-[44px] min-w-[44px]"
                                         @click=${async () => {
-            try {
-                await this.camera.toggleTorch();
-                this.requestUpdate();
-            } catch {
-            }
-        }}>
-                                    <svg class="w-6 h-6 ${this.camera.torchOn ? 'text-yellow-400 fill-current' : 'text-slate-200'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                                            try {
+                                                await this.camera.toggleTorch();
+                                                this.requestUpdate();
+                                            } catch {
+                                            }
+                                        }}>
+                                    <svg class="w-6 h-6 ${this.camera.torchOn ? 'text-yellow-400 fill-current' : 'text-slate-200'}"
+                                         fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                              d="M13 10V3L4 14h7v7l9-11h-7z"></path>
                                     </svg>
                                 </button>
                             ` : null}
                         </div>
 
                         <div class="flex gap-2">
-                            <button class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold disabled:opacity-60"
+                            <button class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold disabled:opacity-60 min-h-[44px]"
                                     ?disabled=${this.busy} @click=${() => void this.capturePhoto(false)}>
                                 Capture
                             </button>
-                            <button class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
-                                    ?disabled=${this.busy} @click=${() => this.pickFiles({multiple: true})}>
+                            <button class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60 min-h-[44px]"
+                                    ?disabled=${this.busy}
+                                    @click=${() => this.pickFiles({multiple: !this.replacePageId})}>
                                 Import
                             </button>
-                            <button class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800"
+                            <button class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 min-h-[44px]"
                                     @click=${() => void this.exitScan()}>
                                 ${this.session.exitLabel}
                             </button>
                         </div>
-                        <button class="text-sm text-slate-300 hover:underline"
+                        <button class="text-sm text-slate-300 hover:underline min-h-[44px] flex items-center"
                                 @click=${async () => {
-            await this.stopCamera();
-            this.stopDetector();
-            this.session.setStage('idle');
-        }}>
+                                    await this.stopCamera();
+                                    this.stopDetector();
+                                    this.session.setStage('idle');
+                                }}>
                             ← Back
                         </button>
                     </div>
@@ -769,7 +892,9 @@ export class ScanPage extends LitElement {
                     <div class="space-y-3">
                         ${this.importReviewTotal > 0 ? html`
                             <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 text-slate-200 flex items-center justify-between gap-3">
-                                <div class="text-sm">Reviewing imported pages <span class="text-slate-400">${this.importReviewIndex}/${this.importReviewTotal}</span></div>
+                                <div class="text-sm">Reviewing imported pages <span
+                                        class="text-slate-400">${this.importReviewIndex}
+                                    /${this.importReviewTotal}</span></div>
                                 <div class="text-xs text-slate-400">Save to continue</div>
                             </div>` : null}
                         ${keyed(this.editorKey, html`
@@ -779,7 +904,7 @@ export class ScanPage extends LitElement {
                             ></page-editor>
                         `)}
                         <div class="flex justify-end">
-                            <button class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 disabled:opacity-60"
+                            <button class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 disabled:opacity-60 min-h-[44px]"
                                     ?disabled=${this.busy} @click=${() => void this.exitScan()}>
                                 ${this.session.exitLabel}
                             </button>

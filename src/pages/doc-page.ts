@@ -199,7 +199,6 @@ export class DocPage extends LitElement {
         }
     }
 
-    // FIX: Implemented manual deletion logic here instead of relying on missing Repo method
     private async deletePage(pageId: string): Promise<void> {
         const ok = await ConfirmModal.ask({
             title: 'Delete Page?',
@@ -235,6 +234,14 @@ export class DocPage extends LitElement {
         }
     }
 
+    // #8 Retake Button Logic
+    private retakePage(pageId: string) {
+        if (!this.doc) return;
+        localStorage.setItem('sahifah.appendToDocId', this.doc.id);
+        localStorage.setItem('sahifah.replacePageId', pageId);
+        location.hash = '#/scan';
+    }
+
     private async deleteDoc(): Promise<void> {
         if (!this.doc) return;
         const ok = await ConfirmModal.ask({
@@ -267,6 +274,46 @@ export class DocPage extends LitElement {
         await this.load();
     }
 
+    // #9 Drag and Drop Handlers
+    private handleDragStart(e: DragEvent, id: string) {
+        if (e.dataTransfer) {
+            e.dataTransfer.setData('text/plain', id);
+            e.dataTransfer.effectAllowed = 'move';
+            // Slight delay to allow drag image to generate
+            setTimeout(() => (e.target as HTMLElement).classList.add('opacity-50'), 0);
+        }
+    }
+
+    private handleDragEnd(e: DragEvent) {
+        (e.target as HTMLElement).classList.remove('opacity-50');
+    }
+
+    private handleDragOver(e: DragEvent) {
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    }
+
+    private async handleDrop(e: DragEvent, targetId: string) {
+        e.preventDefault();
+        (e.target as HTMLElement).classList.remove('opacity-50');
+
+        const sourceId = e.dataTransfer?.getData('text/plain');
+        if (!sourceId || sourceId === targetId || !this.doc) return;
+
+        const ids = [...this.doc.pageIds];
+        const fromIdx = ids.indexOf(sourceId);
+        const toIdx = ids.indexOf(targetId);
+
+        if (fromIdx === -1 || toIdx === -1) return;
+
+        // Move item
+        ids.splice(fromIdx, 1);
+        ids.splice(toIdx, 0, sourceId);
+
+        await this.saveMeta({pageIds: ids});
+        await this.load();
+    }
+
     render() {
         if (!this.doc) return html`
             <div class="p-4 text-slate-500">Document not found</div>`;
@@ -291,7 +338,8 @@ export class DocPage extends LitElement {
         return html`
             <div class="space-y-4 pb-20">
                 <div class="flex items-center justify-between">
-                    <a class="text-sm text-slate-300 hover:underline flex items-center gap-1" href="#/library">
+                    <a class="text-sm text-slate-300 hover:underline flex items-center gap-1 min-h-[44px]"
+                       href="#/library">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                   d="M15 19l-7-7 7-7"></path>
@@ -308,7 +356,7 @@ export class DocPage extends LitElement {
                 <div class="p-4 rounded-xl border border-slate-800 bg-slate-950 space-y-3">
                     <div class="space-y-1">
                         <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Title</div>
-                        <input class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100"
+                        <input class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 min-h-[44px]"
                                .value=${live(this.doc.title)}
                                @change=${(e: Event) => this.saveMeta({title: (e.target as HTMLInputElement).value})}/>
                     </div>
@@ -316,35 +364,36 @@ export class DocPage extends LitElement {
                     <div class="grid grid-cols-2 gap-3">
                         <div class="space-y-1">
                             <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Folder</div>
-                            <input class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100"
+                            <input class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 min-h-[44px]"
                                    .value=${live(this.doc.folder ?? '')}
                                    @change=${(e: Event) => this.saveMeta({folder: (e.target as HTMLInputElement).value || null})}/>
                         </div>
                         <div class="space-y-1">
                             <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Tags</div>
-                            <input class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100"
+                            <input class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 min-h-[44px]"
                                    .value=${live(this.doc.tags.join(', '))}
                                    @change=${(e: Event) => this.saveMeta({tags: (e.target as HTMLInputElement).value.split(',').map(s => s.trim()).filter(Boolean)})}/>
                         </div>
                     </div>
 
                     <div class="space-y-1">
-                        <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Search Index</div>
+                        <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Search Index
+                        </div>
                         <div class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-500 h-16 overflow-y-auto">
                             ${this.doc.searchIndex || 'No text indexed yet.'}
                         </div>
                     </div>
 
                     <div class="flex flex-wrap gap-2 pt-2">
-                        <button class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-lg shadow-emerald-900/20"
+                        <button class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-lg shadow-emerald-900/20 min-h-[44px]"
                                 ?disabled=${this.busy || this.pages.length === 0} @click=${this.exportPdf}>
                             ${this.busy ? 'Working...' : 'Export PDF'}
                         </button>
-                        <button class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm"
+                        <button class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm min-h-[44px]"
                                 ?disabled=${this.busy || this.pages.length === 0} @click=${this.exportImagesZip}>
                             Export Zip
                         </button>
-                        <button class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm"
+                        <button class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm min-h-[44px]"
                                 @click=${() => {
                                     localStorage.setItem('sahifah.appendToDocId', this.doc!.id);
                                     location.hash = '#/scan';
@@ -352,7 +401,7 @@ export class DocPage extends LitElement {
                             Add Pages
                         </button>
                         <div class="flex-1"></div>
-                        <button class="px-3 py-2 rounded-lg border border-red-900/30 text-red-400 hover:bg-red-950/20 text-sm"
+                        <button class="px-3 py-2 rounded-lg border border-red-900/30 text-red-400 hover:bg-red-950/20 text-sm min-h-[44px]"
                                 @click=${this.deleteDoc}>
                             Delete
                         </button>
@@ -363,13 +412,21 @@ export class DocPage extends LitElement {
                     <div class="text-sm font-semibold text-slate-400 uppercase tracking-wider">Pages
                             (${this.pages.length})
                     </div>
+
                     <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
                         ${this.pages.map((p, idx) => html`
-                            <div class="group relative rounded-xl border border-slate-800 bg-slate-950 overflow-hidden shadow-sm hover:border-slate-600 transition-colors">
+                            <div class="group relative rounded-xl border border-slate-800 bg-slate-950 overflow-hidden shadow-sm hover:border-slate-600 transition-colors"
+                                 draggable="true"
+                                 @dragstart=${(e: DragEvent) => this.handleDragStart(e, p.id)}
+                                 @dragend=${this.handleDragEnd}
+                                 @dragover=${this.handleDragOver}
+                                 @drop=${(e: DragEvent) => this.handleDrop(e, p.id)}>
+
                                 <div class="aspect-[3/4] bg-slate-900 cursor-pointer relative"
                                      @click=${() => this.openViewerAt(idx)}>
                                     ${this.thumbs[p.id]
-                                            ? html`<img src=${this.thumbs[p.id]} class="w-full h-full object-cover">`
+                                            ? html`<img src=${this.thumbs[p.id]}
+                                                        class="w-full h-full object-cover pointer-events-none">`
                                             : html`
                                                 <div class="w-full h-full flex items-center justify-center text-slate-700">
                                                     ?
@@ -385,7 +442,7 @@ export class DocPage extends LitElement {
                                     <span class="text-xs text-slate-500 font-mono w-5">#${idx + 1}</span>
 
                                     <div class="flex items-center gap-1">
-                                        <button class="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-emerald-400"
+                                        <button class="p-2 rounded hover:bg-slate-800 text-slate-400 hover:text-emerald-400 min-h-[36px] min-w-[36px]"
                                                 title="Edit"
                                                 @click=${() => this.editPage(p)}>
                                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -394,14 +451,25 @@ export class DocPage extends LitElement {
                                             </svg>
                                         </button>
 
-                                        <button class="p-1.5 rounded hover:bg-slate-800 text-slate-400"
+                                        <button class="p-2 rounded hover:bg-slate-800 text-slate-400 hover:text-amber-400 min-h-[36px] min-w-[36px]"
+                                                title="Retake"
+                                                @click=${() => this.retakePage(p.id)}>
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                      d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path>
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                      d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                            </svg>
+                                        </button>
+
+                                        <button class="p-2 rounded hover:bg-slate-800 text-slate-400 min-h-[36px] min-w-[36px]"
                                                 @click=${() => this.movePage(p.id, -1)} ?disabled=${idx === 0}>↑
                                         </button>
-                                        <button class="p-1.5 rounded hover:bg-slate-800 text-slate-400"
+                                        <button class="p-2 rounded hover:bg-slate-800 text-slate-400 min-h-[36px] min-w-[36px]"
                                                 @click=${() => this.movePage(p.id, 1)}
                                                 ?disabled=${idx === this.pages.length - 1}>↓
                                         </button>
-                                        <button class="p-1.5 rounded hover:bg-red-900/30 text-slate-400 hover:text-red-400"
+                                        <button class="p-2 rounded hover:bg-red-900/30 text-slate-400 hover:text-red-400 min-h-[36px] min-w-[36px]"
                                                 @click=${() => this.deletePage(p.id)}>
                                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
