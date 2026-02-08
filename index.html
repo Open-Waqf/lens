@@ -8,11 +8,14 @@
     />
     <meta name="theme-color" content="#0b1220"/>
 
-    <!-- Baseline CSP (tighten later if you add more capabilities) -->
-    <meta
-            http-equiv="Content-Security-Policy"
-            content="default-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self';"
-    />
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval';
+        style-src 'self' 'unsafe-inline';
+        img-src 'self' blob: data:;
+        worker-src 'self' blob:;
+        connect-src 'self' https://github.com https://raw.githubusercontent.com;
+    ">
 
     <title>Sahifah Lens</title>
     <link rel="icon" href="/icons/icon-192.png"/>

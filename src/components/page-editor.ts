@@ -537,6 +537,7 @@ export class PageEditor extends LitElement {
                                     }}>
                                 <option value="original">Original</option>
                                 <option value="magic">✨ Magic Color</option>
+                                <option value="whiteboard">Whiteboard</option>
                                 <option value="grayscale">Grayscale</option>
                                 <option value="bw">B&W</option>
                             </select>

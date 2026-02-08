@@ -9,6 +9,8 @@ import {shareOrDownload} from '../services/share';
 import {jsonFile, makeZip} from '../lib/zip';
 import {decryptBytesWithPassword, encryptBytesWithPassword, isEncryptedBackup} from '../lib/crypto/pbe';
 import {opfsRemoveTree} from '../services/filestore/opfs-store';
+// Fix: Correct import name
+import {resetAllStorage} from '../services/reset-storage';
 
 import {strFromU8, unzipSync} from 'fflate';
 import type {DocRecord, PageRecord} from '../domain/types';
@@ -26,6 +28,10 @@ export class SettingsPage extends LitElement {
     @state() private msg: string | null = null;
     @state() private err: string | null = null;
 
+    // Safety Interlock State
+    @state() private showDangerZone = false;
+    @state() private deleteConfirmation = '';
+
     private async exportBackup(): Promise<void> {
         this.busy = true;
         this.msg = null;
@@ -37,17 +43,22 @@ export class SettingsPage extends LitElement {
             const pages = await db.pages.toArray();
 
             const files: Record<string, Uint8Array> = {
-                ...jsonFile('metadata.json', {docs, pages, exportedAt: Date.now()}),
+                'metadata.json': jsonFile('metadata.json', {docs, pages, exportedAt: Date.now()})['metadata.json'],
             };
 
-            // include binaries (NOTE: this is still RAM-heavy for very large vaults)
             for (const p of pages) {
-                files[p.imagePath] = await store.get(p.imagePath);
-                files[p.thumbPath] = await store.get(p.thumbPath);
+                try {
+                    files[p.imagePath] = await store.get(p.imagePath);
+                    files[p.thumbPath] = await store.get(p.thumbPath);
+                } catch {
+                }
             }
             for (const d of docs) {
                 if (d.pdfPath && (await store.exists(d.pdfPath))) {
-                    files[d.pdfPath] = await store.get(d.pdfPath);
+                    try {
+                        files[d.pdfPath] = await store.get(d.pdfPath);
+                    } catch {
+                    }
                 }
             }
 
@@ -56,12 +67,13 @@ export class SettingsPage extends LitElement {
             const pw = prompt(
                 'Set a password to encrypt your backup.\n\nIf you lose it, you cannot restore the backup.',
             );
-            if (!pw) return;
+            if (pw === null) return; // Cancelled
 
-            const encrypted = await encryptBytesWithPassword(zipBytes, pw);
+            const finalBytes = pw ? await encryptBytesWithPassword(zipBytes, pw) : zipBytes;
+            const ext = pw ? 'slbk' : 'zip';
 
-            await shareOrDownload(encrypted, `sahifah-backup-${Date.now()}.slbk`, 'application/octet-stream');
-            this.msg = 'Backup exported.';
+            await shareOrDownload(finalBytes, `sahifah-backup-${Date.now()}.${ext}`, 'application/octet-stream');
+            this.msg = 'Backup exported successfully.';
         } catch (e) {
             this.err = (e as Error).message;
         } finally {
@@ -75,19 +87,16 @@ export class SettingsPage extends LitElement {
         this.err = null;
 
         try {
-            const mode = await this.askRestoreMode();
-            if (!mode) return;
-
             const buf = new Uint8Array(await file.arrayBuffer());
 
             // 1) decrypt if needed
-            const zipBytes = isEncryptedBackup(buf)
-                ? await (async () => {
-                    const pw = prompt('Enter backup password');
-                    if (!pw) throw new Error('Restore cancelled.');
-                    return await decryptBytesWithPassword(buf, pw);
-                })()
-                : buf;
+            let zipBytes: Uint8Array = buf;
+            if (isEncryptedBackup(buf)) {
+                const pw = prompt('Enter backup password');
+                if (!pw) throw new Error('Restore cancelled.');
+                // Fix: Ensure type compatibility
+                zipBytes = await decryptBytesWithPassword(buf, pw);
+            }
 
             // 2) unzip
             const unz = unzipSync(zipBytes);
@@ -96,11 +105,14 @@ export class SettingsPage extends LitElement {
             const meta = JSON.parse(strFromU8(unz['metadata.json']));
             const {docs, pages} = meta as { docs: DocRecord[]; pages: PageRecord[] };
 
+            // Ask Mode
+            const mode = await this.askRestoreMode(docs.length);
+            if (!mode) return;
+
             const store = getFileStore();
 
             if (mode === 'erase') {
-                // Destructive restore: explicitly wipe current DB first.
-                // Also attempt to wipe OPFS docs/ to avoid orphaning blobs.
+                // Destructive restore
                 try {
                     await opfsRemoveTree('docs');
                 } catch {
@@ -111,7 +123,7 @@ export class SettingsPage extends LitElement {
                     await db.pages.clear();
                 });
 
-                // Write files from backup
+                // Write files
                 for (const [name, bytes] of Object.entries(unz)) {
                     if (name === 'metadata.json') continue;
                     if (!name.startsWith('docs/')) continue;
@@ -123,88 +135,59 @@ export class SettingsPage extends LitElement {
                     await db.pages.bulkAdd(pages);
                 });
 
-                this.msg = 'Backup restored (replaced existing library).';
-                return;
-            }
+                this.msg = 'Library replaced from backup.';
+            } else {
+                // Merge restore
+                const docIdMap = new Map<string, string>();
+                for (const d of docs) docIdMap.set(d.id, nanoid());
 
-            // Merge restore: remap IDs & paths so we never overwrite existing items.
-            const docIdMap = new Map<string, string>();
-            for (const d of docs) docIdMap.set(d.id, nanoid());
+                const pageIdMap = new Map<string, string>();
+                for (const p of pages) pageIdMap.set(p.id, nanoid());
 
-            const pageIdMap = new Map<string, string>();
-            for (const p of pages) pageIdMap.set(p.id, nanoid());
-
-            const rewritePath = (path: string): string => {
-                // Handle pages/thumbs naming patterns
-                const m = path.match(/^docs\/([^/]+)\/(pages|thumbs)\/([^/.]+)(\.[^/]+)$/);
-                if (m) {
-                    const oldDocId = m[1];
-                    const kind = m[2];
-                    const oldPageId = m[3];
-                    const ext = m[4];
-                    const newDocId = docIdMap.get(oldDocId);
-                    const newPageId = pageIdMap.get(oldPageId);
-                    if (!newDocId || !newPageId) return path;
-                    return `docs/${newDocId}/${kind}/${newPageId}${ext}`;
-                }
-                const m2 = path.match(/^docs\/([^/]+)\/(.+)$/);
-                if (m2) {
-                    const oldDocId = m2[1];
-                    const rest = m2[2];
-                    const newDocId = docIdMap.get(oldDocId);
-                    if (!newDocId) return path;
-                    return `docs/${newDocId}/${rest}`;
-                }
-                return path;
-            };
-
-            const newDocs: DocRecord[] = docs.map((d) => {
-                const newId = docIdMap.get(d.id)!;
-                const newPageIds = (d.pageIds ?? []).map((pid) => pageIdMap.get(pid)!).filter(Boolean);
-                const pdfPath = d.pdfPath ? rewritePath(d.pdfPath) : undefined;
-
-                return {
-                    ...d,
-                    id: newId,
-                    pageIds: newPageIds,
-                    pdfPath,
-                    updatedAt: Date.now(),
+                const rewritePath = (path: string): string => {
+                    const m = path.match(/^docs\/([^/]+)\/(pages|thumbs)\/([^/.]+)(\.[^/]+)$/);
+                    if (m) {
+                        const [, oldDocId, kind, oldPageId, ext] = m;
+                        const newDocId = docIdMap.get(oldDocId);
+                        const newPageId = pageIdMap.get(oldPageId);
+                        if (!newDocId || !newPageId) return path;
+                        return `docs/${newDocId}/${kind}/${newPageId}${ext}`;
+                    }
+                    return path; // Fallback
                 };
-            });
 
-            const newPages: PageRecord[] = pages.map((p) => {
-                const newId = pageIdMap.get(p.id)!;
-                const newDocId = docIdMap.get(p.docId)!;
+                const newDocs = docs.map((d) => ({
+                    ...d,
+                    id: docIdMap.get(d.id)!,
+                    pageIds: (d.pageIds ?? []).map((pid) => pageIdMap.get(pid)!).filter(Boolean),
+                    updatedAt: Date.now(),
+                    pdfPath: undefined // Invalidate old PDF paths
+                }));
 
-                return {
+                const newPages = pages.map((p) => ({
                     ...p,
-                    id: newId,
-                    docId: newDocId,
+                    id: pageIdMap.get(p.id)!,
+                    docId: docIdMap.get(p.docId)!,
                     imagePath: rewritePath(p.imagePath),
                     thumbPath: rewritePath(p.thumbPath),
-                };
-            });
+                }));
 
-            // Write binaries with rewritten paths
-            for (const [name, bytes] of Object.entries(unz)) {
-                if (name === 'metadata.json') continue;
-                if (!name.startsWith('docs/')) continue;
+                for (const [name, bytes] of Object.entries(unz)) {
+                    if (!name.startsWith('docs/')) continue;
+                    // Only write if we can remap it (orphaned files skipped)
+                    const m = name.match(/^docs\/([^/]+)\//);
+                    if (m && docIdMap.has(m[1])) {
+                        const newName = rewritePath(name);
+                        await store.put(newName, bytes as Uint8Array, guessMime(newName));
+                    }
+                }
 
-                const m = name.match(/^docs\/([^/]+)\//);
-                const oldDocId = m?.[1];
-                if (!oldDocId) continue;
-                if (!docIdMap.has(oldDocId)) continue;
-
-                const newName = rewritePath(name);
-                await store.put(newName, bytes as Uint8Array, guessMime(newName));
+                await db.transaction('rw', db.docs, db.pages, async () => {
+                    await db.docs.bulkAdd(newDocs);
+                    await db.pages.bulkAdd(newPages);
+                });
+                this.msg = `Merged ${newDocs.length} documents from backup.`;
             }
-
-            await db.transaction('rw', db.docs, db.pages, async () => {
-                await db.docs.bulkAdd(newDocs);
-                await db.pages.bulkAdd(newPages);
-            });
-
-            this.msg = `Backup restored (merged: +${newDocs.length} docs).`;
         } catch (e) {
             this.err = (e as Error).message;
         } finally {
@@ -212,85 +195,144 @@ export class SettingsPage extends LitElement {
         }
     }
 
-    private async askRestoreMode(): Promise<RestoreMode | null> {
+    private async askRestoreMode(count: number): Promise<RestoreMode | null> {
         const raw = prompt(
-            'Restore backup:\n\nType MERGE to add backup into current library.\nType ERASE to replace and delete current library.',
+            `Backup contains ${count} documents.\n\nType MERGE to add them to your library.\nType ERASE to replace your library (destroys current data).`,
             'MERGE',
         );
         if (!raw) return null;
-
         const v = raw.trim().toUpperCase();
         if (v === 'MERGE') return 'merge';
         if (v === 'ERASE') {
-            const confirmText = prompt('This will DELETE ALL current data. Type ERASE to confirm.');
-            if (confirmText?.trim().toUpperCase() !== 'ERASE') return null;
             return 'erase';
         }
-        throw new Error('Invalid choice. Type MERGE or ERASE.');
+        return null;
+    }
+
+    private async nukeEverything() {
+        if (this.deleteConfirmation !== 'DELETE') {
+            this.msg = 'Please type DELETE to confirm.';
+            return;
+        }
+
+        if (!confirm('Final Warning: This will wipe ALL documents and settings. This cannot be undone.')) {
+            return;
+        }
+
+        this.busy = true;
+        this.msg = 'Wiping data...';
+        try {
+            await resetAllStorage(); // Fix: Call correct function name
+            location.reload();
+        } catch (e) {
+            this.msg = `Failed to reset: ${e}`;
+            this.busy = false;
+        }
     }
 
     render() {
         return html`
-            <div class="space-y-4">
-                <div class="text-lg font-semibold">Settings</div>
-
-                ${this.msg
-                        ? html`
-                            <div class="p-3 rounded-lg bg-emerald-950/40 border border-emerald-900 text-emerald-200">
-                                ${this.msg}
-                            </div>`
-                        : null}
-                ${this.err
-                        ? html`
-                            <div class="p-3 rounded-lg bg-red-950/40 border border-red-900 text-red-200">${this.err}
-                            </div>`
-                        : null}
-
-                <div class="p-4 rounded-xl border border-slate-800 bg-slate-950 space-y-2">
-                    <div class="text-sm text-slate-300 font-medium">Capabilities</div>
-                    <div class="text-sm text-slate-400">Capacitor: ${String(this.caps.isCapacitor)}</div>
-                    <div class="text-sm text-slate-400">OPFS: ${String(this.caps.hasOPFS)}</div>
-                    <div class="text-sm text-slate-400">Web Share: ${String(this.caps.hasWebShare)}</div>
-                    <div class="text-sm text-slate-400">Camera stream: ${String(this.caps.hasCameraStream)}</div>
+            <div class="space-y-6">
+                <div class="flex items-center gap-3">
+                    <button class="p-2 rounded-full hover:bg-slate-800" @click=${() => location.hash = '#/library'}>
+                        <svg class="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M15 19l-7-7 7-7"></path>
+                        </svg>
+                    </button>
+                    <h1 class="text-xl font-bold text-slate-100">Settings</h1>
                 </div>
 
-                <div class="p-4 rounded-xl border border-slate-800 bg-slate-950 space-y-3">
-                    <div class="text-sm text-slate-300 font-medium">Backup</div>
-                    <div class="flex flex-wrap gap-2">
-                        <button
-                                class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold disabled:opacity-60"
-                                ?disabled=${this.busy}
-                                @click=${this.exportBackup}
-                        >
-                            Export backup (.slbk)
+                ${this.msg ? html`
+                    <div class="p-4 rounded-lg bg-slate-800 text-emerald-400 border border-emerald-900/50">${this.msg}
+                    </div>` : null}
+                ${this.err ? html`
+                    <div class="p-4 rounded-lg bg-red-950/40 text-red-200 border border-red-900">${this.err}
+                    </div>` : null}
+
+                <section class="space-y-3">
+                    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">Data Management</h2>
+
+                    <div class="grid gap-3">
+                        <button class="flex items-center justify-between p-4 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors"
+                                ?disabled=${this.busy} @click=${() => this.exportBackup()}>
+                            <div class="flex items-center gap-3">
+                                <div class="p-2 rounded-lg bg-emerald-900/30 text-emerald-400">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                                    </svg>
+                                </div>
+                                <div class="text-left">
+                                    <div class="text-slate-200 font-medium">Export Backup</div>
+                                    <div class="text-xs text-slate-500">Save library to .slbk file</div>
+                                </div>
+                            </div>
                         </button>
 
-                        <label class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 cursor-pointer disabled:opacity-60">
-                            Restore backup
-                            <input
-                                    class="hidden"
-                                    type="file"
-                                    accept=".slbk,.zip,application/octet-stream,application/zip"
-                                    ?disabled=${this.busy}
-                                    @change=${(e: Event) => {
-                                        const f = (e.target as HTMLInputElement).files?.[0];
-                                        if (f) void this.importBackup(f);
-                                    }}
-                            />
+                        <label class="flex items-center justify-between p-4 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors cursor-pointer">
+                            <div class="flex items-center gap-3">
+                                <div class="p-2 rounded-lg bg-blue-900/30 text-blue-400">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m-4 4v12"></path>
+                                    </svg>
+                                </div>
+                                <div class="text-left">
+                                    <div class="text-slate-200 font-medium">Restore Backup</div>
+                                    <div class="text-xs text-slate-500">Merge or replace library</div>
+                                </div>
+                            </div>
+                            <input class="hidden" type="file" accept=".slbk,.zip" ?disabled=${this.busy}
+                                   @change=${(e: Event) => {
+                                       const f = (e.target as HTMLInputElement).files?.[0];
+                                       if (f) void this.importBackup(f);
+                                   }}/>
                         </label>
                     </div>
+                </section>
 
-                    <div class="text-xs text-slate-500 space-y-1">
-                        <div>
-                            Restore supports two modes:
-                            <span class="text-slate-300">MERGE</span> (safe, default) or
-                            <span class="text-slate-300">ERASE</span> (destructive).
-                        </div>
-                        <div>
-                            Everything stays local unless you export/share. No account required.
-                        </div>
+                <div class="p-4 rounded-xl border border-slate-800 bg-slate-950/50 space-y-2">
+                    <div class="text-xs font-mono text-slate-500">System Capabilities</div>
+                    <div class="text-xs text-slate-600">Capacitor: ${this.caps.isCapacitor} • OPFS: ${this.caps.hasOPFS}
+                        • Share: ${this.caps.hasWebShare}
                     </div>
                 </div>
+
+                <section class="space-y-3 pt-6 border-t border-slate-800">
+                    <h2 class="text-sm font-semibold text-red-400 uppercase tracking-wider">Danger Zone</h2>
+
+                    ${!this.showDangerZone ? html`
+                        <button class="w-full p-4 rounded-xl bg-slate-900 border border-red-900/30 text-red-400 hover:bg-red-950/20 transition-colors text-sm font-medium"
+                                @click=${() => this.showDangerZone = true}>
+                            Show Destructive Options
+                        </button>
+                    ` : html`
+                        <div class="p-4 rounded-xl bg-red-950/10 border border-red-900/50 space-y-4">
+                            <div class="text-sm text-red-200">
+                                <p class="font-bold mb-1">Erase All Data</p>
+                                <p class="opacity-80">This will permanently delete all scanned documents and reset the
+                                    app to factory settings. This action cannot be undone.</p>
+                            </div>
+
+                            <div class="space-y-2">
+                                <label class="text-xs text-red-400">Type "DELETE" to confirm</label>
+                                <input type="text"
+                                       class="w-full bg-slate-950 border border-red-900/50 rounded-lg px-3 py-2 text-red-100 placeholder-red-900/50 focus:outline-none focus:border-red-500"
+                                       placeholder="DELETE"
+                                       .value=${this.deleteConfirmation}
+                                       @input=${(e: Event) => this.deleteConfirmation = (e.target as HTMLInputElement).value}
+                                />
+                            </div>
+
+                            <button class="w-full py-3 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    ?disabled=${this.deleteConfirmation !== 'DELETE' || this.busy}
+                                    @click=${() => this.nukeEverything()}>
+                                ${this.busy ? 'Erasing...' : 'Erase Everything'}
+                            </button>
+                        </div>
+                    `}
+                </section>
             </div>
         `;
     }
@@ -299,6 +341,5 @@ export class SettingsPage extends LitElement {
 function guessMime(path: string): string {
     if (path.endsWith('.jpg') || path.endsWith('.jpeg')) return 'image/jpeg';
     if (path.endsWith('.png')) return 'image/png';
-    if (path.endsWith('.pdf')) return 'application/pdf';
     return 'application/octet-stream';
 }

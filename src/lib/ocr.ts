@@ -6,7 +6,19 @@ let workerPromise: Promise<Worker> | null = null;
 async function getWorker(): Promise<Worker> {
     if (!workerPromise) {
         workerPromise = (async () => {
-            const w = await createWorker('eng');
+            // We configure the worker to load from our local /public/tesseract folder
+            // instead of the default CDN.
+            const w = await createWorker('eng', 1, {
+                workerPath: '/tesseract/worker.min.js',
+                corePath: '/tesseract/tesseract-core.wasm.js',
+                langPath: '/tesseract/', // Point to folder containing eng.traineddata.gz
+                logger: (m) => {
+                    if (m.status === 'recognizing text') {
+                        // console.debug(`OCR Progress: ${(m.progress * 100).toFixed(0)}%`);
+                    }
+                }
+            });
+
             await w.setParameters({
                 tessedit_pageseg_mode: PSM.AUTO,
             });
@@ -27,7 +39,6 @@ export async function recognizeText(
 
         const words: OcrWord[] = [];
 
-        // Fix: Cast to 'any' to bypass strict type definition missing 'lines'
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const lines = (ret.data as any).lines || [];
 
@@ -44,10 +55,10 @@ export async function recognizeText(
                 words.push({
                     text: word.text,
                     box: [
-                        bbox.x0 / width,  // x
-                        bbox.y0 / height, // y
-                        bw / width,       // w
-                        bh / height       // h
+                        bbox.x0 / width,
+                        bbox.y0 / height,
+                        bw / width,
+                        bh / height
                     ],
                     confidence: word.confidence
                 });

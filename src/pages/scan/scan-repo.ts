@@ -5,6 +5,8 @@ import type {PageEditorSaveDetail} from '../../components/page-editor';
 
 import {db} from '../../services/db';
 import {getFileStore} from '../../services/filestore';
+import {recognizeText} from '../../lib/ocr';
+import {bytesToBlob} from '../../lib/bytes';
 
 export type DocStripItem = { id: string; thumbBytes: Uint8Array };
 
@@ -85,12 +87,11 @@ export class ScanRepo {
         const imagePath = `docs/${docId}/pages/${pageId}.jpg`;
         const thumbPath = `docs/${docId}/thumbs/${pageId}.jpg`;
 
-        // 2. Write Files OUTSIDE the Transaction (Prevents "Committed Too Early" crash)
+        // 2. Write Files OUTSIDE the Transaction
         try {
             await store.put(imagePath, master.bytes, 'image/jpeg');
             await store.put(thumbPath, thumb.bytes, 'image/jpeg');
         } catch (e) {
-            // If file write fails, we haven't touched DB, so just cleanup and abort.
             try {
                 await store.del(imagePath);
             } catch {
@@ -117,6 +118,7 @@ export class ScanRepo {
                     height: master.height,
                     rotation: 0,
                     createdAt: Date.now(),
+                    ocrStatus: 'pending', // Mark as needing OCR
                 } as any;
 
                 await db.pages.add(page);
@@ -126,7 +128,6 @@ export class ScanRepo {
                 await db.docs.put(doc);
             });
         } catch (e) {
-            // 4. Rollback: If DB fails, delete the "Ghost" files
             try {
                 await store.del(imagePath);
             } catch {
@@ -138,6 +139,9 @@ export class ScanRepo {
             throw e;
         }
 
+        // 4. Trigger Background OCR (Fire and Forget)
+        void this.runBackgroundOcr(pageId, master.bytes, master.width, master.height);
+
         return pageId;
     }
 
@@ -148,17 +152,14 @@ export class ScanRepo {
     ): Promise<void> {
         const store = getFileStore();
 
-        // Get docId without transaction first
         const oldPage = await db.pages.get(pageId);
         if (!oldPage) throw new Error('Page missing');
         const docId = oldPage.docId;
 
-        // Use versioning to avoid overwriting the valid file before DB success
         const version = nanoid(6);
         const newImagePath = `docs/${docId}/pages/${pageId}_${version}.jpg`;
         const newThumbPath = `docs/${docId}/thumbs/${pageId}_${version}.jpg`;
 
-        // 1. Write NEW files (Safe Phase)
         try {
             await store.put(newImagePath, master.bytes, 'image/jpeg');
             await store.put(newThumbPath, thumb.bytes, 'image/jpeg');
@@ -175,29 +176,28 @@ export class ScanRepo {
         }
 
         try {
-            // 2. Update DB (Critical Phase)
             await db.transaction('rw', db.docs, db.pages, async () => {
                 const page = await db.pages.get(pageId);
-                if (!page) throw new Error('Page missing'); // Was deleted mid-flight
+                if (!page) throw new Error('Page missing');
 
                 const doc = await db.docs.get(page.docId);
                 if (!doc) throw new Error('Doc missing');
 
                 await db.pages.put({
                     ...page,
-                    imagePath: newImagePath, // Point to new version
+                    imagePath: newImagePath,
                     thumbPath: newThumbPath,
                     width: master.width,
                     height: master.height,
                     rotation: 0,
+                    ocrStatus: 'pending', // Reset OCR status on edit
+                    words: [], // Clear old words
                 });
 
                 doc.updatedAt = Date.now();
                 await db.docs.put(doc);
             });
 
-            // 3. Cleanup OLD files (Success Phase)
-            // If this fails, the Startup GC will eventually catch them.
             try {
                 await store.del(oldPage.imagePath);
             } catch {
@@ -208,7 +208,6 @@ export class ScanRepo {
             }
 
         } catch (e) {
-            // 4. Rollback: If DB fails, delete the NEW files. Old files remain valid.
             try {
                 await store.del(newImagePath);
             } catch {
@@ -219,24 +218,23 @@ export class ScanRepo {
             }
             throw e;
         }
+
+        // Trigger OCR for updated image
+        void this.runBackgroundOcr(pageId, master.bytes, master.width, master.height);
     }
 
     async deleteDocCompletely(docId: string): Promise<void> {
         const store = getFileStore();
-
-        // Read paths first
         const [doc, pages] = await Promise.all([
             db.docs.get(docId),
             db.pages.where('docId').equals(docId).toArray(),
         ]);
 
-        // Delete from DB first (Source of Truth)
         await db.transaction('rw', db.docs, db.pages, async () => {
             await db.pages.where('docId').equals(docId).delete();
             await db.docs.delete(docId);
         });
 
-        // Best-effort file cleanup
         for (const p of pages) {
             try {
                 await store.del(p.imagePath);
@@ -250,6 +248,42 @@ export class ScanRepo {
         if (doc?.pdfPath) {
             try {
                 await store.del(doc.pdfPath);
+            } catch {
+            }
+        }
+    }
+
+    /**
+     * Runs OCR in the background and updates the PageRecord when done.
+     * Does NOT block the UI.
+     */
+    private async runBackgroundOcr(pageId: string, bytes: Uint8Array, w: number, h: number) {
+        try {
+            // Convert bytes to Blob for Tesseract
+            const blob = bytesToBlob(bytes, 'image/jpeg');
+
+            // Run expensive OCR
+            const words = await recognizeText(blob, w, h);
+
+            // Update DB
+            await db.transaction('rw', db.pages, async () => {
+                const p = await db.pages.get(pageId);
+                if (!p) return; // Page deleted while OCR ran
+
+                // Only update if the image hasn't changed since we started
+                // (Simple check: if we had a versioning field we'd check that,
+                // but checking if status is still 'pending' is a decent proxy)
+                if (p.ocrStatus === 'pending') {
+                    await db.pages.update(pageId, {
+                        words,
+                        ocrStatus: 'done'
+                    });
+                }
+            });
+        } catch (e) {
+            console.error('Background OCR failed', e);
+            try {
+                await db.pages.update(pageId, {ocrStatus: 'error'});
             } catch {
             }
         }

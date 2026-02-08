@@ -1,7 +1,7 @@
 import type {FilterMode} from '../../domain/types';
 import type {Quad} from '../scan/quad';
 import {adaptiveBwFromRgba} from './adaptive-bw';
-import {magicColorFromRgba} from './magic-filter';
+import {magicColorFromRgba, whiteboardFromRgba} from './magic-filter';
 import {warpRgba} from './warp';
 
 export type Rotation = 0 | 90 | 180 | 270;
@@ -86,6 +86,9 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
             } else if (req.filter === 'magic') {
                 const magic = magicColorFromRgba(finalRgba, finalW, finalH);
                 finalRgba.set(magic);
+            } else if (req.filter === 'whiteboard') {
+                const wb = whiteboardFromRgba(finalRgba, finalW, finalH);
+                finalRgba.set(wb);
             }
         }
 
