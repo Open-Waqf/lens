@@ -3,6 +3,7 @@ import {customElement, query, state} from 'lit/decorators.js';
 import {keyed} from 'lit/directives/keyed.js';
 import {Capacitor} from '@capacitor/core';
 import {DocumentScanner} from '@capacitor-mlkit/document-scanner';
+import {Haptics, ImpactStyle} from '@capacitor/haptics';
 
 import type {DetectedQuad, Point, Quad} from '../lib/scan/quad';
 import {lerpQuad, quadArea} from '../lib/scan/quad';
@@ -67,6 +68,9 @@ export class ScanPage extends LitElement {
     @state() private videoW = 0;
     @state() private videoH = 0;
 
+    // Guidance State
+    @state() private guidance: string | null = null;
+
     private captureInFlight = false;
 
     private worker: Worker | null = null;
@@ -88,7 +92,6 @@ export class ScanPage extends LitElement {
         super.connectedCallback();
         window.addEventListener('hashchange', this.onHashChange);
 
-        // #1 Pre-permission Onboarding Check
         if (!localStorage.getItem(WELCOME_KEY)) {
             this.showWelcome = true;
         } else {
@@ -130,7 +133,6 @@ export class ScanPage extends LitElement {
         localStorage.setItem(WELCOME_KEY, '1');
         this.showWelcome = false;
         await this.loadMode();
-        // Auto-start camera after welcome
         this.beginCameraFromGesture();
     }
 
@@ -181,11 +183,21 @@ export class ScanPage extends LitElement {
         }
     }
 
+    private async triggerHaptic() {
+        try {
+            if (this.caps.isCapacitor) {
+                await Haptics.impact({style: ImpactStyle.Medium});
+            } else if (navigator.vibrate) {
+                navigator.vibrate(40);
+            }
+        } catch {
+        }
+    }
+
     private async exitScan(): Promise<void> {
         await this.stopCamera();
         this.stopDetector();
 
-        // If we were just replacing a page, go back to doc immediately
         if (this.replacePageId && this.session.docId) {
             location.hash = `#/doc/${this.session.docId}`;
             return;
@@ -292,18 +304,16 @@ export class ScanPage extends LitElement {
             const {master, thumb} = ev.detail;
             const docId = await this.ensureDocId();
 
-            // Logic for Retake (#8) or Edit existing
             const targetId = this.editingPageId || this.replacePageId;
 
             if (targetId) {
                 await this.repo.updateExistingPage(targetId, master, thumb);
                 if (this.editingPageId) this.newPageIds.delete(this.editingPageId);
 
-                // If this was a retake, we are done
                 if (this.replacePageId) {
                     this.replacePageId = null;
                     localStorage.removeItem(REPLACE_PAGE_KEY);
-                    await this.exitScan(); // Return to doc
+                    await this.exitScan();
                     return;
                 }
             } else {
@@ -344,7 +354,6 @@ export class ScanPage extends LitElement {
     private async ensureDocId(): Promise<string> {
         if (this.session.docId) return this.session.docId;
 
-        // #13 Smart Naming
         const now = new Date();
         const dateStr = now.toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
         const timeStr = now.toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'});
@@ -425,6 +434,10 @@ export class ScanPage extends LitElement {
     private async capturePhoto(fromAuto = false): Promise<void> {
         this.error = null;
         if (this.captureInFlight) return;
+
+        // #5 Haptics on capture
+        void this.triggerHaptic();
+
         this.captureInFlight = true;
         try {
             const v = this.videoEl;
@@ -500,7 +513,6 @@ export class ScanPage extends LitElement {
         try {
             const docId = await this.ensureDocId();
 
-            // Retake mode support for imports
             if (this.replacePageId && files.length > 0) {
                 const {master, thumb} = await processPhoto({blob: files[0], rotation: 0, filter: 'original'} as any);
                 await this.repo.updateExistingPage(this.replacePageId, master, thumb);
@@ -554,9 +566,24 @@ export class ScanPage extends LitElement {
             if (det.quad && det.confidence >= 0.35) {
                 const q = det.quad as Quad;
                 this.smoothedQuad = this.smoothedQuad ? lerpQuad(this.smoothedQuad, q, 0.35) : q;
+
+                // #2 Live Guidance Logic
+                if (det.confidence < 0.65) {
+                    this.guidance = 'Hold steady';
+                } else {
+                    const area = quadArea(q) / (det.width * det.height);
+                    if (area < 0.15) {
+                        this.guidance = 'Move closer';
+                    } else if (this.autoCapture && !this.captureInFlight) {
+                        this.guidance = 'Hold steady';
+                    } else {
+                        this.guidance = null;
+                    }
+                }
             } else {
                 this.smoothedQuad = null;
                 this.stableSince = 0;
+                this.guidance = det.confidence > 0.1 ? 'Move closer' : null;
             }
             this.maybeAutoCapture();
         };
@@ -594,6 +621,7 @@ export class ScanPage extends LitElement {
         this.smoothedQuad = null;
         this.stableSince = 0;
         this.cooldownUntil = 0;
+        this.guidance = null;
     }
 
     private grabAndDetect(): void {
@@ -725,24 +753,23 @@ export class ScanPage extends LitElement {
         if (!this.strip.length) return null;
         const selected = this.editingPageId;
         return html`
-            <div class="flex gap-2 overflow-x-auto py-1">
+            <div class="flex gap-3 overflow-x-auto py-2 px-1">
                 ${this.strip.map((it) => html`
-                    <button class="relative shrink-0 rounded-lg border ${selected === it.id ? 'border-emerald-500' : 'border-slate-800'} overflow-hidden ${it.isNew ? '' : 'opacity-60'}"
-                            style="width: 76px; height: 96px;"
+                    <button class="relative shrink-0 rounded-lg border ${selected === it.id ? 'border-emerald-500 ring-2 ring-emerald-500/20' : 'border-slate-800'} overflow-hidden ${it.isNew ? '' : 'opacity-60'} transition-all active:scale-95"
+                            style="width: 84px; height: 108px;"
                             title=${it.isNew ? 'Edit page' : 'Locked (already saved)'}
                             @click=${() => {
                                 if (it.isNew) void this.openExistingPageInEditor(it.id);
                             }}>
                         <img src=${it.url} class="w-full h-full object-cover" alt="thumb"/>
                         ${it.isNew ? html`<span
-                                class="absolute top-1 left-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-semibold">NEW</span>` : null}
+                                class="absolute top-1 left-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500 text-white font-bold shadow-sm">NEW</span>` : null}
                     </button>
                 `)}
             </div>
         `;
     }
 
-    // #1 Welcome Screen
     private renderWelcome() {
         return html`
             <div class="min-h-[80vh] flex flex-col items-center justify-center p-6 text-center space-y-8">
@@ -776,8 +803,6 @@ export class ScanPage extends LitElement {
                         Start Scanning
                     </button>
                 </div>
-
-                <p class="text-xs text-slate-500">We need camera access to scan documents.</p>
             </div>
         `;
     }
@@ -793,18 +818,19 @@ export class ScanPage extends LitElement {
                         ${this.replacePageId ? 'Retake Page' : (this.session.isAppend ? 'Add pages' : 'Scan')}
                     </div>
                     ${!this.caps.isCapacitor ? html`
-                        <label class="text-xs text-slate-400 flex items-center gap-2 select-none min-h-[44px]">
-                            <input type="checkbox" .checked=${this.autoCapture}
-                                   @change=${(e: Event) => {
-                                       const v = (e.target as HTMLInputElement).checked;
-                                       this.autoCapture = v;
-                                       try {
-                                           localStorage.setItem(AUTO_KEY, v ? '1' : '0');
-                                       } catch {
-                                       }
-                                   }}/>
-                            Auto-capture
-                        </label>` : null}
+
+                        <button class="relative h-8 w-14 rounded-full bg-slate-800 transition-colors duration-200 focus:outline-none ${this.autoCapture ? 'bg-emerald-600/20' : ''}"
+                                @click=${() => {
+                                    this.autoCapture = !this.autoCapture;
+                                    try {
+                                        localStorage.setItem(AUTO_KEY, this.autoCapture ? '1' : '0');
+                                    } catch {
+                                    }
+                                }}>
+                            <span class="sr-only">Auto Capture</span>
+                            <span class="${this.autoCapture ? 'translate-x-7 bg-emerald-500' : 'translate-x-1 bg-slate-400'} inline-block h-6 w-6 transform rounded-full transition duration-200 ease-in-out mt-1 shadow-sm"></span>
+                        </button>
+                    ` : null}
                 </div>
 
                 ${this.error ? html`
@@ -841,8 +867,14 @@ export class ScanPage extends LitElement {
                     <div class="space-y-3">
                         <div class="rounded-xl overflow-hidden border border-slate-800 bg-black relative">
                             <video class="w-full h-[60vh] object-cover" autoplay playsinline muted></video>
-                            <scan-overlay .detected=${this.lastDetect} .quad=${this.smoothedQuad} .videoW=${this.videoW}
-                                          .videoH=${this.videoH}></scan-overlay>
+
+                            <scan-overlay
+                                    .detected=${this.lastDetect}
+                                    .quad=${this.smoothedQuad}
+                                    .guidance=${this.guidance}
+                                    .videoW=${this.videoW}
+                                    .videoH=${this.videoH}>
+                            </scan-overlay>
 
                             ${this.camera.torchSupported ? html`
                                 <button class="absolute top-4 right-4 p-3 rounded-full bg-black/50 hover:bg-black/70 text-white z-20 min-h-[44px] min-w-[44px]"
