@@ -2,7 +2,6 @@ import {html, LitElement} from 'lit';
 import {customElement, state} from 'lit/decorators.js';
 import {repeat} from 'lit/directives/repeat.js';
 import {live} from 'lit/directives/live.js';
-import {classMap} from 'lit/directives/class-map.js';
 
 import {db} from '../services/db';
 import type {DocRecord} from '../domain/types';
@@ -230,16 +229,14 @@ export class LibraryPage extends LitElement {
         const date = new Date(doc.updatedAt).toLocaleDateString();
         const selected = this.selectedIds.has(doc.id);
 
-        const containerClasses = classMap({
-            'group relative bg-slate-900 border rounded-xl overflow-hidden transition-all cursor-pointer': true,
-            'border-emerald-500 ring-1 ring-emerald-500/50 bg-emerald-900/10': selected,
-            'border-slate-800 hover:border-slate-700 active:bg-slate-800': !selected,
-            'flex': !isGallery,
-            'flex-col': isGallery
-        });
+        const baseClasses = "group relative bg-slate-900 border rounded-xl overflow-hidden transition-all cursor-pointer";
+        const stateClasses = selected
+            ? "border-emerald-500 ring-1 ring-emerald-500/50 bg-emerald-900/10"
+            : "border-slate-800 hover:border-slate-700 active:bg-slate-800";
+        const layoutClasses = isGallery ? "flex-col" : "flex";
 
         return html`
-            <div class=${containerClasses}
+            <div class="${baseClasses} ${stateClasses} ${layoutClasses}"
                  @click=${() => {
                      if (this.selectionMode) this.toggleSelection(doc.id);
                      else location.hash = `#/doc/${doc.id}`;

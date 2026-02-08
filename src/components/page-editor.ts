@@ -4,10 +4,7 @@ import {customElement, property, query, state} from 'lit/decorators.js';
 import type {FilterMode} from '../domain/types';
 import type {Point, Quad} from '../lib/scan/quad';
 import {quadArea} from '../lib/scan/quad';
-
-// Use computeOutputSize from warp, but not the canvas version anymore
 import {computeOutputSize} from '../lib/image/warp';
-
 import type {WorkerRequest, WorkerResponse} from '../lib/image/worker';
 
 export type PageEditorSaveDetail = {
@@ -29,8 +26,6 @@ export class PageEditor extends LitElement {
     @state() private err: string | null = null;
 
     private sourceBitmap: ImageBitmap | null = null;
-
-    // Derived view for cropping UI
     private baseCanvas: HTMLCanvasElement | null = null;
     private baseW = 0;
     private baseH = 0;
@@ -271,22 +266,27 @@ export class PageEditor extends LitElement {
         ctx.lineWidth = 3;
         ctx.strokeRect(1.5, 1.5, size - 3, size - 3);
 
-        // Crosshair
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-        ctx.lineWidth = 1;
+        // Crosshair - Double stroke for contrast
         ctx.beginPath();
-        // Vertical
         ctx.moveTo(size / 2, 0);
         ctx.lineTo(size / 2, size);
-        // Horizontal
         ctx.moveTo(0, size / 2);
         ctx.lineTo(size, size / 2);
+
+        // Thick black stroke for visibility on light backgrounds
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        // Thin white stroke for visibility on dark backgrounds
+        ctx.strokeStyle = 'rgba(255, 255, 255, 1.0)';
+        ctx.lineWidth = 1;
         ctx.stroke();
     }
 
     private async autoDetectEdges(): Promise<void> {
         if (!this.baseCanvas || !this.quad) return;
-        this.startWorker(); // This is edge-worker, different from image-worker.
+        this.startWorker();
         this.pushHistory();
 
         const maxDim = 640;
@@ -319,7 +319,6 @@ export class PageEditor extends LitElement {
         this.queuePreview();
     }
 
-    // Edge detector worker (separate)
     private detectQuad(rgba: Uint8ClampedArray, w: number, h: number): Promise<Quad | null> {
         return new Promise((resolve) => {
             const wkr = new Worker(new URL('../lib/scan/edge-worker.ts', import.meta.url), {type: 'module'});
@@ -336,7 +335,6 @@ export class PageEditor extends LitElement {
         });
     }
 
-    // Image processor worker
     private startWorker() {
         if (this.worker) return;
         this.worker = new Worker(new URL('../lib/image/worker.ts', import.meta.url), {type: 'module'});
@@ -393,7 +391,6 @@ export class PageEditor extends LitElement {
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
             ctx.clearRect(0, 0, cw, ch);
 
-            // Center fit
             const s = Math.min(cw / res.width!, ch / res.height!);
             const dw = res.width! * s;
             const dh = res.height! * s;
@@ -403,7 +400,6 @@ export class PageEditor extends LitElement {
             res.bitmap.close();
 
         } catch (e) {
-            // ignore preview err
         } finally {
             if (token === this._previewToken) this.busy = false;
         }
@@ -456,7 +452,6 @@ export class PageEditor extends LitElement {
             if (!resM.ok) throw new Error(resM.error || 'Failed to encode master');
             if (!resT.ok) throw new Error(resT.error || 'Failed to encode thumb');
 
-            // Now safely access .bytes
             if (!resM.bytes) throw new Error('Missing master bytes');
             if (!resT.bytes) throw new Error('Missing thumb bytes');
 
@@ -473,6 +468,10 @@ export class PageEditor extends LitElement {
         } finally {
             this.busy = false;
         }
+    }
+
+    private onCancel(): void {
+        this.dispatchEvent(new CustomEvent('page-editor-cancel', {bubbles: true, composed: true}));
     }
 
     private mapQuadToSource(q: Quad): Quad {
@@ -579,10 +578,6 @@ export class PageEditor extends LitElement {
                 </div>
             </div>
         `;
-    }
-
-    private onCancel(): void {
-        this.dispatchEvent(new CustomEvent('page-editor-cancel', {bubbles: true, composed: true}));
     }
 }
 
