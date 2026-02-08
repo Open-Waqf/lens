@@ -6,6 +6,7 @@ import {getPlatformCaps} from '../services/platform';
 import {getFileStore} from '../services/filestore';
 import {shareOrDownload} from '../services/share';
 import {jsonFile, makeZip} from '../lib/zip';
+import {decryptBytesWithPassword, encryptBytesWithPassword, isEncryptedBackup} from '../lib/crypto/pbe';
 
 import {strFromU8, unzipSync} from 'fflate';
 
@@ -45,8 +46,15 @@ export class SettingsPage extends LitElement {
                 }
             }
 
-            const zip = makeZip(files);
-            await shareOrDownload(zip, `sahifah-backup-${new Date().toISOString().slice(0, 10)}.zip`, 'application/zip');
+            const zipBytes = makeZip(files);
+
+            // Ask user for password (simple version)
+            const pw = prompt('Set a password to encrypt your backup.\n\nIf you lose it, you cannot restore the backup.');
+            if (!pw) return;
+
+            const encrypted = await encryptBytesWithPassword(zipBytes, pw);
+
+            await shareOrDownload(encrypted, `sahifah-backup-${Date.now()}.slbk`, 'application/octet-stream');
             this.msg = 'Backup exported.';
         } catch (e) {
             this.err = (e as Error).message;
@@ -62,7 +70,18 @@ export class SettingsPage extends LitElement {
 
         try {
             const buf = new Uint8Array(await file.arrayBuffer());
-            const unz = unzipSync(buf);
+
+            // 1) decrypt if needed
+            const zipBytes = isEncryptedBackup(buf)
+                ? await (async () => {
+                    const pw = prompt('Enter backup password');
+                    if (!pw) throw new Error('Restore cancelled.');
+                    return await decryptBytesWithPassword(buf, pw);
+                })()
+                : buf;
+
+            // 2) now unzip
+            const unz = unzipSync(zipBytes);
 
             if (!unz['metadata.json']) throw new Error('metadata.json missing in backup');
 
@@ -71,15 +90,12 @@ export class SettingsPage extends LitElement {
 
             const store = getFileStore();
 
-            // write binaries first
             for (const [name, bytes] of Object.entries(unz)) {
                 if (name === 'metadata.json') continue;
-                // Only restore our doc paths
                 if (!name.startsWith('docs/')) continue;
                 await store.put(name, bytes, guessMime(name));
             }
 
-            // restore DB
             await db.transaction('rw', db.docs, db.pages, async () => {
                 await db.docs.clear();
                 await db.pages.clear();
@@ -94,6 +110,7 @@ export class SettingsPage extends LitElement {
             this.busy = false;
         }
     }
+
 
     render() {
         return html`
@@ -124,7 +141,7 @@ export class SettingsPage extends LitElement {
                                 ?disabled=${this.busy}
                                 @click=${this.exportBackup}
                         >
-                            Export backup (.zip)
+                            Export backup (.slbk)
                         </button>
 
                         <label class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 cursor-pointer disabled:opacity-60">
@@ -132,7 +149,7 @@ export class SettingsPage extends LitElement {
                             <input
                                     class="hidden"
                                     type="file"
-                                    accept=".zip,application/zip"
+                                    accept=".slbk,.zip,application/octet-stream,application/zip"
                                     ?disabled=${this.busy}
                                     @change=${(e: Event) => {
                                         const f = (e.target as HTMLInputElement).files?.[0];
