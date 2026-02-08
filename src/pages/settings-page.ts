@@ -10,6 +10,7 @@ import {jsonFile, makeZip} from '../lib/zip';
 import {decryptBytesWithPassword, encryptBytesWithPassword, isEncryptedBackup} from '../lib/crypto/pbe';
 import {opfsRemoveTree} from '../services/filestore/opfs-store';
 import {resetAllStorage} from '../services/reset-storage';
+import {ConfirmModal} from '../components/confirm-modal';
 
 import {strFromU8, unzipSync} from 'fflate';
 import type {DocRecord, PageRecord} from '../domain/types';
@@ -93,9 +94,12 @@ export class SettingsPage extends LitElement {
 
             const zipBytes = makeZip(files);
 
-            const pw = prompt(
-                'Set a password to encrypt your backup.\n\nIf you lose it, you cannot restore the backup.',
-            );
+            const pw = await ConfirmModal.prompt({
+                title: 'Encrypt Backup',
+                description: 'Enter a password to protect your files (Optional).',
+                placeholder: 'Password123',
+                confirm: 'Export'
+            });
             if (pw === null) return; // Cancelled
 
             const finalBytes = pw ? await encryptBytesWithPassword(zipBytes, pw) : zipBytes;
@@ -121,9 +125,13 @@ export class SettingsPage extends LitElement {
             // 1) decrypt if needed
             let zipBytes: Uint8Array = buf;
             if (isEncryptedBackup(buf)) {
-                const pw = prompt('Enter backup password');
+                const pw = await ConfirmModal.prompt({
+                    title: 'Unlock Backup',
+                    description: 'This backup is encrypted. Enter password:',
+                    placeholder: 'Password',
+                    confirm: 'Unlock'
+                });
                 if (!pw) throw new Error('Restore cancelled.');
-                // FIX: Type cast to fix TypeScript error
                 zipBytes = (await decryptBytesWithPassword(buf, pw)) as Uint8Array;
             }
 

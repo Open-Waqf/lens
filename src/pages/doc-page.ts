@@ -10,6 +10,8 @@ import {jsonFile, makeZip} from '../lib/zip';
 import {bytesToBlob} from '../lib/bytes';
 import {ScanRepo} from './scan/scan-repo';
 
+import {ConfirmModal} from '../components/confirm-modal';
+
 import '../components/page-editor';
 import type {PageEditorSaveDetail} from '../components/page-editor';
 import type {DocRecord, PageRecord} from '../domain/types';
@@ -199,7 +201,13 @@ export class DocPage extends LitElement {
 
     // FIX: Implemented manual deletion logic here instead of relying on missing Repo method
     private async deletePage(pageId: string): Promise<void> {
-        if (!confirm('Delete this page?')) return;
+        const ok = await ConfirmModal.ask({
+            title: 'Delete Page?',
+            description: 'This page will be permanently removed.',
+            confirm: 'Delete',
+            destructive: true
+        });
+        if (!ok) return;
         this.busy = true;
         try {
             // 1. Get Page Info
@@ -229,7 +237,13 @@ export class DocPage extends LitElement {
 
     private async deleteDoc(): Promise<void> {
         if (!this.doc) return;
-        if (!confirm('Delete this entire document?')) return;
+        const ok = await ConfirmModal.ask({
+            title: 'Delete Document?',
+            description: `Permanently delete "${this.doc.title}" and all ${this.pages.length} pages?`,
+            confirm: 'Delete All',
+            destructive: true
+        });
+        if (!ok) return;
         this.busy = true;
         try {
             await this.repo.deleteDocCompletely(this.doc.id);
@@ -430,10 +444,11 @@ export class DocPage extends LitElement {
                         ` : null}
 
                         <div class="flex-1 flex items-center justify-center p-4 overflow-hidden relative">
-                            ${this.viewerBusy ? html`<div class="text-slate-500">Loading...</div>` : this.viewerUrl ? html`
+                            ${this.viewerBusy ? html`
+                                <div class="text-slate-500">Loading...</div>` : this.viewerUrl ? html`
                                 <div class="relative shadow-2xl max-w-full max-h-full">
                                     <img src=${this.viewerUrl} class="block max-w-full max-h-full object-contain">
-                                    
+
                                     ${this.showOcrOverlay && currentPage?.words ? currentPage.words.map(w => html`
                                         <div class="absolute border border-red-500/50 bg-red-500/10 hover:bg-red-500/30"
                                              style="left: ${w.box[0] * 100}%; top: ${w.box[1] * 100}%; width: ${w.box[2] * 100}%; height: ${w.box[3] * 100}%;"
