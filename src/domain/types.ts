@@ -1,5 +1,4 @@
 export type DocId = string;
-// Add 'whiteboard'
 export type FilterMode = 'original' | 'grayscale' | 'bw' | 'magic' | 'whiteboard';
 
 export type OcrWord = {
@@ -17,6 +16,10 @@ export interface DocRecord {
     updatedAt: number;
     pageIds: string[];
     pdfPath?: string;
+
+    // NEW: The "Brain" memory
+    // Contains aggregated text from all pages for instant search
+    searchIndex?: string;
 }
 
 export interface PageRecord {

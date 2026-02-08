@@ -6,7 +6,7 @@ import type {PageEditorSaveDetail} from '../../components/page-editor';
 import {db} from '../../services/db';
 import {getFileStore} from '../../services/filestore';
 import {recognizeText} from '../../lib/ocr';
-import {bytesToBlob} from '../../lib/bytes';
+import {bytesToBlob} from "../../lib/bytes";
 
 export type DocStripItem = { id: string; thumbBytes: Uint8Array };
 
@@ -254,30 +254,38 @@ export class ScanRepo {
     }
 
     /**
-     * Runs OCR in the background and updates the PageRecord when done.
-     * Does NOT block the UI.
+     * Runs OCR in the background, saves words to the Page,
+     * AND updates the Document's search index.
      */
     private async runBackgroundOcr(pageId: string, bytes: Uint8Array, w: number, h: number) {
         try {
-            // Convert bytes to Blob for Tesseract
             const blob = bytesToBlob(bytes, 'image/jpeg');
 
-            // Run expensive OCR
+            // 1. Run Intelligence
             const words = await recognizeText(blob, w, h);
+            const fullText = words.map(w => w.text).join(' ');
 
-            // Update DB
-            await db.transaction('rw', db.pages, async () => {
+            // 2. Commit to Memory (DB)
+            await db.transaction('rw', db.pages, db.docs, async () => {
                 const p = await db.pages.get(pageId);
-                if (!p) return; // Page deleted while OCR ran
+                if (!p) return;
 
-                // Only update if the image hasn't changed since we started
-                // (Simple check: if we had a versioning field we'd check that,
-                // but checking if status is still 'pending' is a decent proxy)
                 if (p.ocrStatus === 'pending') {
+                    // Update Page
                     await db.pages.update(pageId, {
                         words,
                         ocrStatus: 'done'
                     });
+
+                    // Update Parent Document Index
+                    const doc = await db.docs.get(p.docId);
+                    if (doc) {
+                        // Append new text to existing index
+                        const prevIndex = doc.searchIndex ?? '';
+                        await db.docs.update(p.docId, {
+                            searchIndex: (prevIndex + ' ' + fullText).trim()
+                        });
+                    }
                 }
             });
         } catch (e) {
