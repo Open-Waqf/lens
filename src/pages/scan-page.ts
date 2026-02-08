@@ -1,27 +1,26 @@
 import {html, LitElement} from 'lit';
 import {customElement, query, state} from 'lit/decorators.js';
+import {keyed} from 'lit/directives/keyed.js';
 import {nanoid} from 'nanoid';
 
-import type {DocRecord, FilterMode, PageRecord} from '../domain/types';
+import type {DocRecord, PageRecord} from '../domain/types';
 import {db} from '../services/db';
 import {getFileStore} from '../services/filestore';
-import {processPhoto, type Rotation} from '../lib/image/pipeline';
 
 import type {DetectedQuad, Point, Quad} from '../lib/scan/quad';
 import {lerpQuad, quadArea} from '../lib/scan/quad';
 import {computeOutputSize, warpRgbaToCanvas} from '../lib/image/warp';
 import {takePendingImport} from '../services/pending-import';
 import {bytesToBlob} from '../lib/bytes';
+import {processPhoto} from '../lib/image/pipeline';
 
-import '../components/cropper';
-import type {Cropper} from '../components/cropper';
+import '../components/page-editor';
+import type {PageEditorSaveDetail} from '../components/page-editor';
 
 type ScanStage = 'idle' | 'camera' | 'edit';
 
 const APPEND_DOC_KEY = 'sahifah.appendToDocId';
 const AUTO_KEY = 'sahifah.autoCapture';
-
-// for Library highlight (implement on library-page)
 const JUST_SAVED_DOC_KEY = 'sahifah.justSavedDocId';
 
 type StripItem = { id: string; url: string; isNew: boolean };
@@ -38,41 +37,28 @@ export class ScanPage extends LitElement {
     @state() private stage: ScanStage = 'idle';
     @state() private stream: MediaStream | null = null;
 
-    // append-mode (when coming from doc page)
     @state() private appendToDocId: string | null = null;
     @state() private targetDocTitle: string | null = null;
 
-    // new scan mode current doc (created on first save OR multi-import)
     private currentDocId: string | null = null;
 
-    // doc UI
     @state() private docTitle: string | null = null;
     @state() private pageCount = 0;
     @state() private strip: StripItem[] = [];
 
-    // NEW labels (no schema changes)
     private newPageIds = new Set<string>();
-
-    // committed = user saved at least one page OR explicitly opened the doc
     private committed = false;
 
-    // editor state
     @state() private captured: Blob | null = null;
     @state() private editingPageId: string | null = null;
-    @state() private filter: FilterMode = 'original';
-    @state() private rotation: Rotation = 0;
 
     @state() private busy = false;
     @state() private error: string | null = null;
 
-    // auto capture
     @state() private autoCapture = readBool(AUTO_KEY, false);
 
-    // preview overlay (shows filter/rotate live)
-    @state() private previewUrl: string | null = null;
-    @state() private previewBusy = false;
-    private _previewTimer: number | null = null;
-    private _previewToken = 0;
+    // remount the editor to reset its internal state per page
+    @state() private editorKey = 0;
 
     // edge detection
     private worker: Worker | null = null;
@@ -97,21 +83,54 @@ export class ScanPage extends LitElement {
         return this.appendToDocId ?? this.currentDocId;
     }
 
-    private get hasDoc(): boolean {
-        return !!this.docId;
-    }
-
     private get hasPages(): boolean {
         return this.pageCount > 0;
     }
 
     private get exitLabel(): string {
         if (this.isAppend) return 'Back to document';
-        if (!this.hasDoc && !this.hasPages) return 'Cancel';
+        if (!this.docId && !this.hasPages) return 'Cancel';
         if (!this.committed && this.hasPages) return 'Discard';
         if (this.committed) return 'Back to library';
         return 'Cancel';
     }
+
+    // ----------------- lifecycle -----------------
+
+    async connectedCallback(): Promise<void> {
+        super.connectedCallback();
+        window.addEventListener('hashchange', this.onHashChange);
+
+        await this.loadMode();
+
+        const pending = takePendingImport();
+        if (pending?.length) {
+            this.appendToDocId = null;
+            this.targetDocTitle = null;
+
+            if (pending.length === 1) {
+                await this.openNewBlobInEditor(pending[0]);
+            } else {
+                await this.batchImport(pending);
+            }
+        }
+    }
+
+    disconnectedCallback(): void {
+        window.removeEventListener('hashchange', this.onHashChange);
+
+        if (this.appendToDocId) this.clearAppendKey();
+        void this.stopCamera();
+        this.stopDetector();
+        this.revokeStrip();
+        super.disconnectedCallback();
+    }
+
+    private onHashChange = () => {
+        // app-root routing ignores query, so scan-page must handle "#/scan?new=1"
+        const h = location.hash || '';
+        if (h.startsWith('#/scan')) void this.loadMode();
+    };
 
     // ----------------- storage helpers -----------------
 
@@ -132,41 +151,11 @@ export class ScanPage extends LitElement {
         }
     }
 
-    // ----------------- lifecycle -----------------
-
-    async connectedCallback(): Promise<void> {
-        super.connectedCallback();
-        await this.loadMode();
-
-        const pending = takePendingImport();
-        if (pending?.length) {
-            // pending import means "new document import" flow
-            this.appendToDocId = null;
-            this.targetDocTitle = null;
-
-            if (pending.length === 1) {
-                await this.openNewBlobInEditor(pending[0]);
-            } else {
-                await this.batchImport(pending);
-            }
-        }
-    }
-
-    disconnectedCallback(): void {
-        // never let append leak
-        if (this.appendToDocId) this.clearAppendKey();
-
-        void this.stopCamera();
-        this.stopDetector();
-        this.revokeStrip();
-        this.revokePreview();
-        super.disconnectedCallback();
-    }
+    // ----------------- mode/load -----------------
 
     private async loadMode(): Promise<void> {
         const params = this.getHashParams();
 
-        // Library/Menu Scan => force new document (avoid append leak)
         const forceNew = params.get('new') === '1';
         if (forceNew) this.clearAppendKey();
 
@@ -186,8 +175,7 @@ export class ScanPage extends LitElement {
             const doc = await db.docs.get(appendId);
             this.targetDocTitle = doc?.title ?? 'Document';
             this.docTitle = doc?.title ?? 'Document';
-            // append doc already exists (we never delete it on exit)
-            this.committed = true;
+            this.committed = true; // append is always "keep"
             await this.refreshDocInfo();
         } else {
             this.targetDocTitle = null;
@@ -196,7 +184,6 @@ export class ScanPage extends LitElement {
             this.revokeStrip();
         }
 
-        // optional import deep link
         if (params.get('import') === '1') {
             setTimeout(() => void this.pickFiles({multiple: true}), 0);
         }
@@ -207,7 +194,6 @@ export class ScanPage extends LitElement {
     private async exitScan(): Promise<void> {
         await this.stopCamera();
 
-        // append mode -> always return to doc (keep any saved pages)
         if (this.appendToDocId) {
             const id = this.appendToDocId;
             this.clearAppendKey();
@@ -216,11 +202,15 @@ export class ScanPage extends LitElement {
             return;
         }
 
-        // new scan mode
         const id = this.currentDocId;
 
         // nothing created
-        if (!id || (!this.hasPages && !this.hasDoc)) {
+        if (!id || (!this.hasPages && !this.docId)) {
+            // important: avoid stale "NEW" marker
+            try {
+                sessionStorage.removeItem(JUST_SAVED_DOC_KEY);
+            } catch {
+            }
             location.hash = '#/library';
             return;
         }
@@ -232,11 +222,18 @@ export class ScanPage extends LitElement {
 
             await this.deleteDocCompletely(id);
             this.resetAllState();
+
+            // avoid stuck highlight from older doc
+            try {
+                sessionStorage.removeItem(JUST_SAVED_DOC_KEY);
+            } catch {
+            }
+
             location.hash = '#/library';
             return;
         }
 
-        // committed => keep doc, go back to library and mark as "just saved"
+        // committed => keep doc, mark just-saved for library highlight
         if (this.committed && this.hasPages) {
             try {
                 sessionStorage.setItem(JUST_SAVED_DOC_KEY, id);
@@ -282,85 +279,28 @@ export class ScanPage extends LitElement {
         const id = this.docId;
         if (!id || this.pageCount === 0) return;
 
-        // in new mode: choosing to open doc = "keep it"
         if (!this.isAppend) this.committed = true;
 
-        // clear append key to avoid leakage
         this.clearAppendKey();
         this.appendToDocId = null;
 
         location.hash = `#/doc/${id}`;
     }
 
-    // ----------------- editor + preview -----------------
+    // ----------------- editor state -----------------
 
     private clearEditor() {
         this.captured = null;
         this.editingPageId = null;
-        this.rotation = 0;
-        this.filter = 'original';
-
-        this.revokePreview();
-        this.previewBusy = false;
-
-        if (this._previewTimer) window.clearTimeout(this._previewTimer);
-        this._previewTimer = null;
-
-        // invalidate in-flight preview
-        this._previewToken++;
-    }
-
-    private revokePreview() {
-        if (this.previewUrl) URL.revokeObjectURL(this.previewUrl);
-        this.previewUrl = null;
-    }
-
-    private queuePreview() {
-        if (!this.captured) return;
-        if (this._previewTimer) window.clearTimeout(this._previewTimer);
-        this._previewTimer = window.setTimeout(() => void this.updatePreview(), 140);
-    }
-
-    /**
-     * Preview is for filter/rotate visibility.
-     * Crop is NOT applied here to keep alignment with cropper.
-     * Crop is applied on save.
-     */
-    private async updatePreview(): Promise<void> {
-        if (!this.captured) return;
-        const token = ++this._previewToken;
-
-        this.previewBusy = true;
-        try {
-            const {master} = await processPhoto({
-                blob: this.captured,
-                rotation: this.rotation,
-                filter: this.filter
-            });
-
-            if (token !== this._previewToken) return;
-
-            const blob = bytesToBlob(master.bytes, 'image/jpeg');
-            const url = URL.createObjectURL(blob);
-
-            this.revokePreview();
-            this.previewUrl = url;
-        } catch {
-            // ignore
-        } finally {
-            if (token === this._previewToken) this.previewBusy = false;
-        }
+        // invalidate editor instance
+        this.editorKey++;
     }
 
     private async openNewBlobInEditor(blob: Blob): Promise<void> {
         this.captured = blob;
         this.editingPageId = null;
-        this.rotation = 0;
-        this.filter = 'original';
         this.stage = 'edit';
-
-        this.revokePreview();
-        this.queuePreview();
+        this.editorKey++;
     }
 
     private async openExistingPageInEditor(pageId: string): Promise<void> {
@@ -375,22 +315,84 @@ export class ScanPage extends LitElement {
 
             this.captured = blob;
             this.editingPageId = pageId;
-            this.rotation = 0;
-            this.filter = 'original';
             this.stage = 'edit';
-
-            this.revokePreview();
-            this.queuePreview();
+            this.editorKey++;
         } catch (e) {
             this.error = (e as Error).message;
         }
     }
 
-    private resetEdits(): void {
-        this.rotation = 0;
-        this.filter = 'original';
-        this.queuePreview();
-    }
+    private onEditorCancel = () => {
+        this.clearEditor();
+        this.stage = this.stream ? 'camera' : 'idle';
+    };
+
+    private onEditorSave = async (ev: CustomEvent<PageEditorSaveDetail>) => {
+        this.busy = true;
+        this.error = null;
+
+        try {
+            const {master, thumb} = ev.detail;
+
+            const docId = await this.ensureDocId();
+            const store = getFileStore();
+
+            const doc = await db.docs.get(docId);
+            if (!doc) throw new Error('Doc missing');
+
+            if (this.editingPageId) {
+                const page = await db.pages.get(this.editingPageId);
+                if (!page) throw new Error('Page missing');
+
+                await store.put(page.imagePath, master.bytes, 'image/jpeg');
+                await store.put(page.thumbPath, thumb.bytes, 'image/jpeg');
+
+                await db.pages.put({
+                    ...page,
+                    width: master.width,
+                    height: master.height,
+                    rotation: 0
+                });
+
+                this.newPageIds.delete(this.editingPageId);
+            } else {
+                const pageId = nanoid();
+
+                const imagePath = `docs/${docId}/pages/${pageId}.jpg`;
+                const thumbPath = `docs/${docId}/thumbs/${pageId}.jpg`;
+
+                await store.put(imagePath, master.bytes, 'image/jpeg');
+                await store.put(thumbPath, thumb.bytes, 'image/jpeg');
+
+                await db.pages.add({
+                    id: pageId,
+                    docId,
+                    imagePath,
+                    thumbPath,
+                    width: master.width,
+                    height: master.height,
+                    rotation: 0,
+                    createdAt: Date.now()
+                } as PageRecord);
+
+                doc.pageIds = [...doc.pageIds, pageId];
+                this.newPageIds.add(pageId);
+            }
+
+            doc.updatedAt = Date.now();
+            await db.docs.put(doc);
+
+            this.committed = true;
+
+            this.clearEditor();
+            await this.refreshDocInfo();
+            this.stage = this.stream ? 'camera' : 'idle';
+        } catch (e) {
+            this.error = (e as Error).message;
+        } finally {
+            this.busy = false;
+        }
+    };
 
     // ----------------- doc bookkeeping -----------------
 
@@ -446,8 +448,7 @@ export class ScanPage extends LitElement {
             const p = pageMap.get(id);
             if (!p) continue;
             const bytes = await store.get(p.thumbPath);
-            const blob = bytesToBlob(bytes, 'image/jpeg');
-            const url = URL.createObjectURL(blob);
+            const url = URL.createObjectURL(bytesToBlob(bytes, 'image/jpeg'));
             items.push({id: p.id, url, isNew: this.newPageIds.has(p.id)});
         }
 
@@ -463,10 +464,7 @@ export class ScanPage extends LitElement {
         if (this.stream) return;
 
         navigator.mediaDevices
-            .getUserMedia({
-                video: {facingMode: {ideal: 'environment'}},
-                audio: false
-            })
+            .getUserMedia({video: {facingMode: {ideal: 'environment'}}, audio: false})
             .then(async (s) => {
                 this.stream = s;
                 await this.updateComplete;
@@ -587,7 +585,7 @@ export class ScanPage extends LitElement {
             const importedPageIds: string[] = [];
 
             for (const file of files) {
-                const {master, thumb} = await processPhoto({blob: file, rotation: 0, filter: 'original'});
+                const {master, thumb} = await processPhoto({blob: file, rotation: 0, filter: 'original'} as any);
 
                 const pageId = nanoid();
                 importedPageIds.push(pageId);
@@ -618,93 +616,11 @@ export class ScanPage extends LitElement {
 
             await this.refreshDocInfo();
 
-            // open first NEW page for review/edit
             if (importedPageIds.length > 0) {
                 await this.openExistingPageInEditor(importedPageIds[0]);
             } else {
                 this.stage = this.stream ? 'camera' : 'idle';
             }
-        } catch (e) {
-            this.error = (e as Error).message;
-        } finally {
-            this.busy = false;
-        }
-    }
-
-    // ----------------- save -----------------
-
-    private async savePage(): Promise<void> {
-        if (!this.captured) return;
-
-        this.busy = true;
-        this.error = null;
-
-        try {
-            const docId = await this.ensureDocId();
-            const store = getFileStore();
-
-            await this.updateComplete;
-            const cropper = this.renderRoot.querySelector('sl-cropper') as Cropper | null;
-            const crop = cropper ? await cropper.getCropRectPixels() : null;
-
-            const {master, thumb} = await processPhoto({
-                blob: this.captured,
-                crop: crop ?? undefined,
-                rotation: this.rotation,
-                filter: this.filter
-            });
-
-            const doc = await db.docs.get(docId);
-            if (!doc) throw new Error('Doc missing');
-
-            if (this.editingPageId) {
-                const page = await db.pages.get(this.editingPageId);
-                if (!page) throw new Error('Page missing');
-
-                await store.put(page.imagePath, master.bytes, 'image/jpeg');
-                await store.put(page.thumbPath, thumb.bytes, 'image/jpeg');
-
-                await db.pages.put({
-                    ...page,
-                    width: master.width,
-                    height: master.height,
-                    rotation: 0
-                });
-
-                this.newPageIds.delete(this.editingPageId);
-            } else {
-                const pageId = nanoid();
-                const imagePath = `docs/${docId}/pages/${pageId}.jpg`;
-                const thumbPath = `docs/${docId}/thumbs/${pageId}.jpg`;
-
-                await store.put(imagePath, master.bytes, 'image/jpeg');
-                await store.put(thumbPath, thumb.bytes, 'image/jpeg');
-
-                await db.pages.add({
-                    id: pageId,
-                    docId,
-                    imagePath,
-                    thumbPath,
-                    width: master.width,
-                    height: master.height,
-                    rotation: 0,
-                    createdAt: Date.now()
-                } as PageRecord);
-
-                doc.pageIds = [...doc.pageIds, pageId];
-            }
-
-            doc.updatedAt = Date.now();
-            await db.docs.put(doc);
-
-            // user committed work
-            this.committed = true;
-
-            this.clearEditor();
-            await this.refreshDocInfo();
-
-            // back to scan view (banner+strip clarify same doc)
-            this.stage = this.stream ? 'camera' : 'idle';
         } catch (e) {
             this.error = (e as Error).message;
         } finally {
@@ -729,13 +645,7 @@ export class ScanPage extends LitElement {
             const w = Number(msg.width ?? 0);
             const h = Number(msg.height ?? 0);
 
-            const det: DetectedQuad = {
-                quad: quad ? (quad as any) : null,
-                confidence,
-                width: w,
-                height: h
-            };
-
+            const det: DetectedQuad = {quad: quad ? (quad as any) : null, confidence, width: w, height: h};
             this.lastDetect = det;
 
             if (det.quad && det.confidence >= 0.35) {
@@ -817,6 +727,7 @@ export class ScanPage extends LitElement {
         const conf = det.confidence;
         ctx.lineWidth = 6;
         ctx.strokeStyle = conf >= 0.65 ? 'rgba(16,185,129,0.9)' : 'rgba(234,179,8,0.9)';
+
         ctx.beginPath();
         ctx.moveTo(q[0].x * sx, q[0].y * sy);
         ctx.lineTo(q[1].x * sx, q[1].y * sy);
@@ -877,7 +788,6 @@ export class ScanPage extends LitElement {
     // ----------------- UI helpers -----------------
 
     private renderBanner() {
-        // append: always show banner; new: show only after at least 1 page exists
         if (this.isAppend) {
             const title = this.docTitle ?? this.targetDocTitle ?? 'Document';
             return html`
@@ -892,11 +802,13 @@ export class ScanPage extends LitElement {
                                 class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
                                 ?disabled=${this.pageCount === 0}
                                 @click=${() => this.openDocument()}
-                        >Open</button>
+                        >Open
+                        </button>
                         <button
                                 class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
                                 @click=${() => void this.exitScan()}
-                        >${this.exitLabel}</button>
+                        >${this.exitLabel}
+                        </button>
                     </div>
                 </div>
             `;
@@ -917,11 +829,13 @@ export class ScanPage extends LitElement {
                             class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
                             ?disabled=${this.pageCount === 0}
                             @click=${() => this.openDocument()}
-                    >Open</button>
+                    >Open
+                    </button>
                     <button
                             class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
                             @click=${() => void this.exitScan()}
-                    >${this.exitLabel}</button>
+                    >${this.exitLabel}
+                    </button>
                 </div>
             </div>
         `;
@@ -935,10 +849,13 @@ export class ScanPage extends LitElement {
             <div class="flex gap-2 overflow-x-auto py-1">
                 ${this.strip.map(it => html`
                     <button
-                            class="relative shrink-0 rounded-lg border ${selected === it.id ? 'border-emerald-500' : 'border-slate-800'} overflow-hidden"
+                            class="relative shrink-0 rounded-lg border ${selected === it.id ? 'border-emerald-500' : 'border-slate-800'} overflow-hidden ${it.isNew ? '' : 'opacity-60'}"
                             style="width: 76px; height: 96px;"
-                            title="Edit page"
-                            @click=${it.isNew ? () => void this.openExistingPageInEditor(it.id) : undefined}
+                            title=${it.isNew ? 'Edit page' : 'Locked (already saved)'}
+                            @click=${() => {
+                                if (!it.isNew) return;
+                                void this.openExistingPageInEditor(it.id);
+                            }}
                     >
                         <img src=${it.url} class="w-full h-full object-cover" alt="thumb"/>
                         ${it.isNew ? html`
@@ -950,6 +867,8 @@ export class ScanPage extends LitElement {
         `;
     }
 
+    // ----------------- render -----------------
+
     render() {
         return html`
             <div class="space-y-4">
@@ -960,13 +879,13 @@ export class ScanPage extends LitElement {
                                 type="checkbox"
                                 .checked=${this.autoCapture}
                                 @change=${(e: Event) => {
-            const v = (e.target as HTMLInputElement).checked;
-            this.autoCapture = v;
-            try {
-                localStorage.setItem(AUTO_KEY, v ? '1' : '0');
-            } catch {
-            }
-        }}
+                                    const v = (e.target as HTMLInputElement).checked;
+                                    this.autoCapture = v;
+                                    try {
+                                        localStorage.setItem(AUTO_KEY, v ? '1' : '0');
+                                    } catch {
+                                    }
+                                }}
                         />
                         Auto-capture
                     </label>
@@ -989,18 +908,21 @@ export class ScanPage extends LitElement {
                             <button
                                     class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold"
                                     @click=${() => this.beginCameraFromGesture()}
-                            >Open camera</button>
+                            >Open camera
+                            </button>
 
                             <button
                                     class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
                                     ?disabled=${this.busy}
                                     @click=${() => this.pickFiles({multiple: true})}
-                            >Import</button>
+                            >Import
+                            </button>
 
                             <button
                                     class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800"
                                     @click=${() => void this.exitScan()}
-                            >${this.exitLabel}</button>
+                            >${this.exitLabel}
+                            </button>
                         </div>
                     </div>
                 ` : null}
@@ -1017,114 +939,51 @@ export class ScanPage extends LitElement {
                                     class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold disabled:opacity-60"
                                     ?disabled=${this.busy}
                                     @click=${() => void this.capturePhoto(false)}
-                            >Capture</button>
+                            >Capture
+                            </button>
 
                             <button
                                     class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
                                     ?disabled=${this.busy}
                                     @click=${() => this.pickFiles({multiple: true})}
-                            >Import</button>
+                            >Import
+                            </button>
 
                             <button
                                     class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800"
                                     @click=${() => void this.exitScan()}
-                            >${this.exitLabel}</button>
+                            >${this.exitLabel}
+                            </button>
                         </div>
 
                         <button
                                 class="text-sm text-slate-300 hover:underline"
                                 @click=${async () => {
-            await this.stopCamera();
-            this.stage = 'idle';
-        }}
-                        >← Back</button>
+                                    await this.stopCamera();
+                                    this.stage = 'idle';
+                                }}
+                        >← Back
+                        </button>
                     </div>
                 ` : null}
 
                 ${this.stage === 'edit' ? html`
                     <div class="space-y-3">
-                        <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 flex items-center justify-between gap-3">
-                            <div>
-                                <div class="text-sm font-medium text-slate-200">Edit page</div>
-                                <div class="text-xs text-slate-500">
-                                    Filter replaces previous. Rotate accumulates.${this.previewBusy ? ' Updating…' : ''}
-                                </div>
-                            </div>
-                            <button
-                                    class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
-                                    ?disabled=${this.busy}
-                                    @click=${() => this.resetEdits()}
-                            >Reset</button>
-                        </div>
+                        ${keyed(this.editorKey, html`
+                            <page-editor
+                                    .blob=${this.captured!}
+                                    @page-editor-save=${this.onEditorSave}
+                                    @page-editor-cancel=${this.onEditorCancel}
+                            ></page-editor>
+                        `)}
 
-                        <div class="relative rounded-xl overflow-hidden border border-slate-800 bg-black">
-                            <sl-cropper .blob=${this.captured!}></sl-cropper>
-
-                            ${this.previewUrl ? html`
-                                <img
-                                        src=${this.previewUrl}
-                                        class="absolute inset-0 w-full h-full object-contain pointer-events-none"
-                                        alt="preview"
-                                />
-                            ` : null}
-
-                            ${this.previewBusy ? html`
-                                <div class="absolute bottom-2 right-2 text-[11px] px-2 py-1 rounded-full bg-slate-900/80 border border-slate-700 text-slate-200 pointer-events-none">
-                                    Updating…
-                                </div>
-                            ` : null}
-                        </div>
-
-                        <div class="flex flex-wrap gap-2 items-center">
-                            <label class="text-sm text-slate-300">Filter</label>
-                            <select
-                                    class="bg-slate-900 border border-slate-700 rounded-lg px-2 py-2 text-sm"
-                                    .value=${this.filter}
-                                    @change=${(e: Event) => {
-            this.filter = (e.target as HTMLSelectElement).value as FilterMode;
-            this.queuePreview();
-        }}
-                            >
-                                <option value="original">Original</option>
-                                <option value="grayscale">Grayscale</option>
-                                <option value="bw">B&W (adaptive)</option>
-                            </select>
-
-                            <button
-                                    class="ml-auto px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm"
-                                    @click=${() => {
-            this.rotation = ((this.rotation + 90) % 360) as any;
-            this.queuePreview();
-        }}
-                            >Rotate 90°</button>
-                        </div>
-
-                        <div class="flex gap-2">
-                            <button
-                                    class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold disabled:opacity-60"
-                                    ?disabled=${this.busy}
-                                    @click=${() => void this.savePage()}
-                            >${this.busy ? 'Saving…' : 'Save page'}</button>
-
-                            <button
-                                    class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
-                                    ?disabled=${this.busy}
-                                    @click=${() => {
-            // discard current editor changes (doc stays visible via banner/strip)
-            this.clearEditor();
-            this.stage = this.stream ? 'camera' : 'idle';
-        }}
-                            >Back</button>
-
+                        <div class="flex justify-end">
                             <button
                                     class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 disabled:opacity-60"
                                     ?disabled=${this.busy}
                                     @click=${() => void this.exitScan()}
-                            >${this.exitLabel}</button>
-                        </div>
-
-                        <div class="text-xs text-slate-500">
-                            Tip: After saving, you can add more pages (camera/import) and tap thumbnails above to edit.
+                            >${this.exitLabel}
+                            </button>
                         </div>
                     </div>
                 ` : null}

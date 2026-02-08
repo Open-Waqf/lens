@@ -18,6 +18,7 @@ export async function processPhoto(opts: {
     thumb: { bytes: Uint8Array; width: number; height: number };
 }> {
     const id = nanoid();
+
     const req: WorkerRequest = {
         id,
         blob: opts.blob,
