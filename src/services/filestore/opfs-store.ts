@@ -113,3 +113,55 @@ export class OPFSFileStore implements FileStore {
         }
     }
 }
+
+// ---- Extra OPFS helpers (used for GC + reset). ----
+
+export async function opfsRemoveEntry(path: string, opts?: { recursive?: boolean }): Promise<void> {
+    const root = await getRootDir();
+    const parts = splitPath(path);
+    const name = parts.pop();
+    if (!name) return;
+
+    try {
+        const dir = await ensureDir(root, parts, false);
+        await dir.removeEntry(name, {recursive: !!opts?.recursive});
+    } catch (e) {
+        if (isNotFound(e)) return;
+        throw e;
+    }
+}
+
+export async function opfsRemoveTree(prefixDir: string): Promise<void> {
+    // prefixDir is like "docs" or "exports"
+    await opfsRemoveEntry(prefixDir, {recursive: true});
+}
+
+async function listFilesRecursive(dir: FileSystemDirectoryHandle, prefix: string, out: string[]): Promise<void> {
+    for await (const [name, handle] of (dir as any).entries()) {
+        if (handle.kind === 'file') {
+            out.push(prefix ? `${prefix}/${name}` : name);
+        } else if (handle.kind === 'directory') {
+            const nextPrefix = prefix ? `${prefix}/${name}` : name;
+            await listFilesRecursive(handle as FileSystemDirectoryHandle, nextPrefix, out);
+        }
+    }
+}
+
+export async function opfsListFiles(prefixDir = ''): Promise<string[]> {
+    const root = await getRootDir();
+    const out: string[] = [];
+    if (!prefixDir) {
+        await listFilesRecursive(root, '', out);
+        return out;
+    }
+
+    const parts = splitPath(prefixDir);
+    try {
+        const dir = await ensureDir(root, parts, false);
+        await listFilesRecursive(dir, prefixDir.replace(/\/+$/, ''), out);
+        return out;
+    } catch (e) {
+        if (isNotFound(e)) return [];
+        throw e;
+    }
+}

@@ -50,6 +50,10 @@ export class ScanPage extends LitElement {
     @state() private editingPageId: string | null = null;
     @state() private editorKey = 0;
 
+    @state() private importReviewTotal = 0;
+    @state() private importReviewIndex = 0;
+    private importReviewQueue: string[] = [];
+
     @state() private autoCapture = readBool(AUTO_KEY, false);
 
     @state() private videoW = 0;
@@ -99,6 +103,7 @@ export class ScanPage extends LitElement {
         void this.stopCamera();
         this.stopDetector();
         this.revokeStrip();
+        this.clearImportReview();
 
         super.disconnectedCallback();
     }
@@ -118,6 +123,8 @@ export class ScanPage extends LitElement {
 
         this.clearEditor();
         this.newPageIds.clear();
+
+        this.clearImportReview();
 
         this.lastDetect = null;
         this.smoothedQuad = null;
@@ -207,6 +214,13 @@ export class ScanPage extends LitElement {
         this.editorKey++;
     }
 
+
+    private clearImportReview() {
+        this.importReviewQueue = [];
+        this.importReviewTotal = 0;
+        this.importReviewIndex = 0;
+    }
+
     private async openNewBlobInEditor(blob: Blob): Promise<void> {
         this.captured = blob;
         this.editingPageId = null;
@@ -230,6 +244,24 @@ export class ScanPage extends LitElement {
     }
 
     private onEditorCancel = () => {
+        // If we're in an import-review flow, "Back" should not silently drop the whole review.
+        if (this.importReviewQueue.length > 0) {
+            const remaining = this.importReviewQueue.length;
+            const ok = confirm(
+                `Stop reviewing imported pages?
+
+${remaining} page(s) will remain unedited (kept as-is).`,
+            );
+            if (!ok) return;
+            this.clearImportReview();
+        } else if (this.captured) {
+            const msg = this.editingPageId
+                ? 'Discard edits to this page? Your changes will be lost.'
+                : 'Discard this capture? Your work will be lost.';
+            const ok = confirm(msg);
+            if (!ok) return;
+        }
+
         this.clearEditor();
         this.session.setStage(this.camera.isRunning ? 'camera' : 'idle');
     };
@@ -242,19 +274,34 @@ export class ScanPage extends LitElement {
             const {master, thumb} = ev.detail;
             const docId = await this.ensureDocId();
 
-            if (this.editingPageId) {
-                await this.repo.updateExistingPage(this.editingPageId, master, thumb);
-                this.newPageIds.delete(this.editingPageId);
+            const editedId = this.editingPageId;
+
+            if (editedId) {
+                await this.repo.updateExistingPage(editedId, master, thumb);
+                this.newPageIds.delete(editedId);
             } else {
                 const pageId = await this.repo.addNewPage(docId, master, thumb);
                 this.newPageIds.add(pageId);
             }
 
             this.session.markCommitted();
-
-            this.clearEditor();
             await this.refreshDocInfo();
 
+            // If we're reviewing a batch import, advance to the next page instead of dropping back to camera.
+            if (editedId && this.importReviewQueue.length > 0 && this.importReviewQueue[0] === editedId) {
+                this.importReviewQueue.shift();
+                const nextId = this.importReviewQueue[0] ?? null;
+
+                if (nextId) {
+                    this.importReviewIndex = this.importReviewTotal - this.importReviewQueue.length + 1;
+                    await this.openExistingPageInEditor(nextId);
+                    return;
+                } else {
+                    this.clearImportReview();
+                }
+            }
+
+            this.clearEditor();
             this.session.setStage(this.camera.isRunning ? 'camera' : 'idle');
         } catch (e) {
             this.error = (e as Error).message ?? String(e);
@@ -428,8 +475,14 @@ export class ScanPage extends LitElement {
 
             await this.refreshDocInfo();
 
-            if (importedPageIds.length > 0) await this.openExistingPageInEditor(importedPageIds[0]);
-            else this.session.setStage(this.camera.isRunning ? 'camera' : 'idle');
+            if (importedPageIds.length > 0) {
+                this.importReviewQueue = importedPageIds.slice();
+                this.importReviewTotal = importedPageIds.length;
+                this.importReviewIndex = 1;
+                await this.openExistingPageInEditor(importedPageIds[0]);
+            } else {
+                this.session.setStage(this.camera.isRunning ? 'camera' : 'idle');
+            }
         } catch (e) {
             this.error = (e as Error).message ?? String(e);
         } finally {
@@ -440,14 +493,9 @@ export class ScanPage extends LitElement {
     private startDetector(): void {
         if (this.worker) return;
 
-        // Bump token so any late messages from a previous worker/loop are ignored.
-        const token = ++this.detectLoopToken;
-
         this.worker = new Worker(new URL('../lib/scan/edge-worker.ts', import.meta.url), {type: 'module'});
 
         this.worker.onmessage = (ev: MessageEvent<any>) => {
-            if (token !== this.detectLoopToken) return;
-
             const msg = ev.data;
             if (msg?.type !== 'result') return;
 
@@ -483,6 +531,9 @@ export class ScanPage extends LitElement {
         this.offscreen = document.createElement('canvas');
         this.offCtx = this.offscreen.getContext('2d', {willReadFrequently: true});
 
+        // Dynamic loop (uses governor intervalMs each tick)
+        const token = ++this.detectLoopToken;
+
         const tick = () => {
             if (token !== this.detectLoopToken) return;
             if (!this.worker) return;
@@ -509,18 +560,12 @@ export class ScanPage extends LitElement {
     }
 
     private stopDetector(): void {
-        // cancel loop + ignore any late worker messages
+        // cancel loop
         this.detectLoopToken++;
-
-        if (this.detectLoopTimer != null) {
-            window.clearTimeout(this.detectLoopTimer);
-        }
+        if (this.detectLoopTimer) window.clearTimeout(this.detectLoopTimer);
         this.detectLoopTimer = null;
 
-        if (this.worker) {
-            this.worker.onmessage = null;
-            this.worker.terminate();
-        }
+        this.worker?.terminate();
         this.worker = null;
 
         this.offscreen = null;
@@ -533,6 +578,7 @@ export class ScanPage extends LitElement {
         this.stableSince = 0;
         this.cooldownUntil = 0;
     }
+
 
     private grabAndDetect(): void {
         if (!this.worker || !this.offCtx || !this.offscreen) return;
@@ -744,6 +790,25 @@ export class ScanPage extends LitElement {
                                         Open camera
                                     </button>
 
+                                    ${this.camera.torchSupported
+                                            ? html`
+                                                <button
+                                                        class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
+                                                        ?disabled=${this.busy || !this.camera.isRunning}
+                                                        @click=${async () => {
+                                                            this.error = null;
+                                                            try {
+                                                                await this.camera.toggleTorch();
+                                                                this.requestUpdate();
+                                                            } catch (e) {
+                                                                this.error = (e as Error).message ?? String(e);
+                                                            }
+                                                        }}
+                                                >
+                                                    ${this.camera.torchOn ? 'Torch on' : 'Torch off'}
+                                                </button>`
+                                            : null}
+
                                     <button
                                             class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
                                             ?disabled=${this.busy}
@@ -819,6 +884,16 @@ export class ScanPage extends LitElement {
                 ${stage === 'edit'
                         ? html`
                             <div class="space-y-3">
+                                ${this.importReviewTotal > 0
+                                        ? html`
+                                            <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 text-slate-200 flex items-center justify-between gap-3">
+                                                <div class="text-sm">
+                                                    Reviewing imported pages
+                                                    <span class="text-slate-400">${this.importReviewIndex}/${this.importReviewTotal}</span>
+                                                </div>
+                                                <div class="text-xs text-slate-400">Save to continue</div>
+                                            </div>`
+                                        : null}
                                 ${keyed(
                                         this.editorKey,
                                         html`

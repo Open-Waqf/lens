@@ -38,6 +38,10 @@ export class ScanRepo {
         return doc;
     }
 
+    /**
+     * Returns a lightweight strip for the Scan UI.
+     * Important: must be O(limit), not O(total pages).
+     */
     async getDocStrip(docId: string, limit = 16): Promise<DocStripInfo | null> {
         const doc = await db.docs.get(docId);
         if (!doc) return null;
@@ -47,14 +51,13 @@ export class ScanRepo {
             return {id: doc.id, title: doc.title, pageCount: doc.pageIds.length, items: []};
         }
 
-        // Fetch all pages for doc and map by id
-        const pages = await db.pages.where('docId').equals(docId).toArray();
-        const pageMap = new Map(pages.map((p) => [p.id, p]));
+        // Fetch only the needed page records (primary key lookup).
+        const pages = await db.pages.bulkGet(ids);
         const store = getFileStore();
 
         const items: DocStripItem[] = [];
-        for (const id of ids) {
-            const p = pageMap.get(id);
+        for (let i = 0; i < ids.length; i++) {
+            const p = pages[i];
             if (!p) continue;
             const thumbBytes = await store.get(p.thumbPath);
             items.push({id: p.id, thumbBytes});
@@ -71,42 +74,67 @@ export class ScanRepo {
         return await store.get(page.imagePath);
     }
 
-    async addNewPage(docId: string, master: PageEditorSaveDetail['master'], thumb: PageEditorSaveDetail['thumb']): Promise<string> {
+    async addNewPage(
+        docId: string,
+        master: PageEditorSaveDetail['master'],
+        thumb: PageEditorSaveDetail['thumb'],
+    ): Promise<string> {
         const store = getFileStore();
         const pageId = nanoid();
 
         const imagePath = `docs/${docId}/pages/${pageId}.jpg`;
         const thumbPath = `docs/${docId}/thumbs/${pageId}.jpg`;
 
-        await db.transaction('rw', db.docs, db.pages, async () => {
-            const doc = await db.docs.get(docId);
-            if (!doc) throw new Error('Doc missing');
+        try {
+            await db.transaction('rw', db.docs, db.pages, async () => {
+                const doc = await db.docs.get(docId);
+                if (!doc) throw new Error('Doc missing');
 
-            await store.put(imagePath, master.bytes, 'image/jpeg');
-            await store.put(thumbPath, thumb.bytes, 'image/jpeg');
+                // NOTE: OPFS writes inside a DB transaction can cause "ghost files"
+                // if the DB transaction later fails. We mitigate this with:
+                // 1) best-effort rollback on exception (below)
+                // 2) startup GC (services/opfs-gc.ts)
+                await store.put(imagePath, master.bytes, 'image/jpeg');
+                await store.put(thumbPath, thumb.bytes, 'image/jpeg');
 
-            const page: PageRecord = {
-                id: pageId,
-                docId,
-                imagePath,
-                thumbPath,
-                width: master.width,
-                height: master.height,
-                rotation: 0,
-                createdAt: Date.now(),
-            } as any;
+                const page: PageRecord = {
+                    id: pageId,
+                    docId,
+                    imagePath,
+                    thumbPath,
+                    width: master.width,
+                    height: master.height,
+                    rotation: 0,
+                    createdAt: Date.now(),
+                } as any;
 
-            await db.pages.add(page);
+                await db.pages.add(page);
 
-            doc.pageIds = [...doc.pageIds, pageId];
-            doc.updatedAt = Date.now();
-            await db.docs.put(doc);
-        });
+                doc.pageIds = [...doc.pageIds, pageId];
+                doc.updatedAt = Date.now();
+                await db.docs.put(doc);
+            });
+        } catch (e) {
+            // best-effort OPFS cleanup if DB transaction failed
+            try {
+                await store.del(imagePath);
+            } catch {
+            }
+            try {
+                await store.del(thumbPath);
+            } catch {
+            }
+            throw e;
+        }
 
         return pageId;
     }
 
-    async updateExistingPage(pageId: string, master: PageEditorSaveDetail['master'], thumb: PageEditorSaveDetail['thumb']): Promise<void> {
+    async updateExistingPage(
+        pageId: string,
+        master: PageEditorSaveDetail['master'],
+        thumb: PageEditorSaveDetail['thumb'],
+    ): Promise<void> {
         const store = getFileStore();
 
         await db.transaction('rw', db.docs, db.pages, async () => {
@@ -133,8 +161,20 @@ export class ScanRepo {
 
     async deleteDocCompletely(docId: string): Promise<void> {
         const store = getFileStore();
-        const pages = await db.pages.where('docId').equals(docId).toArray();
 
+        // Read paths first (so we can delete DB first for consistency)
+        const [doc, pages] = await Promise.all([
+            db.docs.get(docId),
+            db.pages.where('docId').equals(docId).toArray(),
+        ]);
+
+        await db.transaction('rw', db.docs, db.pages, async () => {
+            await db.pages.where('docId').equals(docId).delete();
+            await db.docs.delete(docId);
+        });
+
+        // Best-effort delete blobs after DB deletion.
+        // Any leftovers are handled by startup OPFS GC.
         for (const p of pages) {
             try {
                 await store.del(p.imagePath);
@@ -145,10 +185,11 @@ export class ScanRepo {
             } catch {
             }
         }
-
-        await db.transaction('rw', db.docs, db.pages, async () => {
-            await db.pages.where('docId').equals(docId).delete();
-            await db.docs.delete(docId);
-        });
+        if (doc?.pdfPath) {
+            try {
+                await store.del(doc.pdfPath);
+            } catch {
+            }
+        }
     }
 }
