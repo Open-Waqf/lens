@@ -7,6 +7,7 @@ import '../pages/doc-page';
 import '../pages/settings-page';
 
 import {getPersistenceStatus, type PersistenceStatus} from '../services/storage-persistence';
+import {db} from '../services/db';
 
 type Route =
     | { name: 'library' }
@@ -37,6 +38,8 @@ export class AppRoot extends LitElement {
     @state() private route: Route = parseHash();
     @state() private fatal: Fatal | null = null;
     @state() private persist: PersistenceStatus | null = null;
+    @state() private resetting = false;
+    @state() private resetErr: string | null = null;
 
     connectedCallback(): void {
         super.connectedCallback();
@@ -65,6 +68,20 @@ export class AppRoot extends LitElement {
         super.disconnectedCallback();
     }
 
+    protected override performUpdate(): void {
+        try {
+            super.performUpdate();
+        } catch (e) {
+            const err = e as Error;
+            const message = err?.message ?? String(e);
+            const detail = err?.stack ? String(err.stack) : undefined;
+            console.error('app-root render error', e);
+            this.fatal = {message, detail};
+            // ensure we re-render with the fallback UI
+            this.requestUpdate();
+        }
+    }
+
     private _onHash = () => {
         this.route = parseHash();
     };
@@ -82,6 +99,87 @@ export class AppRoot extends LitElement {
         const detail = (reason as Error)?.stack ? String((reason as Error).stack) : undefined;
         this.fatal = {message, detail};
     };
+
+    private async resetStorage(): Promise<void> {
+        if (this.resetting) return;
+
+        const ok = confirm(
+            'Reset storage will delete ALL documents stored on this device (Dexie + OPFS) and clear Sahifah Lens settings. Continue?',
+        );
+        if (!ok) return;
+
+        this.resetting = true;
+        this.resetErr = null;
+
+        try {
+            // 1) IndexedDB (Dexie)
+            try {
+                db.close();
+                await db.delete();
+            } catch (e) {
+                console.warn('Failed to delete IndexedDB', e);
+            }
+
+            // 2) OPFS (best effort)
+            try {
+                await this.wipeOPFSRoot();
+            } catch (e) {
+                console.warn('Failed to wipe OPFS', e);
+            }
+
+            // 3) local/session storage (only our keys)
+            this.clearAppStorageKeys();
+
+            // 4) Cache Storage (best effort)
+            try {
+                if ('caches' in window) {
+                    const keys = await caches.keys();
+                    await Promise.all(keys.map((k) => caches.delete(k)));
+                }
+            } catch {
+                // ignore
+            }
+
+            // Back to a known-good route + reload
+            location.hash = '#/library';
+            location.reload();
+        } catch (e) {
+            this.resetErr = (e as Error)?.message ?? String(e);
+        } finally {
+            this.resetting = false;
+        }
+    }
+
+    private clearAppStorageKeys(): void {
+        const clearPrefix = (s: Storage, prefix: string) => {
+            try {
+                for (let i = s.length - 1; i >= 0; i--) {
+                    const k = s.key(i);
+                    if (k && k.startsWith(prefix)) s.removeItem(k);
+                }
+            } catch {
+                // ignore
+            }
+        };
+
+        clearPrefix(localStorage, 'sahifah.');
+        clearPrefix(sessionStorage, 'sahifah.');
+    }
+
+    private async wipeOPFSRoot(): Promise<void> {
+        const getDir = (navigator.storage as any)?.getDirectory;
+        if (!getDir) return; // OPFS not supported
+
+        const root = (await getDir.call(navigator.storage)) as FileSystemDirectoryHandle;
+
+        // Iterate and delete everything under OPFS root.
+        // Use `any` to avoid TS lib differences across environments.
+        for await (const entry of (root as any).entries()) {
+            const name = entry?.[0] as string | undefined;
+            if (!name) continue;
+            await root.removeEntry(name, {recursive: true} as any);
+        }
+    }
 
     private navLink(href: string, label: string, active: boolean) {
         return html`
@@ -110,9 +208,15 @@ export class AppRoot extends LitElement {
                             <pre class="text-xs overflow-auto max-h-56 p-3 rounded-lg bg-black/40 border border-red-900/40">${this.fatal.detail}</pre>`
                         : null}
 
+                ${this.resetErr
+                        ? html`
+                            <div class="text-sm text-red-100">Reset failed: ${this.resetErr}</div>`
+                        : null}
+
                 <div class="flex flex-wrap gap-2">
                     <button
-                            class="px-4 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800"
+                            class="px-4 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 disabled:opacity-60"
+                            ?disabled=${this.resetting}
                             @click=${() => {
                                 this.fatal = null;
                                 location.hash = '#/library';
@@ -122,11 +226,25 @@ export class AppRoot extends LitElement {
                     </button>
 
                     <button
-                            class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold"
+                            class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold disabled:opacity-60"
+                            ?disabled=${this.resetting}
                             @click=${() => location.reload()}
                     >
                         Reload
                     </button>
+
+                    <button
+                            class="px-4 py-2 rounded-xl bg-red-700 hover:bg-red-600 text-slate-50 font-semibold disabled:opacity-60"
+                            ?disabled=${this.resetting}
+                            @click=${() => void this.resetStorage()}
+                    >
+                        ${this.resetting ? 'Resetting…' : 'Reset storage'}
+                    </button>
+                </div>
+
+                <div class="text-xs text-red-200/80">
+                    Reset storage removes all local documents and app state on this device. Exported backups (.slbk)
+                    are not affected.
                 </div>
             </div>
         `;

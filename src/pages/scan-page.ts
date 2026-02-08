@@ -440,9 +440,14 @@ export class ScanPage extends LitElement {
     private startDetector(): void {
         if (this.worker) return;
 
+        // Bump token so any late messages from a previous worker/loop are ignored.
+        const token = ++this.detectLoopToken;
+
         this.worker = new Worker(new URL('../lib/scan/edge-worker.ts', import.meta.url), {type: 'module'});
 
         this.worker.onmessage = (ev: MessageEvent<any>) => {
+            if (token !== this.detectLoopToken) return;
+
             const msg = ev.data;
             if (msg?.type !== 'result') return;
 
@@ -478,9 +483,6 @@ export class ScanPage extends LitElement {
         this.offscreen = document.createElement('canvas');
         this.offCtx = this.offscreen.getContext('2d', {willReadFrequently: true});
 
-        // Dynamic loop (uses governor intervalMs each tick)
-        const token = ++this.detectLoopToken;
-
         const tick = () => {
             if (token !== this.detectLoopToken) return;
             if (!this.worker) return;
@@ -507,12 +509,18 @@ export class ScanPage extends LitElement {
     }
 
     private stopDetector(): void {
-        // cancel loop
+        // cancel loop + ignore any late worker messages
         this.detectLoopToken++;
-        if (this.detectLoopTimer) window.clearTimeout(this.detectLoopTimer);
+
+        if (this.detectLoopTimer != null) {
+            window.clearTimeout(this.detectLoopTimer);
+        }
         this.detectLoopTimer = null;
 
-        this.worker?.terminate();
+        if (this.worker) {
+            this.worker.onmessage = null;
+            this.worker.terminate();
+        }
         this.worker = null;
 
         this.offscreen = null;
@@ -525,7 +533,6 @@ export class ScanPage extends LitElement {
         this.stableSince = 0;
         this.cooldownUntil = 0;
     }
-
 
     private grabAndDetect(): void {
         if (!this.worker || !this.offCtx || !this.offscreen) return;
