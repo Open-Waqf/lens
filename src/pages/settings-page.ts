@@ -15,7 +15,6 @@ import {ConfirmModal} from '../components/confirm-modal';
 import {strFromU8, unzipSync} from 'fflate';
 import type {DocRecord, PageRecord} from '../domain/types';
 
-// Kept this type as it is used in askRestoreMode
 type RestoreMode = 'merge' | 'erase';
 
 @customElement('settings-page')
@@ -29,11 +28,9 @@ export class SettingsPage extends LitElement {
     @state() private msg: string | null = null;
     @state() private err: string | null = null;
 
-    // Safety Interlock State
     @state() private showDangerZone = false;
     @state() private deleteConfirmation = '';
 
-    // NEW: Storage Stats
     @state() private storageUsed = 0;
     @state() private storageQuota = 0;
 
@@ -149,7 +146,6 @@ export class SettingsPage extends LitElement {
             const store = getFileStore();
 
             if (mode === 'erase') {
-                // Destructive restore
                 try {
                     await opfsRemoveTree('docs');
                 } catch {
@@ -160,7 +156,6 @@ export class SettingsPage extends LitElement {
                     await db.pages.clear();
                 });
 
-                // Write files
                 for (const [name, bytes] of Object.entries(unz)) {
                     if (name === 'metadata.json') continue;
                     if (!name.startsWith('docs/')) continue;
@@ -174,7 +169,6 @@ export class SettingsPage extends LitElement {
 
                 this.msg = 'Library replaced from backup.';
             } else {
-                // Merge restore
                 const docIdMap = new Map<string, string>();
                 for (const d of docs) docIdMap.set(d.id, nanoid());
 
@@ -198,7 +192,7 @@ export class SettingsPage extends LitElement {
                     id: docIdMap.get(d.id)!,
                     pageIds: (d.pageIds ?? []).map((pid) => pageIdMap.get(pid)!).filter(Boolean),
                     updatedAt: Date.now(),
-                    pdfPath: undefined // Invalidate old PDF paths
+                    pdfPath: undefined
                 }));
 
                 const newPages = pages.map((p) => ({
@@ -211,7 +205,6 @@ export class SettingsPage extends LitElement {
 
                 for (const [name, bytes] of Object.entries(unz)) {
                     if (!name.startsWith('docs/')) continue;
-                    // Only write if we can remap it (orphaned files skipped)
                     const m = name.match(/^docs\/([^/]+)\//);
                     if (m && docIdMap.has(m[1])) {
                         const newName = rewritePath(name);
@@ -269,12 +262,11 @@ export class SettingsPage extends LitElement {
     }
 
     render() {
-        // Calculate percentage for bar
         const pct = this.storageQuota > 0 ? (this.storageUsed / this.storageQuota) * 100 : 0;
         const color = pct > 90 ? 'bg-red-500' : (pct > 70 ? 'bg-amber-500' : 'bg-emerald-500');
 
         return html`
-            <div class="space-y-6">
+            <div class="space-y-6 pb-20">
                 <div class="flex items-center gap-3">
                     <button class="p-2 rounded-full hover:bg-slate-800" @click=${() => location.hash = '#/library'}>
                         <svg class="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -292,9 +284,26 @@ export class SettingsPage extends LitElement {
                     <div class="p-4 rounded-lg bg-red-950/40 text-red-200 border border-red-900">${this.err}
                     </div>` : null}
 
+                <section class="p-4 rounded-xl border border-slate-700 bg-slate-800/50 space-y-2">
+                    <div class="flex items-center gap-2 text-emerald-400 font-semibold text-sm">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                        </svg>
+                        Privacy & Security
+                    </div>
+                    <p class="text-xs text-slate-300 leading-relaxed">
+                        This app is <strong>Offline Only</strong>. Your documents are stored locally on this device and
+                        are never sent to any cloud server.
+                    </p>
+                    <p class="text-xs text-slate-400">
+                        We cannot see, read, or recover your data. Please use the Backup feature to keep your data safe.
+                    </p>
+                </section>
+
                 <section class="space-y-2">
                     <div class="flex items-center justify-between text-xs text-slate-400 uppercase tracking-wider font-semibold">
-                        <span>Storage</span>
+                        <span>Local Storage</span>
                         <span>${this.formatBytes(this.storageUsed)} / ${this.formatBytes(this.storageQuota)}</span>
                     </div>
                     <div class="h-4 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
@@ -302,7 +311,7 @@ export class SettingsPage extends LitElement {
                              style="width: ${Math.max(2, pct)}%"></div>
                     </div>
                     <div class="text-[10px] text-slate-500">
-                        Space managed by browser. If space runs low, the OS may clear data.
+                        Managed by browser. The OS may clear this if device storage is critically low.
                     </div>
                 </section>
 

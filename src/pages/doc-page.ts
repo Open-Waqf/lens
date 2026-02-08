@@ -5,7 +5,7 @@ import {live} from 'lit/directives/live.js';
 import {db} from '../services/db';
 import {getFileStore} from '../services/filestore';
 import {shareOrDownload} from '../services/share';
-import {buildPdfForDoc} from '../lib/pdf';
+import {buildPdfForDoc, type PdfQuality} from '../lib/pdf';
 import {jsonFile, makeZip} from '../lib/zip';
 import {bytesToBlob} from '../lib/bytes';
 import {ScanRepo} from './scan/scan-repo';
@@ -31,6 +31,12 @@ export class DocPage extends LitElement {
     @state() private thumbs: Record<string, string> = {};
     @state() private busy = false;
     @state() private error: string | null = null;
+
+    // #18 PDF Quality State
+    @state() private pdfQuality: PdfQuality = 'original';
+    // #21 Progress State
+    @state() private exportProgress = 0;
+    @state() private exportTotal = 0;
 
     // Viewer States
     @state() private viewerOpen = false;
@@ -162,12 +168,29 @@ export class DocPage extends LitElement {
     private async exportPdf(): Promise<void> {
         if (!this.doc) return;
         this.busy = true;
+        this.exportProgress = 0;
+        this.exportTotal = this.pages.length;
+
         try {
             const store = getFileStore();
-            const pdfBytes = await buildPdfForDoc(store, this.pages);
+
+            // Wait a tick to show loading UI
+            await new Promise(r => setTimeout(r, 50));
+
+            const pdfBytes = await buildPdfForDoc(store, this.pages, {
+                quality: this.pdfQuality,
+                onProgress: (curr, total) => {
+                    this.exportProgress = curr;
+                    this.exportTotal = total;
+                    this.requestUpdate();
+                }
+            });
+
             const filename = `${safeName(this.doc.title)}.pdf`;
             await shareOrDownload(pdfBytes, filename, 'application/pdf');
 
+            // Only save high-res exports to storage to save space, or if needed
+            // For now, we update the path only if it succeeds
             const pdfPath = `docs/${this.doc.id}/exports/${Date.now()}.pdf`;
             await store.put(pdfPath, pdfBytes, 'application/pdf');
             await this.saveMeta({pdfPath});
@@ -175,6 +198,7 @@ export class DocPage extends LitElement {
             this.error = (e as Error).message;
         } finally {
             this.busy = false;
+            this.exportProgress = 0;
         }
     }
 
@@ -209,18 +233,14 @@ export class DocPage extends LitElement {
         if (!ok) return;
         this.busy = true;
         try {
-            // 1. Get Page Info
             const page = await db.pages.get(pageId);
             if (page) {
-                // 2. Delete Files
                 const store = getFileStore();
                 await store.del(page.imagePath);
                 await store.del(page.thumbPath);
-                // 3. Delete DB Entry
                 await db.pages.delete(pageId);
             }
 
-            // 4. Update Document Metadata
             if (this.doc) {
                 const newIds = this.doc.pageIds.filter(id => id !== pageId);
                 await this.saveMeta({pageIds: newIds});
@@ -232,14 +252,6 @@ export class DocPage extends LitElement {
         } finally {
             this.busy = false;
         }
-    }
-
-    // #8 Retake Button Logic
-    private retakePage(pageId: string) {
-        if (!this.doc) return;
-        localStorage.setItem('sahifah.appendToDocId', this.doc.id);
-        localStorage.setItem('sahifah.replacePageId', pageId);
-        location.hash = '#/scan';
     }
 
     private async deleteDoc(): Promise<void> {
@@ -274,44 +286,36 @@ export class DocPage extends LitElement {
         await this.load();
     }
 
-    // #9 Drag and Drop Handlers
-    private handleDragStart(e: DragEvent, id: string) {
-        if (e.dataTransfer) {
-            e.dataTransfer.setData('text/plain', id);
-            e.dataTransfer.effectAllowed = 'move';
-            // Slight delay to allow drag image to generate
-            setTimeout(() => (e.target as HTMLElement).classList.add('opacity-50'), 0);
-        }
+    private retakePage(pageId: string) {
+        if (!this.doc) return;
+        localStorage.setItem('sahifah.appendToDocId', this.doc.id);
+        localStorage.setItem('sahifah.replacePageId', pageId);
+        location.hash = '#/scan';
     }
 
-    private handleDragEnd(e: DragEvent) {
-        (e.target as HTMLElement).classList.remove('opacity-50');
-    }
+    // --- RENDER HELPERS ---
 
-    private handleDragOver(e: DragEvent) {
-        e.preventDefault();
-        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-    }
+    // #21 Progress Modal
+    private renderProgress() {
+        if (!this.busy || this.exportProgress === 0) return null;
+        const pct = Math.round((this.exportProgress / this.exportTotal) * 100);
 
-    private async handleDrop(e: DragEvent, targetId: string) {
-        e.preventDefault();
-        (e.target as HTMLElement).classList.remove('opacity-50');
-
-        const sourceId = e.dataTransfer?.getData('text/plain');
-        if (!sourceId || sourceId === targetId || !this.doc) return;
-
-        const ids = [...this.doc.pageIds];
-        const fromIdx = ids.indexOf(sourceId);
-        const toIdx = ids.indexOf(targetId);
-
-        if (fromIdx === -1 || toIdx === -1) return;
-
-        // Move item
-        ids.splice(fromIdx, 1);
-        ids.splice(toIdx, 0, sourceId);
-
-        await this.saveMeta({pageIds: ids});
-        await this.load();
+        return html`
+            <div class="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
+                <div class="bg-slate-900 border border-slate-700 p-6 rounded-2xl w-full max-w-sm space-y-4 shadow-2xl">
+                    <div class="flex items-center justify-between">
+                        <div class="font-bold text-slate-100">Generating PDF</div>
+                        <div class="text-sm text-emerald-400 font-mono">${pct}%</div>
+                    </div>
+                    <div class="h-2 bg-slate-800 rounded-full overflow-hidden">
+                        <div class="h-full bg-emerald-500 transition-all duration-200" style="width: ${pct}%"></div>
+                    </div>
+                    <div class="text-xs text-slate-500 text-center">
+                        Processing page ${this.exportProgress} of ${this.exportTotal}
+                    </div>
+                </div>
+            </div>
+        `;
     }
 
     render() {
@@ -337,6 +341,8 @@ export class DocPage extends LitElement {
 
         return html`
             <div class="space-y-4 pb-20">
+                ${this.renderProgress()}
+
                 <div class="flex items-center justify-between">
                     <a class="text-sm text-slate-300 hover:underline flex items-center gap-1 min-h-[44px]"
                        href="#/library">
@@ -349,8 +355,9 @@ export class DocPage extends LitElement {
                 </div>
 
                 ${this.error ? html`
-                    <div class="p-3 bg-red-900/30 text-red-200 border border-red-900/50 rounded-xl text-sm">
-                        ${this.error}
+                    <div class="p-3 bg-red-900/30 text-red-200 border border-red-900/50 rounded-xl text-sm flex justify-between items-start">
+                        <span>${this.error}</span>
+                        <button class="ml-2 text-red-300 hover:text-white" @click=${() => this.error = null}>✕</button>
                     </div>` : null}
 
                 <div class="p-4 rounded-xl border border-slate-800 bg-slate-950 space-y-3">
@@ -377,12 +384,24 @@ export class DocPage extends LitElement {
                     </div>
 
                     <div class="space-y-1">
-                        <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Search Index
-                        </div>
+                        <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Search Index</div>
                         <div class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-500 h-16 overflow-y-auto">
                             ${this.doc.searchIndex || 'No text indexed yet.'}
                         </div>
                     </div>
+
+                    <div class="h-px bg-slate-800 my-2"></div>
+
+                    <label class="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-900 cursor-pointer select-none">
+                        <input type="checkbox"
+                               .checked=${this.pdfQuality === 'email'}
+                               @change=${(e: Event) => this.pdfQuality = (e.target as HTMLInputElement).checked ? 'email' : 'original'}
+                               class="w-5 h-5 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900">
+                        <div class="flex-1">
+                            <div class="text-sm font-medium text-slate-200">Compress for Email</div>
+                            <div class="text-xs text-slate-500">Smaller file size, lower quality</div>
+                        </div>
+                    </label>
 
                     <div class="flex flex-wrap gap-2 pt-2">
                         <button class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-lg shadow-emerald-900/20 min-h-[44px]"
@@ -412,21 +431,13 @@ export class DocPage extends LitElement {
                     <div class="text-sm font-semibold text-slate-400 uppercase tracking-wider">Pages
                             (${this.pages.length})
                     </div>
-
                     <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
                         ${this.pages.map((p, idx) => html`
-                            <div class="group relative rounded-xl border border-slate-800 bg-slate-950 overflow-hidden shadow-sm hover:border-slate-600 transition-colors"
-                                 draggable="true"
-                                 @dragstart=${(e: DragEvent) => this.handleDragStart(e, p.id)}
-                                 @dragend=${this.handleDragEnd}
-                                 @dragover=${this.handleDragOver}
-                                 @drop=${(e: DragEvent) => this.handleDrop(e, p.id)}>
-
+                            <div class="group relative rounded-xl border border-slate-800 bg-slate-950 overflow-hidden shadow-sm hover:border-slate-600 transition-colors">
                                 <div class="aspect-[3/4] bg-slate-900 cursor-pointer relative"
                                      @click=${() => this.openViewerAt(idx)}>
                                     ${this.thumbs[p.id]
-                                            ? html`<img src=${this.thumbs[p.id]}
-                                                        class="w-full h-full object-cover pointer-events-none">`
+                                            ? html`<img src=${this.thumbs[p.id]} class="w-full h-full object-cover">`
                                             : html`
                                                 <div class="w-full h-full flex items-center justify-center text-slate-700">
                                                     ?

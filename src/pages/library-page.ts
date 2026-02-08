@@ -6,7 +6,6 @@ import {live} from 'lit/directives/live.js';
 import {db} from '../services/db';
 import type {DocRecord} from '../domain/types';
 import {ScanRepo} from './scan/scan-repo';
-// Fix: Ensure bytesToBlob is imported
 import {bytesToBlob} from '../lib/bytes';
 
 @customElement('library-page')
@@ -43,7 +42,6 @@ export class LibraryPage extends LitElement {
 
             const strip = await this.repo.getDocStrip(doc.id, 1);
             if (strip?.items[0]) {
-                // FIX: Use helper to satisfy TS strict ArrayBuffer checks
                 const blob = bytesToBlob(strip.items[0].thumbBytes, 'image/jpeg');
                 const url = URL.createObjectURL(blob);
                 this.thumbnails.set(doc.id, url);
@@ -101,13 +99,22 @@ export class LibraryPage extends LitElement {
 
                 ${list.length === 0
                         ? html`
-                            <div class="flex flex-col items-center justify-center py-20 text-slate-500">
-                                <svg class="w-16 h-16 mb-4 opacity-20" fill="none" stroke="currentColor"
-                                     viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                                </svg>
-                                <p>${this.query ? 'No matching documents' : 'Your library is empty'}</p>
+                            <div class="flex flex-col items-center justify-center py-20 text-slate-500 text-center space-y-4">
+                                <div class="w-24 h-24 bg-slate-900 rounded-full flex items-center justify-center mb-2">
+                                    <svg class="w-10 h-10 text-slate-700" fill="none" stroke="currentColor"
+                                         viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                              d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 class="text-lg font-medium text-slate-300">
+                                        ${this.query ? 'No matching documents' : 'No scans yet'}
+                                    </h3>
+                                    <p class="text-sm text-slate-500 max-w-xs mx-auto mt-1">
+                                        ${this.query ? 'Try a different keyword or check your spelling.' : 'Tap the + button to capture your first document.'}
+                                    </p>
+                                </div>
                             </div>
                         `
                         : html`
