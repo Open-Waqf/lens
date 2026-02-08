@@ -1,42 +1,49 @@
-import type {FilterMode} from '../../domain/types';
-import type {WorkerRequest, WorkerResponse} from './worker';
 import {nanoid} from 'nanoid';
+import type {FilterMode} from '../../domain/types';
+import type {Rotation, WorkerResponse} from './worker';
 
-const worker = new Worker(new URL('./worker.ts', import.meta.url), {type: 'module'});
-
-export type Rotation = 0 | 90 | 180 | 270;
-
-export async function processPhoto(opts: {
+export type PipelineInput = {
     blob: Blob;
-    crop?: { x: number; y: number; w: number; h: number };
     rotation: Rotation;
     filter: FilterMode;
     masterJpegQuality?: number;
-    thumbMax?: number;
-}): Promise<{
+};
+
+export type PipelineOutput = {
     master: { bytes: Uint8Array; width: number; height: number };
     thumb: { bytes: Uint8Array; width: number; height: number };
-}> {
-    const id = nanoid();
+};
 
-    const req: WorkerRequest = {
-        id,
-        blob: opts.blob,
-        crop: opts.crop,
-        rotation: opts.rotation,
-        filter: opts.filter,
-        masterJpegQuality: opts.masterJpegQuality ?? 0.82,
-        thumbMax: opts.thumbMax ?? 360
-    };
+export function processPhoto(opts: PipelineInput): Promise<PipelineOutput> {
+    return new Promise((resolve, reject) => {
+        const id = nanoid();
+        const worker = new Worker(new URL('./worker.ts', import.meta.url), {type: 'module'});
 
-    return await new Promise((resolve, reject) => {
         const onMsg = (ev: MessageEvent<WorkerResponse>) => {
             if (ev.data.id !== id) return;
-            worker.removeEventListener('message', onMsg);
+            worker.terminate();
             if (!ev.data.ok) reject(new Error(ev.data.error));
-            else resolve({master: ev.data.master, thumb: ev.data.thumb});
+            else {
+                // Fix: Ensure master/thumb exist before resolving
+                if (!ev.data.master || !ev.data.thumb) {
+                    reject(new Error('Pipeline failed: missing output'));
+                } else {
+                    resolve({
+                        master: ev.data.master,
+                        thumb: ev.data.thumb
+                    });
+                }
+            }
         };
+
         worker.addEventListener('message', onMsg);
-        worker.postMessage(req);
+        worker.postMessage({
+            id,
+            blob: opts.blob,
+            rotation: opts.rotation,
+            filter: opts.filter,
+            masterJpegQuality: opts.masterJpegQuality ?? 0.82,
+            thumbMax: 360,
+        });
     });
 }
