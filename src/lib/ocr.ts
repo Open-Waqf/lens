@@ -6,21 +6,19 @@ let workerPromise: Promise<Worker> | null = null;
 async function getWorker(): Promise<Worker> {
     if (!workerPromise) {
         workerPromise = (async () => {
-            // We configure the worker to load from our local /public/tesseract folder
-            // instead of the default CDN.
             const w = await createWorker('eng', 1, {
+                // Point to the local files we copied to /public/tesseract/
                 workerPath: '/tesseract/worker.min.js',
                 corePath: '/tesseract/tesseract-core.wasm.js',
-                langPath: '/tesseract/', // Point to folder containing eng.traineddata.gz
+                langPath: '/tesseract/',
                 logger: (m) => {
-                    if (m.status === 'recognizing text') {
-                        // console.debug(`OCR Progress: ${(m.progress * 100).toFixed(0)}%`);
-                    }
+                    // Debug logs if needed
+                    if (m.status === 'recognizing text') console.debug(m.progress);
                 }
             });
-
             await w.setParameters({
                 tessedit_pageseg_mode: PSM.AUTO,
+                user_defined_dpi: '300', // FIX: Force DPI to prevent "box outside rectangle" errors
             });
             return w;
         })();
@@ -33,9 +31,14 @@ export async function recognizeText(
     width: number,
     height: number
 ): Promise<OcrWord[]> {
+    let url: string | null = null;
     try {
         const w = await getWorker();
-        const ret = await w.recognize(imageBlob);
+
+        // FIX: Convert Blob to ObjectURL for safer transport to WASM
+        url = URL.createObjectURL(imageBlob);
+
+        const ret = await w.recognize(url);
 
         const words: OcrWord[] = [];
 
@@ -55,10 +58,10 @@ export async function recognizeText(
                 words.push({
                     text: word.text,
                     box: [
-                        bbox.x0 / width,
-                        bbox.y0 / height,
-                        bw / width,
-                        bh / height
+                        bbox.x0 / width,  // Normalize x
+                        bbox.y0 / height, // Normalize y
+                        bw / width,       // Normalize w
+                        bh / height       // Normalize h
                     ],
                     confidence: word.confidence
                 });
@@ -69,6 +72,9 @@ export async function recognizeText(
     } catch (e) {
         console.error('OCR Failed', e);
         return [];
+    } finally {
+        // Cleanup the URL object to prevent memory leaks
+        if (url) URL.revokeObjectURL(url);
     }
 }
 
