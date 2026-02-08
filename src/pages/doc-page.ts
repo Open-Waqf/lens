@@ -7,9 +7,9 @@ import {getFileStore} from '../services/filestore';
 import {shareOrDownload} from '../services/share';
 import {buildPdfForDoc} from '../lib/pdf';
 import {jsonFile, makeZip} from '../lib/zip';
+import {bytesToBlob, toArrayBuffer} from '../lib/bytes';
 
 import type {DocRecord, PageRecord} from '../domain/types';
-import {toArrayBuffer} from "../lib/bytes";
 
 @customElement('doc-page')
 export class DocPage extends LitElement {
@@ -25,6 +25,56 @@ export class DocPage extends LitElement {
     @state() private busy = false;
     @state() private error: string | null = null;
     @state() private justImported = false;
+    @state() private viewerOpen = false;
+    @state() private viewerBusy = false;
+    @state() private viewerErr: string | null = null;
+    @state() private viewerUrl: string | null = null;
+    @state() private viewerIndex = 0;
+
+    private revokeViewerUrl() {
+        if (this.viewerUrl) URL.revokeObjectURL(this.viewerUrl);
+        this.viewerUrl = null;
+    }
+
+    private closeViewer = () => {
+        this.viewerOpen = false;
+        this.viewerBusy = false;
+        this.viewerErr = null;
+        this.revokeViewerUrl();
+    };
+
+    private async openViewerAt(index: number): Promise<void> {
+        if (!this.doc) return;
+        if (index < 0 || index >= this.pages.length) return;
+
+        this.viewerErr = null;
+        this.viewerBusy = true;
+        this.viewerOpen = true;
+        this.viewerIndex = index;
+
+        try {
+            this.revokeViewerUrl();
+
+            const p = this.pages[index];
+            const store = getFileStore();
+            const bytes = await store.get(p.imagePath);
+            const blob = bytesToBlob(bytes, 'image/jpeg');
+            this.viewerUrl = URL.createObjectURL(blob);
+        } catch (e) {
+            this.viewerErr = (e as Error).message ?? String(e);
+        } finally {
+            this.viewerBusy = false;
+        }
+    }
+
+
+    private async viewerPrev(): Promise<void> {
+        await this.openViewerAt(this.viewerIndex - 1);
+    }
+
+    private async viewerNext(): Promise<void> {
+        await this.openViewerAt(this.viewerIndex + 1);
+    }
 
     async connectedCallback(): Promise<void> {
         super.connectedCallback();
@@ -40,6 +90,7 @@ export class DocPage extends LitElement {
 
     disconnectedCallback(): void {
         for (const u of Object.values(this.thumbs)) URL.revokeObjectURL(u);
+        this.revokeViewerUrl();
         super.disconnectedCallback();
     }
 
@@ -334,7 +385,14 @@ export class DocPage extends LitElement {
                         ${this.pages.map((p, idx) => html`
                             <div class="rounded-xl border border-slate-800 bg-slate-950 overflow-hidden">
                                 <div class="aspect-[3/4] bg-black">
-                                    <img class="w-full h-full object-cover" src=${this.thumbs[p.id]} alt="thumb"/>
+                                    <button
+                                            class="w-full h-full block"
+                                            title="View full page"
+                                            @click=${() => void this.openViewerAt(idx)}
+                                    >
+                                        <img class="w-full h-full object-cover" src=${this.thumbs[p.id]} alt="thumb"/>
+                                    </button>
+
                                 </div>
                                 <div class="p-2 flex items-center justify-between gap-2">
                                     <div class="text-xs text-slate-400">#${idx + 1}</div>
@@ -358,6 +416,63 @@ export class DocPage extends LitElement {
                         `)}
                     </div>
                 </div>
+                ${this.viewerOpen ? html`
+                    <div
+                            class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+                            @click=${(e: Event) => {
+                                if (e.target === e.currentTarget) this.closeViewer();
+                            }}
+                    >
+                        <div class="w-full max-w-4xl rounded-2xl border border-slate-800 bg-slate-950 overflow-hidden shadow-xl">
+                            <div class="px-4 py-3 flex items-center justify-between border-b border-slate-800">
+                                <div class="text-sm text-slate-200">
+                                    Page ${this.viewerIndex + 1} / ${this.pages.length}
+                                </div>
+                                <div class="flex gap-2">
+                                    <button
+                                            class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
+                                            ?disabled=${this.viewerBusy || this.viewerIndex === 0}
+                                            @click=${() => void this.viewerPrev()}
+                                    >←
+                                    </button>
+                                    <button
+                                            class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
+                                            ?disabled=${this.viewerBusy || this.viewerIndex === this.pages.length - 1}
+                                            @click=${() => void this.viewerNext()}
+                                    >→
+                                    </button>
+                                    <button
+                                            class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
+                                            @click=${this.closeViewer}
+                                    >Close
+                                    </button>
+                                </div>
+                            </div>
+
+                            ${this.viewerErr ? html`
+                                <div class="p-3 text-sm text-red-200 bg-red-950/40 border-b border-red-900">
+                                    ${this.viewerErr}
+                                </div>
+                            ` : null}
+
+                            <div class="bg-black flex items-center justify-center" style="height: min(78vh, 820px);">
+                                ${this.viewerBusy ? html`
+                                    <div class="text-sm text-slate-300">Loading…</div>
+                                ` : this.viewerUrl ? html`
+                                    <img
+                                            src=${this.viewerUrl}
+                                            class="max-w-full max-h-full object-contain"
+                                            alt="full page"
+                                    />
+                                ` : null}
+                            </div>
+
+                            <div class="px-4 py-3 text-xs text-slate-500 border-t border-slate-800">
+                                Tip: use this to verify page sharpness before exporting PDF.
+                            </div>
+                        </div>
+                    </div>
+                ` : null}
             </div>
         `;
     }

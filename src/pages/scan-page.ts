@@ -1,23 +1,22 @@
 import {html, LitElement} from 'lit';
 import {customElement, query, state} from 'lit/decorators.js';
 import {keyed} from 'lit/directives/keyed.js';
-import {nanoid} from 'nanoid';
-
-import type {DocRecord, PageRecord} from '../domain/types';
-import {db} from '../services/db';
-import {getFileStore} from '../services/filestore';
 
 import type {DetectedQuad, Point, Quad} from '../lib/scan/quad';
 import {lerpQuad, quadArea} from '../lib/scan/quad';
 import {computeOutputSize, warpRgbaToCanvas} from '../lib/image/warp';
+
 import {takePendingImport} from '../services/pending-import';
 import {bytesToBlob} from '../lib/bytes';
 import {processPhoto} from '../lib/image/pipeline';
 
+import '../components/scan-overlay';
 import '../components/page-editor';
 import type {PageEditorSaveDetail} from '../components/page-editor';
 
-type ScanStage = 'idle' | 'camera' | 'edit';
+import {CameraManager} from '../lib/camera/camera-manager';
+import {ScanSessionState, type ScanStage} from './scan/scan-session-state';
+import {ScanRepo} from './scan/scan-repo';
 
 const APPEND_DOC_KEY = 'sahifah.appendToDocId';
 const AUTO_KEY = 'sahifah.autoCapture';
@@ -32,68 +31,51 @@ export class ScanPage extends LitElement {
     }
 
     @query('video') private videoEl!: HTMLVideoElement;
-    @query('canvas[data-overlay]') private overlayEl!: HTMLCanvasElement;
 
-    @state() private stage: ScanStage = 'idle';
-    @state() private stream: MediaStream | null = null;
+    // managers
+    private camera = new CameraManager();
+    private session = new ScanSessionState(() => this.requestUpdate());
+    private repo = new ScanRepo();
 
-    @state() private appendToDocId: string | null = null;
-    @state() private targetDocTitle: string | null = null;
-
-    private currentDocId: string | null = null;
-
-    @state() private docTitle: string | null = null;
-    @state() private pageCount = 0;
-    @state() private strip: StripItem[] = [];
-
-    private newPageIds = new Set<string>();
-    private committed = false;
-
-    @state() private captured: Blob | null = null;
-    @state() private editingPageId: string | null = null;
-
+    // ui
     @state() private busy = false;
     @state() private error: string | null = null;
 
-    @state() private autoCapture = readBool(AUTO_KEY, false);
+    // doc ui
+    @state() private docTitle: string | null = null;
+    @state() private targetDocTitle: string | null = null;
 
-    // remount the editor to reset its internal state per page
+    @state() private strip: StripItem[] = [];
+    private newPageIds = new Set<string>();
+
+    // editor
+    @state() private captured: Blob | null = null;
+    @state() private editingPageId: string | null = null;
     @state() private editorKey = 0;
 
-    // edge detection
+    // auto capture toggle
+    @state() private autoCapture = readBool(AUTO_KEY, false);
+
+    // overlay sizing
+    @state() private videoW = 0;
+    @state() private videoH = 0;
+
+    // capture guard
+    private captureInFlight = false;
+
+    // detection (kept inline for now)
     private worker: Worker | null = null;
     private offscreen: HTMLCanvasElement | null = null;
     private offCtx: CanvasRenderingContext2D | null = null;
     private detecting = false;
 
-    private lastDetect: DetectedQuad | null = null;
-    private smoothedQuad: Quad | null = null;
+    @state() private lastDetect: DetectedQuad | null = null;
+    @state() private smoothedQuad: Quad | null = null;
 
     private stableSince = 0;
     private cooldownUntil = 0;
-    private captureInFlight = false;
 
-    // ----------------- computed helpers -----------------
-
-    private get isAppend(): boolean {
-        return !!this.appendToDocId;
-    }
-
-    private get docId(): string | null {
-        return this.appendToDocId ?? this.currentDocId;
-    }
-
-    private get hasPages(): boolean {
-        return this.pageCount > 0;
-    }
-
-    private get exitLabel(): string {
-        if (this.isAppend) return 'Back to document';
-        if (!this.docId && !this.hasPages) return 'Cancel';
-        if (!this.committed && this.hasPages) return 'Discard';
-        if (this.committed) return 'Back to library';
-        return 'Cancel';
-    }
+    private detectorTimer: number | null = null;
 
     // ----------------- lifecycle -----------------
 
@@ -105,8 +87,13 @@ export class ScanPage extends LitElement {
 
         const pending = takePendingImport();
         if (pending?.length) {
-            this.appendToDocId = null;
+            // pending import always means new-doc flow (avoid append leakage)
+            this.clearAppendKey();
+            this.session.setAppend(null);
+            this.session.setCurrentDocId(null);
+
             this.targetDocTitle = null;
+            this.docTitle = null;
 
             if (pending.length === 1) {
                 await this.openNewBlobInEditor(pending[0]);
@@ -119,69 +106,64 @@ export class ScanPage extends LitElement {
     disconnectedCallback(): void {
         window.removeEventListener('hashchange', this.onHashChange);
 
-        if (this.appendToDocId) this.clearAppendKey();
+        // prevent append leak
+        if (this.session.isAppend) this.clearAppendKey();
+
         void this.stopCamera();
         this.stopDetector();
         this.revokeStrip();
+
         super.disconnectedCallback();
     }
 
     private onHashChange = () => {
-        // app-root routing ignores query, so scan-page must handle "#/scan?new=1"
         const h = location.hash || '';
         if (h.startsWith('#/scan')) void this.loadMode();
     };
 
-    // ----------------- storage helpers -----------------
-
-    private clearAppendKey() {
-        try {
-            localStorage.removeItem(APPEND_DOC_KEY);
-        } catch {
-        }
-    }
-
-    private getHashParams(): URLSearchParams {
-        try {
-            const raw = location.hash || '';
-            const q = raw.includes('?') ? raw.split('?')[1] : '';
-            return new URLSearchParams(q);
-        } catch {
-            return new URLSearchParams();
-        }
-    }
-
     // ----------------- mode/load -----------------
 
     private async loadMode(): Promise<void> {
+        // reset (safe even if re-entered)
+        await this.stopCamera();
+        this.stopDetector();
+        this.revokeStrip();
+
+        this.error = null;
+        this.busy = false;
+
+        this.clearEditor();
+        this.newPageIds.clear();
+
+        this.lastDetect = null;
+        this.smoothedQuad = null;
+
         const params = this.getHashParams();
 
+        // library scan => force new
         const forceNew = params.get('new') === '1';
         if (forceNew) this.clearAppendKey();
 
         const appendId = forceNew ? null : safeGet(APPEND_DOC_KEY);
-        this.appendToDocId = appendId;
-        this.currentDocId = appendId;
 
-        this.error = null;
-        this.stage = 'idle';
+        this.session.resetAll();
+        this.session.setAppend(appendId); // also sets currentDocId
+        this.session.setStage('idle');
 
-        // reset session state
-        this.committed = false;
-        this.newPageIds.clear();
-        this.clearEditor();
+        this.targetDocTitle = null;
+        this.docTitle = null;
 
         if (appendId) {
-            const doc = await db.docs.get(appendId);
+            const doc = await this.repo.getDoc(appendId);
             this.targetDocTitle = doc?.title ?? 'Document';
             this.docTitle = doc?.title ?? 'Document';
-            this.committed = true; // append is always "keep"
+
+            // append is always committed/kept
+            this.session.markCommitted();
+
             await this.refreshDocInfo();
         } else {
-            this.targetDocTitle = null;
-            this.docTitle = null;
-            this.pageCount = 0;
-            this.revokeStrip();
+            this.session.setPageCount(0);
         }
 
         if (params.get('import') === '1') {
@@ -189,142 +171,94 @@ export class ScanPage extends LitElement {
         }
     }
 
-    // ----------------- exit logic -----------------
+    // ----------------- exit policy -----------------
 
     private async exitScan(): Promise<void> {
         await this.stopCamera();
+        this.stopDetector();
 
-        if (this.appendToDocId) {
-            const id = this.appendToDocId;
+        const decision = this.session.decideExit();
+
+        if (decision.kind === 'nav-doc') {
+            // append mode: go back to doc
             this.clearAppendKey();
-            this.appendToDocId = null;
-            location.hash = `#/doc/${id}`;
+            location.hash = `#/doc/${decision.docId}`;
             return;
         }
 
-        const id = this.currentDocId;
-
-        // nothing created
-        if (!id || (!this.hasPages && !this.docId)) {
-            // important: avoid stale "NEW" marker
-            try {
-                sessionStorage.removeItem(JUST_SAVED_DOC_KEY);
-            } catch {
-            }
-            location.hash = '#/library';
-            return;
-        }
-
-        // doc exists with pages but nothing committed => discard doc entirely
-        if (this.hasPages && !this.committed) {
-            const ok = confirm('Discard this document? Imported pages will be lost.');
+        if (decision.kind === 'confirm-discard') {
+            const ok = confirm(decision.message);
             if (!ok) return;
 
-            await this.deleteDocCompletely(id);
-            this.resetAllState();
+            await this.repo.deleteDocCompletely(decision.docId);
 
-            // avoid stuck highlight from older doc
-            try {
-                sessionStorage.removeItem(JUST_SAVED_DOC_KEY);
-            } catch {
-            }
+            this.session.resetAll();
+            this.revokeStrip();
+            this.newPageIds.clear();
+            this.clearEditor();
+
+            this.docTitle = null;
+            this.targetDocTitle = null;
 
             location.hash = '#/library';
             return;
         }
 
-        // committed => keep doc, mark just-saved for library highlight
-        if (this.committed && this.hasPages) {
-            try {
-                sessionStorage.setItem(JUST_SAVED_DOC_KEY, id);
-            } catch {
+        if (decision.kind === 'nav-library') {
+            if (decision.markJustSavedDocId) {
+                try {
+                    sessionStorage.setItem(JUST_SAVED_DOC_KEY, decision.markJustSavedDocId);
+                } catch {
+                }
             }
+            location.hash = '#/library';
         }
-
-        location.hash = '#/library';
-    }
-
-    private resetAllState(): void {
-        this.currentDocId = null;
-        this.docTitle = null;
-        this.pageCount = 0;
-        this.revokeStrip();
-        this.newPageIds.clear();
-        this.committed = false;
-        this.clearEditor();
-        this.error = null;
-        this.stage = 'idle';
-    }
-
-    private async deleteDocCompletely(docId: string): Promise<void> {
-        const store = getFileStore();
-        const pages = await db.pages.where('docId').equals(docId).toArray();
-
-        for (const p of pages) {
-            try {
-                await store.del(p.imagePath);
-            } catch {
-            }
-            try {
-                await store.del(p.thumbPath);
-            } catch {
-            }
-        }
-
-        await db.pages.where('docId').equals(docId).delete();
-        await db.docs.delete(docId);
     }
 
     private openDocument(): void {
-        const id = this.docId;
-        if (!id || this.pageCount === 0) return;
+        const id = this.session.docId;
+        if (!id || this.session.pageCount === 0) return;
 
-        if (!this.isAppend) this.committed = true;
+        // opening doc in new mode = keep it
+        if (!this.session.isAppend) this.session.markCommitted();
 
         this.clearAppendKey();
-        this.appendToDocId = null;
-
         location.hash = `#/doc/${id}`;
     }
 
-    // ----------------- editor state -----------------
+    // ----------------- editor -----------------
 
     private clearEditor() {
         this.captured = null;
         this.editingPageId = null;
-        // invalidate editor instance
         this.editorKey++;
     }
 
     private async openNewBlobInEditor(blob: Blob): Promise<void> {
         this.captured = blob;
         this.editingPageId = null;
-        this.stage = 'edit';
+        this.session.setStage('edit');
         this.editorKey++;
     }
 
     private async openExistingPageInEditor(pageId: string): Promise<void> {
         this.error = null;
         try {
-            const page = await db.pages.get(pageId);
-            if (!page) return;
+            const bytes = await this.repo.getPageImageBytes(pageId);
+            if (!bytes) return;
 
-            const store = getFileStore();
-            const bytes = await store.get(page.imagePath);
-            const blob = bytesToBlob(bytes, 'image/jpeg');
-
-            this.captured = blob;
+            this.captured = bytesToBlob(bytes, 'image/jpeg');
             this.editingPageId = pageId;
-            this.stage = 'edit';
+            this.session.setStage('edit');
             this.editorKey++;
         } catch (e) {
-            this.error = (e as Error).message;
+            this.error = (e as Error).message ?? String(e);
         }
     }
 
     private onEditorCancel = () => {
         this.clearEditor();
-        this.stage = this.stream ? 'camera' : 'idle';
+        this.session.setStage(this.camera.isRunning ? 'camera' : 'idle');
     };
 
     private onEditorSave = async (ev: CustomEvent<PageEditorSaveDetail>) => {
@@ -335,60 +269,24 @@ export class ScanPage extends LitElement {
             const {master, thumb} = ev.detail;
 
             const docId = await this.ensureDocId();
-            const store = getFileStore();
-
-            const doc = await db.docs.get(docId);
-            if (!doc) throw new Error('Doc missing');
 
             if (this.editingPageId) {
-                const page = await db.pages.get(this.editingPageId);
-                if (!page) throw new Error('Page missing');
-
-                await store.put(page.imagePath, master.bytes, 'image/jpeg');
-                await store.put(page.thumbPath, thumb.bytes, 'image/jpeg');
-
-                await db.pages.put({
-                    ...page,
-                    width: master.width,
-                    height: master.height,
-                    rotation: 0
-                });
-
+                await this.repo.updateExistingPage(this.editingPageId, master, thumb);
                 this.newPageIds.delete(this.editingPageId);
             } else {
-                const pageId = nanoid();
-
-                const imagePath = `docs/${docId}/pages/${pageId}.jpg`;
-                const thumbPath = `docs/${docId}/thumbs/${pageId}.jpg`;
-
-                await store.put(imagePath, master.bytes, 'image/jpeg');
-                await store.put(thumbPath, thumb.bytes, 'image/jpeg');
-
-                await db.pages.add({
-                    id: pageId,
-                    docId,
-                    imagePath,
-                    thumbPath,
-                    width: master.width,
-                    height: master.height,
-                    rotation: 0,
-                    createdAt: Date.now()
-                } as PageRecord);
-
-                doc.pageIds = [...doc.pageIds, pageId];
+                const pageId = await this.repo.addNewPage(docId, master, thumb);
                 this.newPageIds.add(pageId);
             }
 
-            doc.updatedAt = Date.now();
-            await db.docs.put(doc);
-
-            this.committed = true;
+            // saving = committed
+            this.session.markCommitted();
 
             this.clearEditor();
             await this.refreshDocInfo();
-            this.stage = this.stream ? 'camera' : 'idle';
+
+            this.session.setStage(this.camera.isRunning ? 'camera' : 'idle');
         } catch (e) {
-            this.error = (e as Error).message;
+            this.error = (e as Error).message ?? String(e);
         } finally {
             this.busy = false;
         }
@@ -402,91 +300,66 @@ export class ScanPage extends LitElement {
     }
 
     private async ensureDocId(): Promise<string> {
-        if (this.appendToDocId) return this.appendToDocId;
-        if (this.currentDocId) return this.currentDocId;
+        if (this.session.docId) return this.session.docId;
 
-        const id = nanoid();
         const now = Date.now();
         const title = `Scan ${new Date(now).toLocaleString()}`;
 
-        await db.docs.add({
-            id,
-            title,
-            folder: null,
-            tags: [],
-            createdAt: now,
-            updatedAt: now,
-            pageIds: []
-        } as DocRecord);
+        const doc = await this.repo.createDoc(title);
 
-        this.currentDocId = id;
-        this.docTitle = title;
-        return id;
+        this.docTitle = doc.title;
+        this.session.setCurrentDocId(doc.id);
+        this.session.setPageCount(0);
+
+        return doc.id;
     }
 
     private async refreshDocInfo(): Promise<void> {
-        const docId = this.docId;
+        const docId = this.session.docId;
         if (!docId) return;
 
-        const doc = await db.docs.get(docId);
-        if (!doc) return;
+        const info = await this.repo.getDocStrip(docId, 16);
+        if (!info) return;
 
-        this.docTitle = doc.title;
-        this.pageCount = doc.pageIds.length;
-
-        const N = 16;
-        const ids = doc.pageIds.slice(-N);
-
-        const pages = await db.pages.where('docId').equals(docId).toArray();
-        const pageMap = new Map(pages.map((p) => [p.id, p]));
-        const store = getFileStore();
+        this.docTitle = info.title;
+        this.session.setPageCount(info.pageCount);
 
         this.revokeStrip();
+
         const items: StripItem[] = [];
-
-        for (const id of ids) {
-            const p = pageMap.get(id);
-            if (!p) continue;
-            const bytes = await store.get(p.thumbPath);
-            const url = URL.createObjectURL(bytesToBlob(bytes, 'image/jpeg'));
-            items.push({id: p.id, url, isNew: this.newPageIds.has(p.id)});
+        for (const it of info.items) {
+            const url = URL.createObjectURL(bytesToBlob(it.thumbBytes, 'image/jpeg'));
+            items.push({id: it.id, url, isNew: this.newPageIds.has(it.id)});
         }
-
         this.strip = items;
     }
 
-    // ----------------- camera / capture / import -----------------
+    // ----------------- camera -----------------
 
     private beginCameraFromGesture(): void {
         this.error = null;
-        this.stage = 'camera';
+        this.session.setStage('camera');
 
-        if (this.stream) return;
+        if (this.camera.isRunning) return;
 
-        navigator.mediaDevices
-            .getUserMedia({video: {facingMode: {ideal: 'environment'}}, audio: false})
-            .then(async (s) => {
-                this.stream = s;
-                await this.updateComplete;
+        void (async () => {
+            try {
+                await this.updateComplete; // ensure <video> exists
+                const res = await this.camera.start(this.videoEl);
 
-                const v = this.videoEl;
-                v.srcObject = s;
-                v.onloadedmetadata = () => {
-                    v.play().catch(() => {
-                    });
-                    this.startDetector();
-                };
-            })
-            .catch((e) => {
+                this.videoW = res.width;
+                this.videoH = res.height;
+
+                this.startDetector();
+            } catch (e) {
                 this.error = (e as Error).message ?? String(e);
-                this.stage = 'idle';
-            });
+                this.session.setStage('idle');
+            }
+        })();
     }
 
     private async stopCamera(): Promise<void> {
-        this.stream?.getTracks().forEach((t) => t.stop());
-        this.stream = null;
-        this.stopDetector();
+        await this.camera.stop();
     }
 
     private async capturePhoto(fromAuto = false): Promise<void> {
@@ -496,6 +369,7 @@ export class ScanPage extends LitElement {
 
         try {
             const v = this.videoEl;
+
             const maxDim = 1800;
             const scale = Math.min(1, maxDim / Math.max(v.videoWidth, v.videoHeight));
             const w = Math.max(1, Math.round(v.videoWidth * scale));
@@ -539,12 +413,14 @@ export class ScanPage extends LitElement {
 
             await this.openNewBlobInEditor(blob);
         } catch (e) {
-            this.error = (e as Error).message;
+            this.error = (e as Error).message ?? String(e);
             if (fromAuto) this.cooldownUntil = Date.now() + 1500;
         } finally {
             this.captureInFlight = false;
         }
     }
+
+    // ----------------- import -----------------
 
     private async pickFiles(opts: { multiple: boolean }): Promise<void> {
         this.error = null;
@@ -568,7 +444,7 @@ export class ScanPage extends LitElement {
 
             await this.batchImport(files);
         } catch (e) {
-            this.error = (e as Error).message;
+            this.error = (e as Error).message ?? String(e);
         }
     }
 
@@ -578,57 +454,34 @@ export class ScanPage extends LitElement {
 
         try {
             const docId = await this.ensureDocId();
-            const store = getFileStore();
-            const doc = await db.docs.get(docId);
-            if (!doc) throw new Error('Doc missing');
 
             const importedPageIds: string[] = [];
 
             for (const file of files) {
                 const {master, thumb} = await processPhoto({blob: file, rotation: 0, filter: 'original'} as any);
 
-                const pageId = nanoid();
+                // saved immediately, but session stays uncommitted until user saves/opens
+                const pageId = await this.repo.addNewPage(docId, master, thumb);
+
                 importedPageIds.push(pageId);
                 this.newPageIds.add(pageId);
-
-                const imagePath = `docs/${docId}/pages/${pageId}.jpg`;
-                const thumbPath = `docs/${docId}/thumbs/${pageId}.jpg`;
-
-                await store.put(imagePath, master.bytes, 'image/jpeg');
-                await store.put(thumbPath, thumb.bytes, 'image/jpeg');
-
-                await db.pages.add({
-                    id: pageId,
-                    docId,
-                    imagePath,
-                    thumbPath,
-                    width: master.width,
-                    height: master.height,
-                    rotation: 0,
-                    createdAt: Date.now()
-                } as PageRecord);
-
-                doc.pageIds.push(pageId);
             }
-
-            doc.updatedAt = Date.now();
-            await db.docs.put(doc);
 
             await this.refreshDocInfo();
 
             if (importedPageIds.length > 0) {
                 await this.openExistingPageInEditor(importedPageIds[0]);
             } else {
-                this.stage = this.stream ? 'camera' : 'idle';
+                this.session.setStage(this.camera.isRunning ? 'camera' : 'idle');
             }
         } catch (e) {
-            this.error = (e as Error).message;
+            this.error = (e as Error).message ?? String(e);
         } finally {
             this.busy = false;
         }
     }
 
-    // ----------------- edge detection -----------------
+    // ----------------- detector -----------------
 
     private startDetector(): void {
         if (this.worker) return;
@@ -640,7 +493,7 @@ export class ScanPage extends LitElement {
 
             this.detecting = false;
 
-            const quad = (msg.quad as Point[] | null);
+            const quad = msg.quad as Point[] | null;
             const confidence = Number(msg.confidence ?? 0);
             const w = Number(msg.width ?? 0);
             const h = Number(msg.height ?? 0);
@@ -656,30 +509,37 @@ export class ScanPage extends LitElement {
                 this.stableSince = 0;
             }
 
-            this.drawOverlay();
             this.maybeAutoCapture();
         };
 
         this.offscreen = document.createElement('canvas');
         this.offCtx = this.offscreen.getContext('2d', {willReadFrequently: true});
 
-        const tick = () => {
-            if (!this.worker || !this.stream || this.stage !== 'camera') return;
+        // IMPORTANT: use interval so it resumes when returning to camera stage
+        this.detectorTimer = window.setInterval(() => {
+            if (!this.worker) return;
+            if (!this.camera.isRunning) return;
+            if (this.session.stage !== 'camera') return;
             this.grabAndDetect();
-            setTimeout(tick, 140);
-        };
-        tick();
+        }, 140);
     }
 
     private stopDetector(): void {
+        if (this.detectorTimer) window.clearInterval(this.detectorTimer);
+        this.detectorTimer = null;
+
         this.worker?.terminate();
         this.worker = null;
+
+        this.offscreen = null;
+        this.offCtx = null;
         this.detecting = false;
+
         this.lastDetect = null;
         this.smoothedQuad = null;
+
         this.stableSince = 0;
         this.cooldownUntil = 0;
-        this.captureInFlight = false;
     }
 
     private grabAndDetect(): void {
@@ -704,39 +564,6 @@ export class ScanPage extends LitElement {
         this.worker.postMessage({type: 'detect', width: w, height: h, rgba: img.data});
     }
 
-    private drawOverlay(): void {
-        const c = this.overlayEl;
-        if (!c) return;
-
-        const v = this.videoEl;
-        if (!v || v.videoWidth === 0 || v.videoHeight === 0) return;
-
-        c.width = v.videoWidth;
-        c.height = v.videoHeight;
-
-        const ctx = c.getContext('2d')!;
-        ctx.clearRect(0, 0, c.width, c.height);
-
-        const det = this.lastDetect;
-        const q = this.smoothedQuad;
-        if (!det || !q) return;
-
-        const sx = c.width / det.width;
-        const sy = c.height / det.height;
-
-        const conf = det.confidence;
-        ctx.lineWidth = 6;
-        ctx.strokeStyle = conf >= 0.65 ? 'rgba(16,185,129,0.9)' : 'rgba(234,179,8,0.9)';
-
-        ctx.beginPath();
-        ctx.moveTo(q[0].x * sx, q[0].y * sy);
-        ctx.lineTo(q[1].x * sx, q[1].y * sy);
-        ctx.lineTo(q[2].x * sx, q[2].y * sy);
-        ctx.lineTo(q[3].x * sx, q[3].y * sy);
-        ctx.closePath();
-        ctx.stroke();
-    }
-
     private quadStabilityScore(q: Quad, det: DetectedQuad): number {
         if (!this.smoothedQuad) return 1;
         const norm = (p: Point) => ({x: p.x / det.width, y: p.y / det.height});
@@ -751,7 +578,8 @@ export class ScanPage extends LitElement {
         if (!this.autoCapture) return;
         if (this.captureInFlight) return;
         if (Date.now() < this.cooldownUntil) return;
-        if (this.stage !== 'camera') return;
+        if (this.session.stage !== 'camera') return;
+
         if (!this.lastDetect?.quad || !this.smoothedQuad) {
             this.stableSince = 0;
             return;
@@ -788,33 +616,34 @@ export class ScanPage extends LitElement {
     // ----------------- UI helpers -----------------
 
     private renderBanner() {
-        if (this.isAppend) {
+        if (this.session.isAppend) {
             const title = this.docTitle ?? this.targetDocTitle ?? 'Document';
             return html`
                 <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 flex items-center justify-between gap-3">
                     <div class="min-w-0">
                         <div class="text-xs text-slate-400">Adding pages to</div>
                         <div class="text-sm text-slate-100 truncate">${title}</div>
-                        <div class="text-xs text-slate-500">${this.pageCount} page(s)</div>
+                        <div class="text-xs text-slate-500">${this.session.pageCount} page(s)</div>
                     </div>
                     <div class="flex gap-2">
                         <button
                                 class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
-                                ?disabled=${this.pageCount === 0}
+                                ?disabled=${this.session.pageCount === 0}
                                 @click=${() => this.openDocument()}
                         >Open
                         </button>
+
                         <button
                                 class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
                                 @click=${() => void this.exitScan()}
-                        >${this.exitLabel}
+                        >${this.session.exitLabel}
                         </button>
                     </div>
                 </div>
             `;
         }
 
-        if (!this.hasPages) return null;
+        if (!this.session.hasPages) return null;
 
         const title = this.docTitle ?? 'Document';
         return html`
@@ -822,19 +651,20 @@ export class ScanPage extends LitElement {
                 <div class="min-w-0">
                     <div class="text-xs text-slate-400">Building document</div>
                     <div class="text-sm text-slate-100 truncate">${title}</div>
-                    <div class="text-xs text-slate-500">${this.pageCount} page(s)</div>
+                    <div class="text-xs text-slate-500">${this.session.pageCount} page(s)</div>
                 </div>
                 <div class="flex gap-2">
                     <button
                             class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
-                            ?disabled=${this.pageCount === 0}
+                            ?disabled=${this.session.pageCount === 0}
                             @click=${() => this.openDocument()}
                     >Open
                     </button>
+
                     <button
                             class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
                             @click=${() => void this.exitScan()}
-                    >${this.exitLabel}
+                    >${this.session.exitLabel}
                     </button>
                 </div>
             </div>
@@ -847,22 +677,26 @@ export class ScanPage extends LitElement {
 
         return html`
             <div class="flex gap-2 overflow-x-auto py-1">
-                ${this.strip.map(it => html`
-                    <button
-                            class="relative shrink-0 rounded-lg border ${selected === it.id ? 'border-emerald-500' : 'border-slate-800'} overflow-hidden ${it.isNew ? '' : 'opacity-60'}"
-                            style="width: 76px; height: 96px;"
-                            title=${it.isNew ? 'Edit page' : 'Locked (already saved)'}
-                            @click=${() => {
-                                if (!it.isNew) return;
-                                void this.openExistingPageInEditor(it.id);
-                            }}
-                    >
-                        <img src=${it.url} class="w-full h-full object-cover" alt="thumb"/>
-                        ${it.isNew ? html`
-                            <span class="absolute top-1 left-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-semibold">NEW</span>
-                        ` : null}
-                    </button>
-                `)}
+                ${this.strip.map(
+                        (it) => html`
+                            <button
+                                    class="relative shrink-0 rounded-lg border ${selected === it.id ? 'border-emerald-500' : 'border-slate-800'}
+                     overflow-hidden ${it.isNew ? '' : 'opacity-60'}"
+                                    style="width: 76px; height: 96px;"
+                                    title=${it.isNew ? 'Edit page' : 'Locked (already saved)'}
+                                    @click=${() => {
+                                        if (!it.isNew) return;
+                                        void this.openExistingPageInEditor(it.id);
+                                    }}
+                            >
+                                <img src=${it.url} class="w-full h-full object-cover" alt="thumb"/>
+                                ${it.isNew
+                                        ? html`<span
+                                                class="absolute top-1 left-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-semibold">NEW</span>`
+                                        : null}
+                            </button>
+                        `
+                )}
             </div>
         `;
     }
@@ -870,10 +704,12 @@ export class ScanPage extends LitElement {
     // ----------------- render -----------------
 
     render() {
+        const stage: ScanStage = this.session.stage;
+
         return html`
             <div class="space-y-4">
                 <div class="flex items-center justify-between">
-                    <div class="text-lg font-semibold">${this.isAppend ? 'Add pages' : 'Scan'}</div>
+                    <div class="text-lg font-semibold">${this.session.isAppend ? 'Add pages' : 'Scan'}</div>
                     <label class="text-xs text-slate-400 flex items-center gap-2 select-none">
                         <input
                                 type="checkbox"
@@ -891,104 +727,143 @@ export class ScanPage extends LitElement {
                     </label>
                 </div>
 
-                ${this.error ? html`
-                    <div class="p-3 rounded-lg bg-red-950/40 border border-red-900 text-red-200">${this.error}</div>
-                ` : null}
+                ${this.error
+                        ? html`
+                            <div class="p-3 rounded-lg bg-red-950/40 border border-red-900 text-red-200">${this.error}
+                            </div>`
+                        : null}
 
                 ${this.renderBanner()}
                 ${this.renderStrip()}
 
-                ${this.stage === 'idle' ? html`
-                    <div class="p-4 rounded-xl border border-slate-800 bg-slate-950 space-y-3">
-                        <div class="text-sm text-slate-300">
-                            ${this.isAppend ? `Adding pages to: ${this.targetDocTitle ?? 'Document'}` : 'Start a new document'}
-                        </div>
+                ${stage === 'idle'
+                        ? html`
+                            <div class="p-4 rounded-xl border border-slate-800 bg-slate-950 space-y-3">
+                                <div class="text-sm text-slate-300">
+                                    ${this.session.isAppend
+                                            ? `Adding pages to: ${this.targetDocTitle ?? 'Document'}`
+                                            : 'Start a new document'}
+                                </div>
 
-                        <div class="flex gap-2">
-                            <button
-                                    class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold"
-                                    @click=${() => this.beginCameraFromGesture()}
-                            >Open camera
-                            </button>
+                                <div class="flex gap-2">
+                                    <button
+                                            class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold"
+                                            @click=${() => this.beginCameraFromGesture()}
+                                    >Open camera
+                                    </button>
 
-                            <button
-                                    class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
-                                    ?disabled=${this.busy}
-                                    @click=${() => this.pickFiles({multiple: true})}
-                            >Import
-                            </button>
+                                    <button
+                                            class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
+                                            ?disabled=${this.busy}
+                                            @click=${() => this.pickFiles({multiple: true})}
+                                    >Import
+                                    </button>
 
-                            <button
-                                    class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800"
-                                    @click=${() => void this.exitScan()}
-                            >${this.exitLabel}
-                            </button>
-                        </div>
-                    </div>
-                ` : null}
+                                    <button
+                                            class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800"
+                                            @click=${() => void this.exitScan()}
+                                    >${this.session.exitLabel}
+                                    </button>
+                                </div>
+                            </div>
+                        `
+                        : null}
 
-                ${this.stage === 'camera' ? html`
-                    <div class="space-y-3">
-                        <div class="rounded-xl overflow-hidden border border-slate-800 bg-black relative">
-                            <video class="w-full h-[60vh] object-cover" autoplay playsinline muted></video>
-                            <canvas data-overlay class="absolute inset-0 w-full h-full pointer-events-none"></canvas>
-                        </div>
+                ${stage === 'camera'
+                        ? html`
+                            <div class="space-y-3">
+                                <div class="rounded-xl overflow-hidden border border-slate-800 bg-black relative">
+                                    <video class="w-full h-[60vh] object-cover" autoplay playsinline muted></video>
 
-                        <div class="flex gap-2">
-                            <button
-                                    class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold disabled:opacity-60"
-                                    ?disabled=${this.busy}
-                                    @click=${() => void this.capturePhoto(false)}
-                            >Capture
-                            </button>
+                                    <scan-overlay
+                                            .detected=${this.lastDetect}
+                                            .quad=${this.smoothedQuad}
+                                            .videoW=${this.videoW}
+                                            .videoH=${this.videoH}
+                                    ></scan-overlay>
+                                </div>
 
-                            <button
-                                    class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
-                                    ?disabled=${this.busy}
-                                    @click=${() => this.pickFiles({multiple: true})}
-                            >Import
-                            </button>
+                                <div class="flex gap-2">
+                                    <button
+                                            class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold disabled:opacity-60"
+                                            ?disabled=${this.busy}
+                                            @click=${() => void this.capturePhoto(false)}
+                                    >Capture
+                                    </button>
 
-                            <button
-                                    class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800"
-                                    @click=${() => void this.exitScan()}
-                            >${this.exitLabel}
-                            </button>
-                        </div>
+                                    <button
+                                            class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
+                                            ?disabled=${this.busy}
+                                            @click=${() => this.pickFiles({multiple: true})}
+                                    >Import
+                                    </button>
 
-                        <button
-                                class="text-sm text-slate-300 hover:underline"
-                                @click=${async () => {
-                                    await this.stopCamera();
-                                    this.stage = 'idle';
-                                }}
-                        >← Back
-                        </button>
-                    </div>
-                ` : null}
+                                    <button
+                                            class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800"
+                                            @click=${() => void this.exitScan()}
+                                    >${this.session.exitLabel}
+                                    </button>
+                                </div>
 
-                ${this.stage === 'edit' ? html`
-                    <div class="space-y-3">
-                        ${keyed(this.editorKey, html`
-                            <page-editor
-                                    .blob=${this.captured!}
-                                    @page-editor-save=${this.onEditorSave}
-                                    @page-editor-cancel=${this.onEditorCancel}
-                            ></page-editor>
-                        `)}
+                                <button
+                                        class="text-sm text-slate-300 hover:underline"
+                                        @click=${async () => {
+                                            await this.stopCamera();
+                                            this.stopDetector();
+                                            this.session.setStage('idle');
+                                        }}
+                                >← Back
+                                </button>
+                            </div>
+                        `
+                        : null}
 
-                        <div class="flex justify-end">
-                            <button
-                                    class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 disabled:opacity-60"
-                                    ?disabled=${this.busy}
-                                    @click=${() => void this.exitScan()}
-                            >${this.exitLabel}
-                            </button>
-                        </div>
-                    </div>
-                ` : null}
+                ${stage === 'edit'
+                        ? html`
+                            <div class="space-y-3">
+                                ${keyed(
+                                        this.editorKey,
+                                        html`
+                                            <page-editor
+                                                    .blob=${this.captured!}
+                                                    @page-editor-save=${this.onEditorSave}
+                                                    @page-editor-cancel=${this.onEditorCancel}
+                                            ></page-editor>
+                                        `
+                                )}
+
+                                <div class="flex justify-end">
+                                    <button
+                                            class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 disabled:opacity-60"
+                                            ?disabled=${this.busy}
+                                            @click=${() => void this.exitScan()}
+                                    >${this.session.exitLabel}
+                                    </button>
+                                </div>
+                            </div>
+                        `
+                        : null}
             </div>
         `;
+    }
+
+    // ----------------- storage helpers -----------------
+
+    private clearAppendKey() {
+        try {
+            localStorage.removeItem(APPEND_DOC_KEY);
+        } catch {
+        }
+    }
+
+    private getHashParams(): URLSearchParams {
+        try {
+            const raw = location.hash || '';
+            const q = raw.includes('?') ? raw.split('?')[1] : '';
+            return new URLSearchParams(q);
+        } catch {
+            return new URLSearchParams();
+        }
     }
 }
 

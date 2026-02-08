@@ -23,20 +23,18 @@ export class PageEditor extends LitElement {
     @property({attribute: false}) blob!: Blob;
     @property({attribute: false}) filter: FilterMode = 'original';
 
-    // rotation is owned here; scan-page can reset by remounting or calling reset()
     @state() private rotation: 0 | 90 | 180 | 270 = 0;
 
     @state() private busy = false;
     @state() private err: string | null = null;
 
-    // image base (already rotated)
+    // base decoded image (already rotated in baseCanvas)
     private baseCanvas: HTMLCanvasElement | null = null;
-    private baseCtx: CanvasRenderingContext2D | null = null;
     private baseW = 0;
     private baseH = 0;
 
     @state() private quad: Quad | null = null;
-    @state() private previewUrl: string | null = null;
+
     private _previewTimer: number | null = null;
     private _previewToken = 0;
 
@@ -46,34 +44,62 @@ export class PageEditor extends LitElement {
     @query('canvas[data-edges]') private edgesEl!: HTMLCanvasElement;
     private dragIdx: number | null = null;
 
+    // preview + magnifier
+    @query('canvas[data-preview]') private previewEl!: HTMLCanvasElement;
+    @query('canvas[data-magnify]') private magnifyEl!: HTMLCanvasElement;
+
+    private history: Array<{ quad: Quad; filter: FilterMode; rotation: 0 | 90 | 180 | 270 }> = [];
+
+    @state() private showMagnify = false;
+    @state() private magnifyX = 0; // base image coords
+    @state() private magnifyY = 0;
+
+    // ---------- history ----------
+
+    private pushHistory(): void {
+        if (!this.quad) return;
+        if (this.history.length > 80) this.history.shift();
+        this.history.push({
+            quad: this.quad.map(p => ({x: p.x, y: p.y})) as Quad,
+            filter: this.filter,
+            rotation: this.rotation
+        });
+    }
+
+    /**
+     * Undo currently restores quad + filter.
+     * (Rotation undo is possible, but needs reloading the original blob + reapplying rotations.)
+     */
+    private undo(): void {
+        const last = this.history.pop();
+        if (!last) return;
+        this.quad = last.quad;
+        this.filter = last.filter;
+        this.drawEdges();
+        this.queuePreview();
+    }
+
+    // ---------- lifecycle ----------
+
     disconnectedCallback(): void {
         this.stopWorker();
-        this.revokePreview();
         if (this._previewTimer) window.clearTimeout(this._previewTimer);
         this._previewTimer = null;
         super.disconnectedCallback();
     }
 
     updated(ch: Map<string, unknown>) {
-        if (ch.has('blob')) {
-            void this.loadBlob();
-        }
-        if (ch.has('filter')) {
-            this.queuePreview();
-        }
+        if (ch.has('blob')) void this.loadBlob();
+        if (ch.has('filter')) this.queuePreview();
     }
 
     // ---------- public helpers ----------
 
     reset() {
-        this.rotation = 0;
+        // full reset = reload original blob (keeps baseCanvas consistent with rotation=0)
         this.err = null;
-        // reset quad to full rect
-        if (this.baseW && this.baseH) {
-            this.quad = fullQuad(this.baseW, this.baseH);
-            this.drawEdges();
-            this.queuePreview();
-        }
+        this.history = [];
+        void this.loadBlob();
     }
 
     rotate90() {
@@ -84,34 +110,29 @@ export class PageEditor extends LitElement {
 
     private async loadBlob(): Promise<void> {
         this.err = null;
-        this.revokePreview();
         this.quad = null;
         this.rotation = 0;
+        this.history = [];
 
         const img = await blobToImageBitmap(this.blob);
 
-        // base canvas = decoded image
         const c = document.createElement('canvas');
         c.width = img.width;
         c.height = img.height;
-        const ctx = c.getContext('2d', {willReadFrequently: true})!;
-        ctx.drawImage(img, 0, 0);
+        c.getContext('2d', {willReadFrequently: true})!.drawImage(img, 0, 0);
 
         this.baseCanvas = c;
-        this.baseCtx = ctx;
         this.baseW = img.width;
         this.baseH = img.height;
 
-        // default quad = full
         this.quad = fullQuad(this.baseW, this.baseH);
 
         await this.updateComplete;
         this.drawEdges();
 
-        // auto-detect edges (best effort)
+        // best-effort auto detect
         void this.autoDetectEdges();
 
-        // preview
         this.queuePreview();
     }
 
@@ -121,7 +142,6 @@ export class PageEditor extends LitElement {
         const canvas = this.edgesEl;
         if (!canvas || !this.baseCanvas || !this.quad) return;
 
-        // fit to container width, keep aspect
         const maxW = canvas.parentElement?.clientWidth ?? 320;
         const scale = Math.min(1, maxW / this.baseW);
 
@@ -134,10 +154,8 @@ export class PageEditor extends LitElement {
         const ctx = canvas.getContext('2d')!;
         ctx.clearRect(0, 0, w, h);
 
-        // draw image
         ctx.drawImage(this.baseCanvas, 0, 0, w, h);
 
-        // quad
         const q = this.quad;
         const sx = w / this.baseW;
         const sy = h / this.baseH;
@@ -154,7 +172,6 @@ export class PageEditor extends LitElement {
         ctx.closePath();
         ctx.stroke();
 
-        // handles
         for (let i = 0; i < 4; i++) {
             const p = q[i];
             ctx.beginPath();
@@ -190,8 +207,14 @@ export class PageEditor extends LitElement {
         if (!this.quad) return;
         const idx = this.pickHandle(ev);
         if (idx == null) return;
+
+        // start of gesture => snapshot history once
+        this.pushHistory();
+
         this.dragIdx = idx;
         (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
+
+        this.showMagnify = true;
     };
 
     private onPointerMove = (ev: PointerEvent) => {
@@ -208,20 +231,74 @@ export class PageEditor extends LitElement {
         q[this.dragIdx] = {x: ix, y: iy};
         this.quad = q;
 
+        // magnifier
+        this.magnifyX = ix;
+        this.magnifyY = iy;
+        this.drawMagnifier();
+
         this.drawEdges();
         this.queuePreview();
     };
 
     private onPointerUp = (_ev: PointerEvent) => {
         this.dragIdx = null;
+        this.showMagnify = false;
+        this.clearMagnifier();
     };
 
+    private clearMagnifier(): void {
+        const c = this.magnifyEl;
+        if (!c) return;
+        const ctx = c.getContext('2d')!;
+        ctx.clearRect(0, 0, c.width, c.height);
+    }
+
+    private drawMagnifier(): void {
+        if (!this.showMagnify || !this.baseCanvas) return;
+
+        const c = this.magnifyEl;
+        if (!c) return;
+
+        const size = 140;
+        c.width = size;
+        c.height = size;
+
+        const ctx = c.getContext('2d')!;
+        ctx.clearRect(0, 0, size, size);
+
+        const zoom = 5;
+        const sample = Math.max(18, Math.round(size / zoom));
+
+        const sx = clamp(this.magnifyX - sample / 2, 0, this.baseW - sample);
+        const sy = clamp(this.magnifyY - sample / 2, 0, this.baseH - sample);
+
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(this.baseCanvas, sx, sy, sample, sample, 0, 0, size, size);
+
+        // crosshair
+        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(size / 2, 0);
+        ctx.lineTo(size / 2, size);
+        ctx.moveTo(0, size / 2);
+        ctx.lineTo(size, size / 2);
+        ctx.stroke();
+
+        // border
+        ctx.strokeStyle = 'rgba(16,185,129,0.95)';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(1.5, 1.5, size - 3, size - 3);
+    }
+
     private async autoDetectEdges(): Promise<void> {
-        if (!this.baseCanvas || !this.baseCtx) return;
+        if (!this.baseCanvas || !this.quad) return;
 
         this.startWorker();
 
-        // downscale for detection
+        // history snapshot if we’re changing quad
+        this.pushHistory();
+
         const maxDim = 640;
         const scale = Math.min(1, maxDim / Math.max(this.baseW, this.baseH));
         const w = Math.max(1, Math.round(this.baseW * scale));
@@ -237,7 +314,6 @@ export class PageEditor extends LitElement {
         const quad = await this.detectQuad(img.data, w, h);
         if (!quad) return;
 
-        // map to full-res
         const sx = this.baseW / w;
         const sy = this.baseH / h;
 
@@ -248,7 +324,6 @@ export class PageEditor extends LitElement {
             {x: quad[3].x * sx, y: quad[3].y * sy},
         ];
 
-        // avoid ridiculous tiny quads
         const areaNorm = quadArea(mapped) / (this.baseW * this.baseH);
         if (areaNorm < 0.08) return;
 
@@ -260,6 +335,7 @@ export class PageEditor extends LitElement {
     private detectQuad(rgba: Uint8ClampedArray, w: number, h: number): Promise<Quad | null> {
         return new Promise((resolve) => {
             if (!this.worker) return resolve(null);
+
             const onMsg = (ev: MessageEvent<any>) => {
                 const msg = ev.data;
                 if (msg?.type !== 'result') return;
@@ -292,7 +368,9 @@ export class PageEditor extends LitElement {
     private async applyRotate90(): Promise<void> {
         if (!this.baseCanvas) return;
 
-        // rotate base canvas clockwise
+        // snapshot before changing geometry
+        this.pushHistory();
+
         const src = this.baseCanvas;
         const out = document.createElement('canvas');
         out.width = src.height;
@@ -303,25 +381,21 @@ export class PageEditor extends LitElement {
         ctx.rotate(Math.PI / 2);
         ctx.drawImage(src, -src.width / 2, -src.height / 2);
 
-        // rotate quad points too
         const oldH = this.baseH;
 
         this.baseCanvas = out;
-        this.baseCtx = ctx;
         this.baseW = out.width;
         this.baseH = out.height;
 
         this.rotation = (((this.rotation + 90) % 360) as any);
 
         if (this.quad) {
-            // (x,y) -> (H - y, x) based on OLD dims
             const rotated: Quad = [
-                    rot90(this.quad[0], oldH),
-                    rot90(this.quad[1], oldH),
-                    rot90(this.quad[2], oldH),
-                    rot90(this.quad[3], oldH),
-                ]
-            ;
+                rot90(this.quad[0], oldH),
+                rot90(this.quad[1], oldH),
+                rot90(this.quad[2], oldH),
+                rot90(this.quad[3], oldH),
+            ];
             this.quad = rotated;
         } else {
             this.quad = fullQuad(this.baseW, this.baseH);
@@ -332,17 +406,12 @@ export class PageEditor extends LitElement {
         this.queuePreview();
     }
 
-    // ---------- preview + save ----------
-
-    private revokePreview() {
-        if (this.previewUrl) URL.revokeObjectURL(this.previewUrl);
-        this.previewUrl = null;
-    }
+    // ---------- preview (canvas) ----------
 
     private queuePreview() {
         if (!this.baseCanvas || !this.quad) return;
         if (this._previewTimer) window.clearTimeout(this._previewTimer);
-        this._previewTimer = window.setTimeout(() => void this.updatePreview(), 140);
+        this._previewTimer = window.setTimeout(() => void this.updatePreview(), 120);
     }
 
     private async updatePreview(): Promise<void> {
@@ -354,12 +423,31 @@ export class PageEditor extends LitElement {
             const previewCanvas = await this.renderFlattenedCanvas(1400);
             if (token !== this._previewToken) return;
 
-            // encode lightweight preview
-            const blob = await canvasToJpegBlob(previewCanvas, 0.82);
-            if (token !== this._previewToken) return;
+            await this.updateComplete;
 
-            this.revokePreview();
-            this.previewUrl = URL.createObjectURL(blob);
+            const out = this.previewEl;
+            if (!out) return;
+
+            // draw "contain" into the visible canvas
+            const dpr = window.devicePixelRatio || 1;
+            const cw = Math.max(1, out.clientWidth || 1);
+            const ch = Math.max(1, out.clientHeight || 1);
+
+            out.width = Math.round(cw * dpr);
+            out.height = Math.round(ch * dpr);
+
+            const ctx = out.getContext('2d')!;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, cw, ch);
+
+            const s = Math.min(cw / previewCanvas.width, ch / previewCanvas.height);
+            const dw = previewCanvas.width * s;
+            const dh = previewCanvas.height * s;
+            const dx = (cw - dw) / 2;
+            const dy = (ch - dh) / 2;
+
+            ctx.imageSmoothingEnabled = true;
+            ctx.drawImage(previewCanvas, dx, dy, dw, dh);
         } catch {
             // ignore preview failures
         } finally {
@@ -373,7 +461,6 @@ export class PageEditor extends LitElement {
         const srcH = this.baseH;
         const q = this.quad!;
 
-        // output size + cap
         const out0 = computeOutputSize(q);
         const s = Math.min(1, maxDim / Math.max(out0.w, out0.h));
         const outW = Math.max(1, Math.round(out0.w * s));
@@ -384,7 +471,6 @@ export class PageEditor extends LitElement {
 
         const warped = warpRgbaToCanvas(img.data, srcW, srcH, q, outW, outH);
 
-        // filters (in-place)
         if (this.filter !== 'original') {
             const wctx = warped.getContext('2d', {willReadFrequently: true})!;
             const data = wctx.getImageData(0, 0, warped.width, warped.height);
@@ -392,10 +478,8 @@ export class PageEditor extends LitElement {
             if (this.filter === 'grayscale') {
                 grayscaleInPlace(data.data);
             } else if (this.filter === 'bw') {
-                // ensure ArrayBuffer-backed array for ImageData constructor
                 const bw = adaptiveBwFromRgba(data.data, warped.width, warped.height);
-                const bwCopy = new Uint8ClampedArray(bw);
-                data.data.set(bwCopy);
+                data.data.set(new Uint8ClampedArray(bw));
             }
 
             wctx.putImageData(data, 0, 0);
@@ -403,6 +487,8 @@ export class PageEditor extends LitElement {
 
         return warped;
     }
+
+    // ---------- save ----------
 
     private async encode(masterMax = 2200, thumbMax = 360): Promise<PageEditorSaveDetail> {
         const masterCanvas = await this.renderFlattenedCanvas(masterMax);
@@ -452,25 +538,32 @@ export class PageEditor extends LitElement {
                             <div class="text-sm font-medium text-slate-200">Edges</div>
                             <div class="text-xs text-slate-500">Auto edges + drag corners</div>
                         </div>
+
                         <div class="flex gap-2">
                             <button
                                     class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
                                     ?disabled=${this.busy}
                                     @click=${() => void this.autoDetectEdges()}
-                            >
-                                Auto
+                            >Auto
                             </button>
+
                             <button
                                     class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm disabled:opacity-60"
                                     ?disabled=${this.busy}
                                     @click=${() => this.reset()}
-                            >
-                                Reset
+                            >Reset
+                            </button>
+
+                            <button
+                                    class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
+                                    ?disabled=${this.busy || this.history.length === 0}
+                                    @click=${() => this.undo()}
+                            >Undo
                             </button>
                         </div>
                     </div>
 
-                    <div class="rounded-xl overflow-hidden border border-slate-800 bg-black">
+                    <div class="rounded-xl overflow-hidden border border-slate-800 bg-black relative">
                         <canvas
                                 data-edges
                                 class="w-full h-auto touch-none select-none"
@@ -479,6 +572,13 @@ export class PageEditor extends LitElement {
                                 @pointerup=${this.onPointerUp}
                                 @pointercancel=${this.onPointerUp}
                         ></canvas>
+
+                        <div class=${[
+                            'absolute top-2 right-2 rounded-xl overflow-hidden border border-slate-800 bg-black shadow-lg',
+                            this.showMagnify ? '' : 'hidden'
+                        ].join(' ')}>
+                            <canvas data-magnify class="block"></canvas>
+                        </div>
                     </div>
                 </div>
 
@@ -493,8 +593,7 @@ export class PageEditor extends LitElement {
                                 class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
                                 ?disabled=${this.busy}
                                 @click=${() => this.rotate90()}
-                        >
-                            Rotate 90°
+                        >Rotate 90°
                         </button>
                     </div>
 
@@ -504,7 +603,10 @@ export class PageEditor extends LitElement {
                                 class="bg-slate-900 border border-slate-700 rounded-lg px-2 py-2 text-sm"
                                 .value=${this.filter}
                                 @change=${(e: Event) => {
+                                    // undo snapshot
+                                    this.pushHistory();
                                     this.filter = (e.target as HTMLSelectElement).value as FilterMode;
+                                    this.queuePreview();
                                 }}
                         >
                             <option value="original">Original</option>
@@ -513,11 +615,15 @@ export class PageEditor extends LitElement {
                         </select>
                     </div>
 
-                    <div class="rounded-xl overflow-hidden border border-slate-800 bg-black aspect-[3/4] flex items-center justify-center">
-                        ${this.previewUrl
-                                ? html`<img src=${this.previewUrl} class="w-full h-full object-contain" alt="preview"/>`
-                                : html`
-                                    <div class="text-xs text-slate-500 px-3 text-center">Preparing preview…</div>`}
+                    <div class="rounded-xl overflow-hidden border border-slate-800 bg-black aspect-[3/4] relative">
+                        <canvas data-preview class="w-full h-full block"></canvas>
+
+                        ${!this.baseCanvas
+                                ? html`
+                                    <div class="absolute inset-0 flex items-center justify-center text-xs text-slate-500">
+                                        Preparing preview…
+                                    </div>`
+                                : null}
                     </div>
 
                     <div class="flex gap-2">
@@ -528,12 +634,12 @@ export class PageEditor extends LitElement {
                         >
                             ${this.busy ? 'Saving…' : 'Save page'}
                         </button>
+
                         <button
                                 class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 disabled:opacity-60"
                                 ?disabled=${this.busy}
                                 @click=${this.onCancel}
-                        >
-                            Back
+                        >Back
                         </button>
                     </div>
                 </div>
@@ -562,7 +668,6 @@ function clamp(v: number, a: number, b: number) {
 }
 
 async function blobToImageBitmap(blob: Blob): Promise<ImageBitmap> {
-    // works well in modern browsers
     return await createImageBitmap(blob);
 }
 
