@@ -12,7 +12,8 @@ import {takePendingImport} from '../services/pending-import';
 import {bytesToBlob} from '../lib/bytes';
 import {processPhoto} from '../lib/image/pipeline';
 import {DetectGovernor} from '../lib/scan/detect-governor';
-import {getPlatformCaps} from '../services/platform'; // Imported for platform check
+import {getPlatformCaps} from '../services/platform';
+
 import '../components/scan-overlay';
 import '../components/page-editor';
 import type {PageEditorSaveDetail} from '../components/page-editor';
@@ -38,7 +39,7 @@ export class ScanPage extends LitElement {
     private camera = new CameraManager();
     private session = new ScanSessionState(() => this.requestUpdate());
     private repo = new ScanRepo();
-    private caps = getPlatformCaps(); // Cache capabilities
+    private caps = getPlatformCaps();
 
     @state() private busy = false;
     @state() private error: string | null = null;
@@ -125,14 +126,12 @@ export class ScanPage extends LitElement {
 
         this.clearEditor();
         this.newPageIds.clear();
-
         this.clearImportReview();
 
         this.lastDetect = null;
         this.smoothedQuad = null;
 
         const params = this.getHashParams();
-
         const forceNew = params.get('new') === '1';
         if (forceNew) this.clearAppendKey();
 
@@ -177,15 +176,10 @@ export class ScanPage extends LitElement {
             if (!ok) return;
 
             await this.repo.deleteDocCompletely(decision.docId);
-
             this.session.resetAll();
             this.revokeStrip();
             this.newPageIds.clear();
             this.clearEditor();
-
-            this.docTitle = null;
-            this.targetDocTitle = null;
-
             location.hash = '#/library';
             return;
         }
@@ -247,17 +241,13 @@ export class ScanPage extends LitElement {
     private onEditorCancel = () => {
         if (this.importReviewQueue.length > 0) {
             const remaining = this.importReviewQueue.length;
-            const ok = confirm(
-                `Stop reviewing imported pages?
-
-${remaining} page(s) will remain unedited (kept as-is).`,
-            );
+            const ok = confirm(`Stop reviewing imported pages?\n${remaining} page(s) will remain unedited.`);
             if (!ok) return;
             this.clearImportReview();
         } else if (this.captured) {
             const msg = this.editingPageId
-                ? 'Discard edits to this page? Your changes will be lost.'
-                : 'Discard this capture? Your work will be lost.';
+                ? 'Discard edits?'
+                : 'Discard this capture?';
             const ok = confirm(msg);
             if (!ok) return;
         }
@@ -273,7 +263,6 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
         try {
             const {master, thumb} = ev.detail;
             const docId = await this.ensureDocId();
-
             const editedId = this.editingPageId;
 
             if (editedId) {
@@ -316,31 +305,23 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
 
     private async ensureDocId(): Promise<string> {
         if (this.session.docId) return this.session.docId;
-
         const now = Date.now();
         const title = `Scan ${new Date(now).toLocaleString()}`;
-
         const doc = await this.repo.createDoc(title);
         this.docTitle = doc.title;
-
         this.session.setCurrentDocId(doc.id);
         this.session.setPageCount(0);
-
         return doc.id;
     }
 
     private async refreshDocInfo(): Promise<void> {
         const docId = this.session.docId;
         if (!docId) return;
-
         const info = await this.repo.getDocStrip(docId, 16);
         if (!info) return;
-
         this.docTitle = info.title;
         this.session.setPageCount(info.pageCount);
-
         this.revokeStrip();
-
         const items: StripItem[] = [];
         for (const it of info.items) {
             const url = URL.createObjectURL(bytesToBlob(it.thumbBytes, 'image/jpeg'));
@@ -349,21 +330,14 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
         this.strip = items;
     }
 
-    // --- Core "Eye Transplant" Logic ---
-
     private beginCameraFromGesture(): void {
         this.error = null;
-
-        // If native, invoke the "Lens-class" system scanner
         if (this.caps.isCapacitor) {
             void this.invokeNativeScanner();
             return;
         }
-
-        // Fallback: Web Camera
         this.session.setStage('camera');
         if (this.camera.isRunning) return;
-
         void (async () => {
             try {
                 await this.updateComplete;
@@ -381,32 +355,19 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
     private async invokeNativeScanner(): Promise<void> {
         this.busy = true;
         try {
-            // Trigger the native UI (ML Kit / VisionKit)
-            const {scannedImages} = await DocumentScanner.scanDocument({
-                pageLimit: 24, // Fix 1: Correct property name
-            });
-
-            // Fix 2: Check if scannedImages exists
+            const {scannedImages} = await DocumentScanner.scanDocument({pageLimit: 24});
             if (scannedImages && scannedImages.length > 0) {
-                // Convert file URIs to Blobs for our pipeline
                 const files: File[] = [];
                 for (const uri of scannedImages) {
-                    // Safe fetch for Capacitor local files
                     const webPath = Capacitor.convertFileSrc(uri);
                     const res = await fetch(webPath);
                     const blob = await res.blob();
                     files.push(new File([blob], 'scan.jpg', {type: 'image/jpeg'}));
                 }
-
-                // Inject into existing batch pipeline
-                if (files.length === 1) {
-                    await this.openNewBlobInEditor(files[0]);
-                } else {
-                    await this.batchImport(files);
-                }
+                if (files.length === 1) await this.openNewBlobInEditor(files[0]);
+                else await this.batchImport(files);
             }
         } catch (e) {
-            // User cancelled or error
             // console.warn(e);
         } finally {
             this.busy = false;
@@ -421,15 +382,12 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
         this.error = null;
         if (this.captureInFlight) return;
         this.captureInFlight = true;
-
         try {
             const v = this.videoEl;
-
             const maxDim = 1800;
             const scale = Math.min(1, maxDim / Math.max(v.videoWidth, v.videoHeight));
             const w = Math.max(1, Math.round(v.videoWidth * scale));
             const h = Math.max(1, Math.round(v.videoHeight * scale));
-
             const canvas = document.createElement('canvas');
             canvas.width = w;
             canvas.height = h;
@@ -443,29 +401,24 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
             if (det?.quad && q && det.confidence >= 0.65) {
                 const sx = w / det.width;
                 const sy = h / det.height;
-
                 const mapped: Quad = [
                     {x: q[0].x * sx, y: q[0].y * sy},
                     {x: q[1].x * sx, y: q[1].y * sy},
                     {x: q[2].x * sx, y: q[2].y * sy},
                     {x: q[3].x * sx, y: q[3].y * sy},
                 ];
-
                 const src = ctx.getImageData(0, 0, w, h);
                 const out = computeOutputSize(mapped);
-
                 const cap = 1800;
                 const s2 = Math.min(1, cap / Math.max(out.w, out.h));
                 const outW = Math.max(1, Math.round(out.w * s2));
                 const outH = Math.max(1, Math.round(out.h * s2));
-
                 finalCanvas = warpRgbaToCanvas(src.data, w, h, mapped, outW, outH);
             }
 
             const blob: Blob = await new Promise((resolve, reject) =>
                 finalCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Capture failed'))), 'image/jpeg', 0.9),
             );
-
             await this.openNewBlobInEditor(blob);
         } catch (e) {
             this.error = (e as Error).message ?? String(e);
@@ -482,19 +435,15 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
             input.type = 'file';
             input.accept = 'image/*';
             input.multiple = opts.multiple;
-
             const files: File[] = await new Promise((resolve) => {
                 input.onchange = () => resolve(input.files ? Array.from(input.files) : []);
                 input.click();
             });
-
             if (files.length === 0) return;
-
             if (files.length === 1) {
                 await this.openNewBlobInEditor(files[0]);
                 return;
             }
-
             await this.batchImport(files);
         } catch (e) {
             this.error = (e as Error).message ?? String(e);
@@ -504,20 +453,16 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
     private async batchImport(files: File[]): Promise<void> {
         this.busy = true;
         this.error = null;
-
         try {
             const docId = await this.ensureDocId();
             const importedPageIds: string[] = [];
-
             for (const file of files) {
                 const {master, thumb} = await processPhoto({blob: file, rotation: 0, filter: 'original'} as any);
                 const pageId = await this.repo.addNewPage(docId, master, thumb);
                 importedPageIds.push(pageId);
                 this.newPageIds.add(pageId);
             }
-
             await this.refreshDocInfo();
-
             if (importedPageIds.length > 0) {
                 this.importReviewQueue = importedPageIds.slice();
                 this.importReviewTotal = importedPageIds.length;
@@ -535,27 +480,19 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
 
     private startDetector(): void {
         if (this.worker) return;
-
         this.worker = new Worker(new URL('../lib/scan/edge-worker.ts', import.meta.url), {type: 'module'});
-
         this.worker.onmessage = (ev: MessageEvent<any>) => {
             const msg = ev.data;
             if (msg?.type !== 'result') return;
-
             this.detecting = false;
-
             const tMs = Number(msg.tMs ?? 0);
             if (tMs > 0) this.detGov.onResult(tMs);
-
-            if (this.detGov.isTooSlowForAutoCapture) {
-                this.stableSince = 0;
-            }
+            if (this.detGov.isTooSlowForAutoCapture) this.stableSince = 0;
 
             const quad = msg.quad as Point[] | null;
             const confidence = Number(msg.confidence ?? 0);
             const w = Number(msg.width ?? 0);
             const h = Number(msg.height ?? 0);
-
             const det: DetectedQuad = {quad: quad ? (quad as any) : null, confidence, width: w, height: h};
             this.lastDetect = det;
 
@@ -566,33 +503,26 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
                 this.smoothedQuad = null;
                 this.stableSince = 0;
             }
-
             this.maybeAutoCapture();
         };
 
         this.offscreen = document.createElement('canvas');
         this.offCtx = this.offscreen.getContext('2d', {willReadFrequently: true});
-
         const token = ++this.detectLoopToken;
-
         const tick = () => {
             if (token !== this.detectLoopToken) return;
             if (!this.worker) return;
-
             if (!this.camera.isRunning || this.session.stage !== 'camera') {
                 this.detectLoopTimer = window.setTimeout(tick, 250);
                 return;
             }
-
             if (document.hidden) {
                 this.detectLoopTimer = window.setTimeout(tick, 800);
                 return;
             }
-
             this.grabAndDetect();
             this.detectLoopTimer = window.setTimeout(tick, this.detGov.intervalMs);
         };
-
         tick();
     }
 
@@ -600,17 +530,13 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
         this.detectLoopToken++;
         if (this.detectLoopTimer) window.clearTimeout(this.detectLoopTimer);
         this.detectLoopTimer = null;
-
         this.worker?.terminate();
         this.worker = null;
-
         this.offscreen = null;
         this.offCtx = null;
         this.detecting = false;
-
         this.lastDetect = null;
         this.smoothedQuad = null;
-
         this.stableSince = 0;
         this.cooldownUntil = 0;
     }
@@ -618,21 +544,16 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
     private grabAndDetect(): void {
         if (!this.worker || !this.offCtx || !this.offscreen) return;
         if (this.detecting) return;
-
         const v = this.videoEl;
         if (!v || v.videoWidth === 0 || v.videoHeight === 0) return;
-
         const maxDim = this.detGov.maxDim;
         const scale = Math.min(1, maxDim / Math.max(v.videoWidth, v.videoHeight));
         const w = Math.max(1, Math.round(v.videoWidth * scale));
         const h = Math.max(1, Math.round(v.videoHeight * scale));
-
         this.offscreen.width = w;
         this.offscreen.height = h;
-
         this.offCtx.drawImage(v, 0, 0, w, h);
         const img = this.offCtx.getImageData(0, 0, w, h);
-
         this.detecting = true;
         this.worker.postMessage({type: 'detect', width: w, height: h, rgba: img.data});
     }
@@ -652,37 +573,30 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
         if (this.captureInFlight) return;
         if (Date.now() < this.cooldownUntil) return;
         if (this.session.stage !== 'camera') return;
-
         if (this.detGov.isTooSlowForAutoCapture) {
             this.stableSince = 0;
             return;
         }
-
         if (!this.lastDetect?.quad || !this.smoothedQuad) {
             this.stableSince = 0;
             return;
         }
-
         const det = this.lastDetect;
         const q = this.smoothedQuad;
-
         if (det.confidence < 0.72) {
             this.stableSince = 0;
             return;
         }
-
         const area = quadArea(q) / (det.width * det.height);
         if (area < 0.18) {
             this.stableSince = 0;
             return;
         }
-
         const jitter = this.quadStabilityScore(q, det);
         if (jitter > 0.012) {
             this.stableSince = 0;
             return;
         }
-
         if (this.stableSince === 0) this.stableSince = Date.now();
         if (Date.now() - this.stableSince > 650) {
             void this.capturePhoto(true);
@@ -702,26 +616,19 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
                         <div class="text-xs text-slate-500">${this.session.pageCount} page(s)</div>
                     </div>
                     <div class="flex gap-2">
-                        <button
-                                class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
-                                ?disabled=${this.session.pageCount === 0}
-                                @click=${() => this.openDocument()}
-                        >
+                        <button class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
+                                ?disabled=${this.session.pageCount === 0} @click=${() => this.openDocument()}>
                             Open
                         </button>
-                        <button
-                                class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
-                                @click=${() => void this.exitScan()}
-                        >
+                        <button class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
+                                @click=${() => void this.exitScan()}>
                             ${this.session.exitLabel}
                         </button>
                     </div>
                 </div>
             `;
         }
-
         if (!this.session.hasPages) return null;
-
         const title = this.docTitle ?? 'Document';
         return html`
             <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 flex items-center justify-between gap-3">
@@ -731,17 +638,12 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
                     <div class="text-xs text-slate-500">${this.session.pageCount} page(s)</div>
                 </div>
                 <div class="flex gap-2">
-                    <button
-                            class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
-                            ?disabled=${this.session.pageCount === 0}
-                            @click=${() => this.openDocument()}
-                    >
+                    <button class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
+                            ?disabled=${this.session.pageCount === 0} @click=${() => this.openDocument()}>
                         Open
                     </button>
-                    <button
-                            class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
-                            @click=${() => void this.exitScan()}
-                    >
+                    <button class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
+                            @click=${() => void this.exitScan()}>
                         ${this.session.exitLabel}
                     </button>
                 </div>
@@ -752,208 +654,138 @@ ${remaining} page(s) will remain unedited (kept as-is).`,
     private renderStrip() {
         if (!this.strip.length) return null;
         const selected = this.editingPageId;
-
         return html`
             <div class="flex gap-2 overflow-x-auto py-1">
-                ${this.strip.map(
-                        (it) => html`
-                            <button
-                                    class="relative shrink-0 rounded-lg border ${selected === it.id ? 'border-emerald-500' : 'border-slate-800'} overflow-hidden ${it.isNew ? '' : 'opacity-60'}"
-                                    style="width: 76px; height: 96px;"
-                                    title=${it.isNew ? 'Edit page' : 'Locked (already saved)'}
-                                    @click=${() => {
-                                        if (!it.isNew) return;
-                                        void this.openExistingPageInEditor(it.id);
-                                    }}
-                            >
-                                <img src=${it.url} class="w-full h-full object-cover" alt="thumb"/>
-                                ${it.isNew
-                                        ? html`<span
-                                                class="absolute top-1 left-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-semibold">NEW</span>`
-                                        : null}
-                            </button>
-                        `,
-                )}
+                ${this.strip.map((it) => html`
+                    <button class="relative shrink-0 rounded-lg border ${selected === it.id ? 'border-emerald-500' : 'border-slate-800'} overflow-hidden ${it.isNew ? '' : 'opacity-60'}"
+                            style="width: 76px; height: 96px;"
+                            title=${it.isNew ? 'Edit page' : 'Locked (already saved)'}
+                            @click=${() => {
+            if (it.isNew) void this.openExistingPageInEditor(it.id);
+        }}>
+                        <img src=${it.url} class="w-full h-full object-cover" alt="thumb"/>
+                        ${it.isNew ? html`<span class="absolute top-1 left-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-semibold">NEW</span>` : null}
+                    </button>
+                `)}
             </div>
         `;
     }
 
     render() {
         const stage: ScanStage = this.session.stage;
-
         return html`
             <div class="space-y-4">
                 <div class="flex items-center justify-between">
                     <div class="text-lg font-semibold">${this.session.isAppend ? 'Add pages' : 'Scan'}</div>
                     ${!this.caps.isCapacitor ? html`
-                        <label class="text-xs text-slate-400 flex items-center gap-2 select-none">
-                            <input
-                                    type="checkbox"
-                                    .checked=${this.autoCapture}
-                                    @change=${(e: Event) => {
-                                        const v = (e.target as HTMLInputElement).checked;
-                                        this.autoCapture = v;
-                                        try {
-                                            localStorage.setItem(AUTO_KEY, v ? '1' : '0');
-                                        } catch {
-                                        }
-                                    }}
-                            />
-                            Auto-capture
-                        </label>` : null}
+                    <label class="text-xs text-slate-400 flex items-center gap-2 select-none">
+                        <input type="checkbox" .checked=${this.autoCapture}
+                               @change=${(e: Event) => {
+            const v = (e.target as HTMLInputElement).checked;
+            this.autoCapture = v;
+            try {
+                localStorage.setItem(AUTO_KEY, v ? '1' : '0');
+            } catch {
+            }
+        }} />
+                        Auto-capture
+                    </label>` : null}
                 </div>
 
-                ${this.error
-                        ? html`
-                            <div class="p-3 rounded-lg bg-red-950/40 border border-red-900 text-red-200">${this.error}
-                            </div>`
-                        : null}
+                ${this.error ? html`<div class="p-3 rounded-lg bg-red-950/40 border border-red-900 text-red-200">${this.error}</div>` : null}
 
                 ${this.renderBanner()} ${this.renderStrip()}
 
-                ${stage === 'idle'
-                        ? html`
-                            <div class="p-4 rounded-xl border border-slate-800 bg-slate-950 space-y-3">
-                                <div class="text-sm text-slate-300">
-                                    ${this.session.isAppend ? `Adding pages to: ${this.targetDocTitle ?? 'Document'}` : 'Start a new document'}
-                                </div>
+                ${stage === 'idle' ? html`
+                    <div class="p-4 rounded-xl border border-slate-800 bg-slate-950 space-y-3">
+                        <div class="text-sm text-slate-300">
+                            ${this.session.isAppend ? `Adding pages to: ${this.targetDocTitle ?? 'Document'}` : 'Start a new document'}
+                        </div>
+                        <div class="flex gap-2">
+                            <button class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold"
+                                    @click=${() => this.beginCameraFromGesture()}>
+                                ${this.caps.isCapacitor ? 'Start Scanner' : 'Open Camera'}
+                            </button>
+                            <button class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
+                                    ?disabled=${this.busy} @click=${() => this.pickFiles({multiple: true})}>
+                                Import
+                            </button>
+                            <button class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800"
+                                    @click=${() => void this.exitScan()}>
+                                ${this.session.exitLabel}
+                            </button>
+                        </div>
+                    </div>
+                ` : null}
 
-                                <div class="flex gap-2">
-                                    <button
-                                            class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold"
-                                            @click=${() => this.beginCameraFromGesture()}
-                                    >
-                                        ${this.caps.isCapacitor ? 'Start Scanner' : 'Open Camera'}
-                                    </button>
-
-                                    ${this.camera.torchSupported && !this.caps.isCapacitor
-                                            ? html`
-                                                <button
-                                                        class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
-                                                        ?disabled=${this.busy || !this.camera.isRunning}
-                                                        @click=${async () => {
-                                                            this.error = null;
-                                                            try {
-                                                                await this.camera.toggleTorch();
-                                                                this.requestUpdate();
-                                                            } catch (e) {
-                                                                this.error = (e as Error).message ?? String(e);
-                                                            }
-                                                        }}
-                                                >
-                                                    ${this.camera.torchOn ? 'Torch on' : 'Torch off'}
-                                                </button>`
-                                            : null}
-
-                                    <button
-                                            class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
-                                            ?disabled=${this.busy}
-                                            @click=${() => this.pickFiles({multiple: true})}
-                                    >
-                                        Import
-                                    </button>
-
-                                    <button
-                                            class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800"
-                                            @click=${() => void this.exitScan()}
-                                    >
-                                        ${this.session.exitLabel}
-                                    </button>
-                                </div>
-                            </div>
-                        `
-                        : null}
-
-                ${stage === 'camera'
-                        ? html`
-                            <div class="space-y-3">
-                                <div class="rounded-xl overflow-hidden border border-slate-800 bg-black relative">
-                                    <video class="w-full h-[60vh] object-cover" autoplay playsinline muted></video>
-
-                                    <scan-overlay
-                                            .detected=${this.lastDetect}
-                                            .quad=${this.smoothedQuad}
-                                            .videoW=${this.videoW}
-                                            .videoH=${this.videoH}
-                                    ></scan-overlay>
-                                </div>
-
-                                <div class="flex gap-2">
-                                    <button
-                                            class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold disabled:opacity-60"
-                                            ?disabled=${this.busy}
-                                            @click=${() => void this.capturePhoto(false)}
-                                    >
-                                        Capture
-                                    </button>
-
-                                    <button
-                                            class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
-                                            ?disabled=${this.busy}
-                                            @click=${() => this.pickFiles({multiple: true})}
-                                    >
-                                        Import
-                                    </button>
-
-                                    <button
-                                            class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800"
-                                            @click=${() => void this.exitScan()}
-                                    >
-                                        ${this.session.exitLabel}
-                                    </button>
-                                </div>
-
-                                <button
-                                        class="text-sm text-slate-300 hover:underline"
+                ${stage === 'camera' ? html`
+                    <div class="space-y-3">
+                        <div class="rounded-xl overflow-hidden border border-slate-800 bg-black relative">
+                            <video class="w-full h-[60vh] object-cover" autoplay playsinline muted></video>
+                            <scan-overlay .detected=${this.lastDetect} .quad=${this.smoothedQuad} .videoW=${this.videoW} .videoH=${this.videoH}></scan-overlay>
+                            
+                            ${this.camera.torchSupported ? html`
+                                <button class="absolute top-4 right-4 p-3 rounded-full bg-black/50 hover:bg-black/70 text-white z-20"
                                         @click=${async () => {
-                                            await this.stopCamera();
-                                            this.stopDetector();
-                                            this.session.setStage('idle');
-                                        }}
-                                >
-                                    ← Back
+            try {
+                await this.camera.toggleTorch();
+                this.requestUpdate();
+            } catch {
+            }
+        }}>
+                                    <svg class="w-6 h-6 ${this.camera.torchOn ? 'text-yellow-400 fill-current' : 'text-slate-200'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                                    </svg>
                                 </button>
-                            </div>
-                        `
-                        : null}
+                            ` : null}
+                        </div>
 
-                ${stage === 'edit'
-                        ? html`
-                            <div class="space-y-3">
-                                ${this.importReviewTotal > 0
-                                        ? html`
-                                            <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 text-slate-200 flex items-center justify-between gap-3">
-                                                <div class="text-sm">
-                                                    Reviewing imported pages
-                                                    <span class="text-slate-400">${this.importReviewIndex}
-                                                        /${this.importReviewTotal}</span>
-                                                </div>
-                                                <div class="text-xs text-slate-400">Save to continue</div>
-                                            </div>`
-                                        : null}
-                                ${keyed(
-                                        this.editorKey,
-                                        html`
-                                            <page-editor
-                                                    .blob=${this.captured!}
-                                                    @page-editor-save=${this.onEditorSave}
-                                                    @page-editor-cancel=${this.onEditorCancel}
-                                            ></page-editor>
-                                        `,
-                                )}
+                        <div class="flex gap-2">
+                            <button class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold disabled:opacity-60"
+                                    ?disabled=${this.busy} @click=${() => void this.capturePhoto(false)}>
+                                Capture
+                            </button>
+                            <button class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
+                                    ?disabled=${this.busy} @click=${() => this.pickFiles({multiple: true})}>
+                                Import
+                            </button>
+                            <button class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800"
+                                    @click=${() => void this.exitScan()}>
+                                ${this.session.exitLabel}
+                            </button>
+                        </div>
+                        <button class="text-sm text-slate-300 hover:underline"
+                                @click=${async () => {
+            await this.stopCamera();
+            this.stopDetector();
+            this.session.setStage('idle');
+        }}>
+                            ← Back
+                        </button>
+                    </div>
+                ` : null}
 
-                                <div class="flex justify-end">
-                                    <button
-                                            class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 disabled:opacity-60"
-                                            ?disabled=${this.busy}
-                                            @click=${() => void this.exitScan()}
-                                    >
-                                        ${this.session.exitLabel}
-                                    </button>
-                                </div>
-                            </div>
-                        `
-                        : null}
+                ${stage === 'edit' ? html`
+                    <div class="space-y-3">
+                        ${this.importReviewTotal > 0 ? html`
+                            <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 text-slate-200 flex items-center justify-between gap-3">
+                                <div class="text-sm">Reviewing imported pages <span class="text-slate-400">${this.importReviewIndex}/${this.importReviewTotal}</span></div>
+                                <div class="text-xs text-slate-400">Save to continue</div>
+                            </div>` : null}
+                        ${keyed(this.editorKey, html`
+                            <page-editor .blob=${this.captured!}
+                                         @page-editor-save=${this.onEditorSave}
+                                         @page-editor-cancel=${this.onEditorCancel}
+                            ></page-editor>
+                        `)}
+                        <div class="flex justify-end">
+                            <button class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 disabled:opacity-60"
+                                    ?disabled=${this.busy} @click=${() => void this.exitScan()}>
+                                ${this.session.exitLabel}
+                            </button>
+                        </div>
+                    </div>
+                ` : null}
             </div>
         `;
     }

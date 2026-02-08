@@ -7,8 +7,11 @@ import {getFileStore} from '../services/filestore';
 import {shareOrDownload} from '../services/share';
 import {buildPdfForDoc} from '../lib/pdf';
 import {jsonFile, makeZip} from '../lib/zip';
-import {bytesToBlob, toArrayBuffer} from '../lib/bytes';
+import {bytesToBlob} from '../lib/bytes';
+import {ScanRepo} from './scan/scan-repo';
 
+import '../components/page-editor';
+import type {PageEditorSaveDetail} from '../components/page-editor';
 import type {DocRecord, PageRecord} from '../domain/types';
 
 @customElement('doc-page')
@@ -19,12 +22,13 @@ export class DocPage extends LitElement {
 
     @property({attribute: false}) docId!: string;
 
+    private repo = new ScanRepo();
+
     @state() private doc: DocRecord | null = null;
     @state() private pages: PageRecord[] = [];
     @state() private thumbs: Record<string, string> = {};
     @state() private busy = false;
     @state() private error: string | null = null;
-    @state() private justImported = false;
 
     // Viewer States
     @state() private viewerOpen = false;
@@ -34,67 +38,25 @@ export class DocPage extends LitElement {
     @state() private viewerIndex = 0;
     @state() private showOcrOverlay = false;
 
-    private revokeViewerUrl() {
-        if (this.viewerUrl) URL.revokeObjectURL(this.viewerUrl);
-        this.viewerUrl = null;
-    }
-
-    private closeViewer = () => {
-        this.viewerOpen = false;
-        this.viewerBusy = false;
-        this.viewerErr = null;
-        this.showOcrOverlay = false;
-        this.revokeViewerUrl();
-    };
-
-    private async openViewerAt(index: number): Promise<void> {
-        if (!this.doc) return;
-        if (index < 0 || index >= this.pages.length) return;
-
-        this.viewerErr = null;
-        this.viewerBusy = true;
-        this.viewerOpen = true;
-        this.viewerIndex = index;
-        this.showOcrOverlay = false;
-
-        try {
-            this.revokeViewerUrl();
-
-            const p = this.pages[index];
-            const store = getFileStore();
-            const bytes = await store.get(p.imagePath);
-            const blob = bytesToBlob(bytes, 'image/jpeg');
-            this.viewerUrl = URL.createObjectURL(blob);
-        } catch (e) {
-            this.viewerErr = (e as Error).message ?? String(e);
-        } finally {
-            this.viewerBusy = false;
-        }
-    }
-
-    private async viewerPrev(): Promise<void> {
-        await this.openViewerAt(this.viewerIndex - 1);
-    }
-
-    private async viewerNext(): Promise<void> {
-        await this.openViewerAt(this.viewerIndex + 1);
-    }
+    // Editor States
+    @state() private editingPage: PageRecord | null = null;
+    @state() private editingBlob: Blob | null = null;
 
     async connectedCallback(): Promise<void> {
         super.connectedCallback();
         await this.load();
-        try {
-            this.justImported = sessionStorage.getItem('sahifah.justImported') === '1';
-            if (this.justImported) sessionStorage.removeItem('sahifah.justImported');
-        } catch {
-            this.justImported = false;
-        }
     }
 
     disconnectedCallback(): void {
-        for (const u of Object.values(this.thumbs)) URL.revokeObjectURL(u);
-        this.revokeViewerUrl();
+        this.revokeUrls();
         super.disconnectedCallback();
+    }
+
+    private revokeUrls() {
+        for (const u of Object.values(this.thumbs)) URL.revokeObjectURL(u);
+        if (this.viewerUrl) URL.revokeObjectURL(this.viewerUrl);
+        this.thumbs = {};
+        this.viewerUrl = null;
     }
 
     private async load(): Promise<void> {
@@ -111,20 +73,83 @@ export class DocPage extends LitElement {
         this.pages = doc.pageIds.map(id => map.get(id)).filter(Boolean) as PageRecord[];
 
         const store = getFileStore();
+        for (const u of Object.values(this.thumbs)) URL.revokeObjectURL(u);
         const thumbs: Record<string, string> = {};
+
         for (const p of this.pages) {
             try {
                 const bytes = await store.get(p.thumbPath);
-                const blob = new Blob([toArrayBuffer(bytes)], {type: 'image/jpeg'});
+                const blob = bytesToBlob(bytes, 'image/jpeg');
                 thumbs[p.id] = URL.createObjectURL(blob);
             } catch {
-                // ignore
             }
         }
-
-        for (const u of Object.values(this.thumbs)) URL.revokeObjectURL(u);
         this.thumbs = thumbs;
     }
+
+    // --- RE-EDITING LOGIC ---
+
+    private async editPage(page: PageRecord): Promise<void> {
+        this.busy = true;
+        try {
+            const store = getFileStore();
+            const bytes = await store.get(page.imagePath);
+            this.editingBlob = bytesToBlob(bytes, 'image/jpeg');
+            this.editingPage = page;
+        } catch (e) {
+            this.error = "Could not load image for editing";
+        } finally {
+            this.busy = false;
+        }
+    }
+
+    private async onEditorSave(ev: CustomEvent<PageEditorSaveDetail>) {
+        if (!this.editingPage) return;
+        this.busy = true;
+        try {
+            const {master, thumb} = ev.detail;
+            await this.repo.updateExistingPage(this.editingPage.id, master, thumb);
+
+            this.editingPage = null;
+            this.editingBlob = null;
+            await this.load();
+        } catch (e) {
+            this.error = (e as Error).message;
+        } finally {
+            this.busy = false;
+        }
+    }
+
+    // --- VIEWER LOGIC ---
+
+    private async openViewerAt(index: number): Promise<void> {
+        if (index < 0 || index >= this.pages.length) return;
+        this.viewerIndex = index;
+        this.viewerOpen = true;
+        this.showOcrOverlay = false;
+        await this.loadViewerImage();
+    }
+
+    private async loadViewerImage() {
+        this.viewerBusy = true;
+        this.viewerErr = null;
+        if (this.viewerUrl) URL.revokeObjectURL(this.viewerUrl);
+        this.viewerUrl = null;
+
+        try {
+            const p = this.pages[this.viewerIndex];
+            const store = getFileStore();
+            const bytes = await store.get(p.imagePath);
+            const blob = bytesToBlob(bytes, 'image/jpeg');
+            this.viewerUrl = URL.createObjectURL(blob);
+        } catch (e) {
+            this.viewerErr = "Failed to load image";
+        } finally {
+            this.viewerBusy = false;
+        }
+    }
+
+    // --- ACTIONS ---
 
     private async saveMeta(patch: Partial<DocRecord>): Promise<void> {
         if (!this.doc) return;
@@ -135,7 +160,6 @@ export class DocPage extends LitElement {
     private async exportPdf(): Promise<void> {
         if (!this.doc) return;
         this.busy = true;
-        this.error = null;
         try {
             const store = getFileStore();
             const pdfBytes = await buildPdfForDoc(store, this.pages);
@@ -155,7 +179,6 @@ export class DocPage extends LitElement {
     private async exportImagesZip(): Promise<void> {
         if (!this.doc) return;
         this.busy = true;
-        this.error = null;
         try {
             const store = getFileStore();
             const files: Record<string, Uint8Array> = {};
@@ -174,40 +197,27 @@ export class DocPage extends LitElement {
         }
     }
 
-    private async movePage(id: string, dir: -1 | 1): Promise<void> {
-        if (!this.doc) return;
-        const ids = [...this.doc.pageIds];
-        const idx = ids.indexOf(id);
-        if (idx < 0) return;
-        const j = idx + dir;
-        if (j < 0 || j >= ids.length) return;
-        [ids[idx], ids[j]] = [ids[j], ids[idx]];
-        await this.saveMeta({pageIds: ids});
-        await this.load();
-    }
-
+    // FIX: Implemented manual deletion logic here instead of relying on missing Repo method
     private async deletePage(pageId: string): Promise<void> {
-        if (!this.doc) return;
-        const ok = confirm('Delete this page? This cannot be undone.');
-        if (!ok) return;
-
+        if (!confirm('Delete this page?')) return;
         this.busy = true;
-        this.error = null;
-
         try {
+            // 1. Get Page Info
             const page = await db.pages.get(pageId);
-            if (!page) return;
+            if (page) {
+                // 2. Delete Files
+                const store = getFileStore();
+                await store.del(page.imagePath);
+                await store.del(page.thumbPath);
+                // 3. Delete DB Entry
+                await db.pages.delete(pageId);
+            }
 
-            const store = getFileStore();
-            await store.del(page.imagePath);
-            await store.del(page.thumbPath);
-            await db.pages.delete(pageId);
-
-            const doc = await db.docs.get(this.doc.id);
-            if (!doc) throw new Error('Doc missing');
-            doc.pageIds = doc.pageIds.filter(id => id !== pageId);
-            doc.updatedAt = Date.now();
-            await db.docs.put(doc);
+            // 4. Update Document Metadata
+            if (this.doc) {
+                const newIds = this.doc.pageIds.filter(id => id !== pageId);
+                await this.saveMeta({pageIds: newIds});
+            }
 
             await this.load();
         } catch (e) {
@@ -219,52 +229,45 @@ export class DocPage extends LitElement {
 
     private async deleteDoc(): Promise<void> {
         if (!this.doc) return;
-        const ok = confirm('Delete this document and all pages? This cannot be undone.');
-        if (!ok) return;
-
+        if (!confirm('Delete this entire document?')) return;
         this.busy = true;
-        this.error = null;
-
         try {
-            const store = getFileStore();
-            const pages = await db.pages.where('docId').equals(this.doc.id).toArray();
-            for (const p of pages) {
-                await store.del(p.imagePath);
-                await store.del(p.thumbPath);
-            }
-            if (this.doc.pdfPath) {
-                try {
-                    await store.del(this.doc.pdfPath);
-                } catch {
-                }
-            }
-            try {
-                const key = 'sahifah.activeDocId';
-                if (localStorage.getItem(key) === this.doc.id) localStorage.removeItem(key);
-            } catch {
-            }
-            try {
-                const k = 'sahifah.appendToDocId';
-                if (localStorage.getItem(k) === this.doc.id) localStorage.removeItem(k);
-            } catch {
-            }
-
-            await db.pages.where('docId').equals(this.doc.id).delete();
-            await db.docs.delete(this.doc.id);
+            await this.repo.deleteDocCompletely(this.doc.id);
             location.hash = '#/library';
         } catch (e) {
             this.error = (e as Error).message;
-        } finally {
             this.busy = false;
         }
     }
 
+    private async movePage(id: string, dir: -1 | 1): Promise<void> {
+        if (!this.doc) return;
+        const ids = [...this.doc.pageIds];
+        const idx = ids.indexOf(id);
+        if (idx < 0) return;
+        const j = idx + dir;
+        if (j < 0 || j >= ids.length) return;
+
+        [ids[idx], ids[j]] = [ids[j], ids[idx]];
+        await this.saveMeta({pageIds: ids});
+        await this.load();
+    }
+
     render() {
-        if (!this.doc) {
+        if (!this.doc) return html`
+            <div class="p-4 text-slate-500">Document not found</div>`;
+
+        if (this.editingPage && this.editingBlob) {
             return html`
-                <div class="space-y-2">
-                    <div class="text-lg font-semibold">Document</div>
-                    <div class="text-slate-500">Not found.</div>
+                <div class="fixed inset-0 z-50 bg-black">
+                    <page-editor
+                            .blob=${this.editingBlob}
+                            @page-editor-save=${this.onEditorSave}
+                            @page-editor-cancel=${() => {
+                                this.editingPage = null;
+                                this.editingBlob = null;
+                            }}
+                    ></page-editor>
                 </div>
             `;
         }
@@ -272,104 +275,124 @@ export class DocPage extends LitElement {
         const currentPage = this.pages[this.viewerIndex];
 
         return html`
-            <div class="space-y-4">
+            <div class="space-y-4 pb-20">
                 <div class="flex items-center justify-between">
-                    <a class="text-sm text-slate-300 hover:underline" href="#/library">← Back</a>
+                    <a class="text-sm text-slate-300 hover:underline flex items-center gap-1" href="#/library">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M15 19l-7-7 7-7"></path>
+                        </svg>
+                        Library
+                    </a>
                 </div>
 
                 ${this.error ? html`
-                    <div class="p-3 rounded-lg bg-red-950/40 border border-red-900 text-red-200">${this.error}
+                    <div class="p-3 bg-red-900/30 text-red-200 border border-red-900/50 rounded-xl text-sm">
+                        ${this.error}
                     </div>` : null}
 
                 <div class="p-4 rounded-xl border border-slate-800 bg-slate-950 space-y-3">
-                    <div class="text-sm text-slate-400">Title</div>
-                    <input class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-3 text-sm"
-                           .value=${live(this.doc.title)}
-                           @change=${(e: Event) => this.saveMeta({title: (e.target as HTMLInputElement).value})}/>
+                    <div class="space-y-1">
+                        <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Title</div>
+                        <input class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100"
+                               .value=${live(this.doc.title)}
+                               @change=${(e: Event) => this.saveMeta({title: (e.target as HTMLInputElement).value})}/>
+                    </div>
 
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div>
-                            <div class="text-sm text-slate-400">Folder</div>
-                            <input class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-3 text-sm"
-                                   placeholder="e.g., Receipts"
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="space-y-1">
+                            <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Folder</div>
+                            <input class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100"
                                    .value=${live(this.doc.folder ?? '')}
-                                   @change=${(e: Event) => {
-                                       const v = (e.target as HTMLInputElement).value.trim();
-                                       void this.saveMeta({folder: v ? v : null});
-                                   }}/>
+                                   @change=${(e: Event) => this.saveMeta({folder: (e.target as HTMLInputElement).value || null})}/>
                         </div>
-                        <div>
-                            <div class="text-sm text-slate-400">Tags</div>
-                            <input class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-3 text-sm"
-                                   placeholder="e.g., taxi, 2026"
+                        <div class="space-y-1">
+                            <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Tags</div>
+                            <input class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100"
                                    .value=${live(this.doc.tags.join(', '))}
-                                   @change=${(e: Event) => {
-                                       const v = (e.target as HTMLInputElement).value.split(',').map(s => s.trim()).filter(Boolean);
-                                       void this.saveMeta({tags: v});
-                                   }}/>
+                                   @change=${(e: Event) => this.saveMeta({tags: (e.target as HTMLInputElement).value.split(',').map(s => s.trim()).filter(Boolean)})}/>
                         </div>
                     </div>
 
-                    <div>
-                        <div class="text-sm text-slate-400">Search Index (OCR Memory)</div>
-                        <div class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-3 text-xs text-slate-500 break-words h-20 overflow-y-auto">
-                            ${this.doc.searchIndex || 'No text indexed yet. OCR runs in background after scanning.'}
+                    <div class="space-y-1">
+                        <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Search Index</div>
+                        <div class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-500 h-16 overflow-y-auto">
+                            ${this.doc.searchIndex || 'No text indexed yet.'}
                         </div>
                     </div>
 
-                    <div class="flex flex-wrap gap-2">
-                        <button class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold disabled:opacity-60"
+                    <div class="flex flex-wrap gap-2 pt-2">
+                        <button class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-lg shadow-emerald-900/20"
                                 ?disabled=${this.busy || this.pages.length === 0} @click=${this.exportPdf}>
-                            ${this.busy ? 'Working…' : 'Export PDF'}
+                            ${this.busy ? 'Working...' : 'Export PDF'}
                         </button>
-                        <button class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
+                        <button class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm"
                                 ?disabled=${this.busy || this.pages.length === 0} @click=${this.exportImagesZip}>
-                            Export images (zip)
+                            Export Zip
                         </button>
-                        <button class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
-                                ?disabled=${this.busy} @click=${() => {
-                            if (!this.doc) return;
-                            localStorage.setItem('sahifah.appendToDocId', this.doc.id);
-                            location.hash = '#/scan';
-                        }}>
-                            Add pages
+                        <button class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm"
+                                @click=${() => {
+                                    localStorage.setItem('sahifah.appendToDocId', this.doc!.id);
+                                    location.hash = '#/scan';
+                                }}>
+                            Add Pages
                         </button>
-                        <button class="px-4 py-2 rounded-xl bg-red-900/40 border border-red-900 hover:bg-red-900/60 text-red-200 disabled:opacity-60"
-                                ?disabled=${this.busy} @click=${this.deleteDoc}>
+                        <div class="flex-1"></div>
+                        <button class="px-3 py-2 rounded-lg border border-red-900/30 text-red-400 hover:bg-red-950/20 text-sm"
+                                @click=${this.deleteDoc}>
                             Delete
                         </button>
                     </div>
                 </div>
 
                 <div class="space-y-2">
-                    <div class="text-lg font-semibold">Pages (${this.pages.length})</div>
-                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <div class="text-sm font-semibold text-slate-400 uppercase tracking-wider">Pages
+                            (${this.pages.length})
+                    </div>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
                         ${this.pages.map((p, idx) => html`
-                            <div class="rounded-xl border border-slate-800 bg-slate-950 overflow-hidden relative">
-                                <div class="aspect-[3/4] bg-black">
-                                    <button class="w-full h-full block" title="View full page"
-                                            @click=${() => void this.openViewerAt(idx)}>
-                                        <img class="w-full h-full object-cover" src=${this.thumbs[p.id]} alt="thumb"/>
-                                    </button>
+                            <div class="group relative rounded-xl border border-slate-800 bg-slate-950 overflow-hidden shadow-sm hover:border-slate-600 transition-colors">
+                                <div class="aspect-[3/4] bg-slate-900 cursor-pointer relative"
+                                     @click=${() => this.openViewerAt(idx)}>
+                                    ${this.thumbs[p.id]
+                                            ? html`<img src=${this.thumbs[p.id]} class="w-full h-full object-cover">`
+                                            : html`
+                                                <div class="w-full h-full flex items-center justify-center text-slate-700">
+                                                    ?
+                                                </div>`
+                                    }
+                                    ${p.words?.length ? html`
+                                        <div class="absolute top-2 right-2 px-1.5 py-0.5 bg-black/60 backdrop-blur text-emerald-400 text-[10px] font-bold rounded">
+                                            TXT
+                                        </div>` : null}
                                 </div>
 
-                                ${p.words && p.words.length > 0 ? html`
-                                    <div class="absolute top-2 right-2 px-1.5 py-0.5 bg-emerald-500/90 text-slate-900 text-[10px] font-bold rounded">
-                                        TXT
-                                    </div>
-                                ` : null}
+                                <div class="p-2 flex items-center justify-between gap-1 bg-slate-950 border-t border-slate-900">
+                                    <span class="text-xs text-slate-500 font-mono w-5">#${idx + 1}</span>
 
-                                <div class="p-2 flex items-center justify-between gap-2">
-                                    <div class="text-xs text-slate-400">#${idx + 1}</div>
-                                    <div class="flex gap-1">
-                                        <button class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs"
-                                                @click=${() => this.movePage(p.id, -1)}>↑
+                                    <div class="flex items-center gap-1">
+                                        <button class="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-emerald-400"
+                                                title="Edit"
+                                                @click=${() => this.editPage(p)}>
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                      d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
+                                            </svg>
                                         </button>
-                                        <button class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs"
-                                                @click=${() => this.movePage(p.id, 1)}>↓
+
+                                        <button class="p-1.5 rounded hover:bg-slate-800 text-slate-400"
+                                                @click=${() => this.movePage(p.id, -1)} ?disabled=${idx === 0}>↑
                                         </button>
-                                        <button class="px-2 py-1 rounded bg-red-900/40 border border-red-900 hover:bg-red-900/60 text-red-200 text-xs"
-                                                @click=${() => this.deletePage(p.id)}>X
+                                        <button class="p-1.5 rounded hover:bg-slate-800 text-slate-400"
+                                                @click=${() => this.movePage(p.id, 1)}
+                                                ?disabled=${idx === this.pages.length - 1}>↓
+                                        </button>
+                                        <button class="p-1.5 rounded hover:bg-red-900/30 text-slate-400 hover:text-red-400"
+                                                @click=${() => this.deletePage(p.id)}>
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                      d="M6 18L18 6M6 6l12 12"></path>
+                                            </svg>
                                         </button>
                                     </div>
                                 </div>
@@ -379,68 +402,68 @@ export class DocPage extends LitElement {
                 </div>
 
                 ${this.viewerOpen ? html`
-                    <div class="fixed inset-0 z-50 bg-black/90 flex flex-col" @click=${(e: Event) => {
-                        if (e.target === e.currentTarget) this.closeViewer();
-                    }}>
-                        <div class="px-4 py-3 flex items-center justify-between border-b border-slate-800 bg-slate-950">
-                            <div class="text-sm text-slate-200">Page ${this.viewerIndex + 1}</div>
-
-                            <div class="flex items-center gap-3">
+                    <div class="fixed inset-0 z-50 bg-black/95 backdrop-blur flex flex-col"
+                         @click=${(e: Event) => e.target === e.currentTarget && (this.viewerOpen = false)}>
+                        <div class="px-4 py-3 flex items-center justify-between bg-black/50 border-b border-white/10">
+                            <div class="text-sm font-medium text-slate-200">Page ${this.viewerIndex + 1}</div>
+                            <div class="flex items-center gap-4">
                                 <label class="flex items-center gap-2 cursor-pointer select-none">
                                     <input type="checkbox" .checked=${this.showOcrOverlay}
                                            @change=${(e: Event) => this.showOcrOverlay = (e.target as HTMLInputElement).checked}>
                                     <span class="text-xs text-emerald-400 font-medium">Show OCR</span>
                                 </label>
-
-                                <div class="h-4 w-px bg-slate-700 mx-1"></div>
-
-                                <button class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50"
-                                        ?disabled=${this.viewerIndex === 0} @click=${() => void this.viewerPrev()}>←
-                                </button>
-                                <button class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50"
-                                        ?disabled=${this.viewerIndex === this.pages.length - 1}
-                                        @click=${() => void this.viewerNext()}>→
-                                </button>
-                                <button class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm"
-                                        @click=${this.closeViewer}>Close
+                                <button class="p-2 hover:bg-white/10 rounded-full"
+                                        @click=${() => this.viewerOpen = false}>
+                                    <svg class="w-6 h-6 text-slate-400" fill="none" stroke="currentColor"
+                                         viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                              d="M6 18L18 6M6 6l12 12"></path>
+                                    </svg>
                                 </button>
                             </div>
                         </div>
 
                         ${this.viewerErr ? html`
-                            <div class="p-3 text-sm text-red-200 bg-red-950/40 border-b border-red-900 text-center">
+                            <div class="bg-red-950/80 text-red-200 p-2 text-center text-sm border-b border-red-900">
                                 ${this.viewerErr}
                             </div>
                         ` : null}
 
-                        <div class="flex-1 overflow-hidden flex items-center justify-center relative bg-black p-4">
-                            ${this.viewerBusy ? html`
-                                <div class="text-slate-400">Loading image...</div>` : this.viewerUrl ? html`
-
-                                <div class="relative shadow-2xl"
-                                     style="aspect-ratio: ${currentPage.width}/${currentPage.height}; max-height: 100%; max-width: 100%;">
-                                    <img src=${this.viewerUrl} class="w-full h-full object-contain block">
-
-                                    ${this.showOcrOverlay && currentPage.words ? currentPage.words.map(w => html`
-                                        <div class="absolute border border-red-500/60 bg-red-500/10 hover:bg-red-500/30 group"
-                                             style="left: ${w.box[0] * 100}%; top: ${w.box[1] * 100}%; width: ${w.box[2] * 100}%; height: ${w.box[3] * 100}%;">
-                                            <div class="absolute bottom-full left-0 mb-1 px-2 py-1 bg-black text-white text-[10px] rounded whitespace-nowrap hidden group-hover:block z-10 pointer-events-none">
-                                                ${w.text} (${Math.round(w.confidence)}%)
-                                            </div>
-                                        </div>
+                        <div class="flex-1 flex items-center justify-center p-4 overflow-hidden relative">
+                            ${this.viewerBusy ? html`<div class="text-slate-500">Loading...</div>` : this.viewerUrl ? html`
+                                <div class="relative shadow-2xl max-w-full max-h-full">
+                                    <img src=${this.viewerUrl} class="block max-w-full max-h-full object-contain">
+                                    
+                                    ${this.showOcrOverlay && currentPage?.words ? currentPage.words.map(w => html`
+                                        <div class="absolute border border-red-500/50 bg-red-500/10 hover:bg-red-500/30"
+                                             style="left: ${w.box[0] * 100}%; top: ${w.box[1] * 100}%; width: ${w.box[2] * 100}%; height: ${w.box[3] * 100}%;"
+                                             title="${w.text}"></div>
                                     `) : null}
-
-                                    ${this.showOcrOverlay && (!currentPage.words || currentPage.words.length === 0) ? html`
-                                        <div class="absolute inset-0 flex items-center justify-center">
-                                            <div class="bg-black/70 px-4 py-2 rounded text-red-400 text-sm">No text
-                                                detected on
-                                                this page
-                                            </div>
-                                        </div>
-                                    ` : null}
                                 </div>
-
                             ` : null}
+
+                            <button class="absolute left-4 p-4 rounded-full bg-black/50 hover:bg-black/80 text-white"
+                                    ?disabled=${this.viewerIndex === 0}
+                                    @click=${(e: Event) => {
+                                        e.stopPropagation();
+                                        this.openViewerAt(this.viewerIndex - 1)
+                                    }}>
+                                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M15 19l-7-7 7-7"></path>
+                                </svg>
+                            </button>
+                            <button class="absolute right-4 p-4 rounded-full bg-black/50 hover:bg-black/80 text-white"
+                                    ?disabled=${this.viewerIndex === this.pages.length - 1}
+                                    @click=${(e: Event) => {
+                                        e.stopPropagation();
+                                        this.openViewerAt(this.viewerIndex + 1)
+                                    }}>
+                                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M9 5l7 7-7 7"></path>
+                                </svg>
+                            </button>
                         </div>
                     </div>
                 ` : null}
