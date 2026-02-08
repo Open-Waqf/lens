@@ -11,6 +11,7 @@ import {decryptBytesWithPassword, encryptBytesWithPassword, isEncryptedBackup} f
 import {opfsRemoveTree} from '../services/filestore/opfs-store';
 import {resetAllStorage} from '../services/reset-storage';
 import {ConfirmModal} from '../components/confirm-modal';
+import pkg from '../../package.json'
 
 import {strFromU8, unzipSync} from 'fflate';
 import type {DocRecord, PageRecord} from '../domain/types';
@@ -275,6 +276,8 @@ export class SettingsPage extends LitElement {
                         </svg>
                     </button>
                     <h1 class="text-xl font-bold text-slate-100">Settings</h1>
+                    <div class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">v${pkg.version}
+                    </div>
                 </div>
 
                 ${this.msg ? html`

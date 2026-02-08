@@ -262,11 +262,26 @@ export class PageEditor extends LitElement {
         const sample = Math.max(18, Math.round(size / zoom));
         const sx = clamp(this.magnifyX - sample / 2, 0, this.baseW - sample);
         const sy = clamp(this.magnifyY - sample / 2, 0, this.baseH - sample);
+
         ctx.imageSmoothingEnabled = false;
         ctx.drawImage(this.baseCanvas, sx, sy, sample, sample, 0, 0, size, size);
+
+        // Border
         ctx.strokeStyle = 'rgba(16,185,129,0.95)';
         ctx.lineWidth = 3;
         ctx.strokeRect(1.5, 1.5, size - 3, size - 3);
+
+        // Crosshair
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        // Vertical
+        ctx.moveTo(size / 2, 0);
+        ctx.lineTo(size / 2, size);
+        // Horizontal
+        ctx.moveTo(0, size / 2);
+        ctx.lineTo(size, size / 2);
+        ctx.stroke();
     }
 
     private async autoDetectEdges(): Promise<void> {

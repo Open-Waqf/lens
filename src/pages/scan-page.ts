@@ -755,12 +755,10 @@ export class ScanPage extends LitElement {
         return html`
             <div class="flex gap-3 overflow-x-auto py-2 px-1">
                 ${this.strip.map((it) => html`
-                    <button class="relative shrink-0 rounded-lg border ${selected === it.id ? 'border-emerald-500 ring-2 ring-emerald-500/20' : 'border-slate-800'} overflow-hidden ${it.isNew ? '' : 'opacity-60'} transition-all active:scale-95"
+                    <button class="relative shrink-0 rounded-lg border ${selected === it.id ? 'border-emerald-500 ring-2 ring-emerald-500/20' : 'border-slate-800'} overflow-hidden transition-all active:scale-95"
                             style="width: 84px; height: 108px;"
-                            title=${it.isNew ? 'Edit page' : 'Locked (already saved)'}
-                            @click=${() => {
-                                if (it.isNew) void this.openExistingPageInEditor(it.id);
-                            }}>
+                            title="Tap to edit"
+                            @click=${() => void this.openExistingPageInEditor(it.id)}>
                         <img src=${it.url} class="w-full h-full object-cover" alt="thumb"/>
                         ${it.isNew ? html`<span
                                 class="absolute top-1 left-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500 text-white font-bold shadow-sm">NEW</span>` : null}
@@ -818,18 +816,20 @@ export class ScanPage extends LitElement {
                         ${this.replacePageId ? 'Retake Page' : (this.session.isAppend ? 'Add pages' : 'Scan')}
                     </div>
                     ${!this.caps.isCapacitor ? html`
-
-                        <button class="relative h-8 w-14 rounded-full bg-slate-800 transition-colors duration-200 focus:outline-none ${this.autoCapture ? 'bg-emerald-600/20' : ''}"
-                                @click=${() => {
-                                    this.autoCapture = !this.autoCapture;
-                                    try {
-                                        localStorage.setItem(AUTO_KEY, this.autoCapture ? '1' : '0');
-                                    } catch {
-                                    }
-                                }}>
-                            <span class="sr-only">Auto Capture</span>
-                            <span class="${this.autoCapture ? 'translate-x-7 bg-emerald-500' : 'translate-x-1 bg-slate-400'} inline-block h-6 w-6 transform rounded-full transition duration-200 ease-in-out mt-1 shadow-sm"></span>
-                        </button>
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs text-slate-400 font-medium uppercase tracking-wider">Auto</span>
+                            <button class="relative h-7 w-12 rounded-full transition-colors duration-200 focus:outline-none ${this.autoCapture ? 'bg-emerald-600' : 'bg-slate-700'}"
+                                    @click=${() => {
+                                        this.autoCapture = !this.autoCapture;
+                                        try {
+                                            localStorage.setItem(AUTO_KEY, this.autoCapture ? '1' : '0');
+                                        } catch {
+                                        }
+                                    }}
+                                    title=${this.autoCapture ? 'Auto-capture Enabled' : 'Auto-capture Disabled'}>
+                                <span class="${this.autoCapture ? 'translate-x-6 bg-white' : 'translate-x-1 bg-slate-300'} inline-block h-5 w-5 transform rounded-full transition duration-200 ease-in-out mt-1 shadow-sm"></span>
+                            </button>
+                        </div>
                     ` : null}
                 </div>
 

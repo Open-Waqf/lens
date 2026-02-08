@@ -259,7 +259,7 @@ export class DocPage extends LitElement {
         const ok = await ConfirmModal.ask({
             title: 'Delete Document?',
             description: `Permanently delete "${this.doc.title}" and all ${this.pages.length} pages?`,
-            confirm: 'Delete All',
+            confirm: 'Delete Document', // Updated wording
             destructive: true
         });
         if (!ok) return;
@@ -437,12 +437,12 @@ export class DocPage extends LitElement {
                                 <div class="aspect-[3/4] bg-slate-900 cursor-pointer relative"
                                      @click=${() => this.openViewerAt(idx)}>
                                     ${this.thumbs[p.id]
-                                ? html`<img src=${this.thumbs[p.id]} class="w-full h-full object-cover">`
-                                : html`
+                                            ? html`<img src=${this.thumbs[p.id]} class="w-full h-full object-cover">`
+                                            : html`
                                                 <div class="w-full h-full flex items-center justify-center text-slate-700">
                                                     ?
                                                 </div>`
-                        }
+                                    }
                                     ${p.words?.length ? html`
                                         <div class="absolute top-2 right-2 px-1.5 py-0.5 bg-black/60 backdrop-blur text-emerald-400 text-[10px] font-bold rounded">
                                             TXT
@@ -539,9 +539,9 @@ export class DocPage extends LitElement {
                             <button class="absolute left-4 p-4 rounded-full bg-black/50 hover:bg-black/80 text-white"
                                     ?disabled=${this.viewerIndex === 0}
                                     @click=${(e: Event) => {
-                    e.stopPropagation();
-                    this.openViewerAt(this.viewerIndex - 1)
-                }}>
+                                        e.stopPropagation();
+                                        this.openViewerAt(this.viewerIndex - 1)
+                                    }}>
                                 <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                           d="M15 19l-7-7 7-7"></path>
@@ -550,9 +550,9 @@ export class DocPage extends LitElement {
                             <button class="absolute right-4 p-4 rounded-full bg-black/50 hover:bg-black/80 text-white"
                                     ?disabled=${this.viewerIndex === this.pages.length - 1}
                                     @click=${(e: Event) => {
-                    e.stopPropagation();
-                    this.openViewerAt(this.viewerIndex + 1)
-                }}>
+                                        e.stopPropagation();
+                                        this.openViewerAt(this.viewerIndex + 1)
+                                    }}>
                                 <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                           d="M9 5l7 7-7 7"></path>
