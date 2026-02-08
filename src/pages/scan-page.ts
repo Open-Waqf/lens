@@ -9,6 +9,7 @@ import {computeOutputSize, warpRgbaToCanvas} from '../lib/image/warp';
 import {takePendingImport} from '../services/pending-import';
 import {bytesToBlob} from '../lib/bytes';
 import {processPhoto} from '../lib/image/pipeline';
+import {DetectGovernor} from '../lib/scan/detect-governor';
 
 import '../components/scan-overlay';
 import '../components/page-editor';
@@ -56,14 +57,14 @@ export class ScanPage extends LitElement {
     // auto capture toggle
     @state() private autoCapture = readBool(AUTO_KEY, false);
 
-    // overlay sizing
+    // overlay sizing (for <scan-overlay/>)
     @state() private videoW = 0;
     @state() private videoH = 0;
 
     // capture guard
     private captureInFlight = false;
 
-    // detection (kept inline for now)
+    // detection
     private worker: Worker | null = null;
     private offscreen: HTMLCanvasElement | null = null;
     private offCtx: CanvasRenderingContext2D | null = null;
@@ -75,7 +76,12 @@ export class ScanPage extends LitElement {
     private stableSince = 0;
     private cooldownUntil = 0;
 
-    private detectorTimer: number | null = null;
+    // dynamic detection governor + timer
+    private detGov = new DetectGovernor();
+    private detectTimer: number | null = null;
+
+    // stage transition tracking to stop detector when leaving camera
+    private _prevStage: ScanStage | null = null;
 
     // ----------------- lifecycle -----------------
 
@@ -116,6 +122,23 @@ export class ScanPage extends LitElement {
         super.disconnectedCallback();
     }
 
+    updated(): void {
+        const stage = this.session.stage;
+        if (stage === this._prevStage) return;
+
+        // when leaving camera stage, stop detector (but keep camera if you want)
+        if (this._prevStage === 'camera' && stage !== 'camera') {
+            this.stopDetector();
+        }
+
+        // when entering camera stage, start detector only if camera is running
+        if (stage === 'camera' && this.camera.isRunning) {
+            this.startDetector();
+        }
+
+        this._prevStage = stage;
+    }
+
     private onHashChange = () => {
         const h = location.hash || '';
         if (h.startsWith('#/scan')) void this.loadMode();
@@ -137,6 +160,9 @@ export class ScanPage extends LitElement {
 
         this.lastDetect = null;
         this.smoothedQuad = null;
+
+        this.stableSince = 0;
+        this.cooldownUntil = 0;
 
         const params = this.getHashParams();
 
@@ -180,7 +206,6 @@ export class ScanPage extends LitElement {
         const decision = this.session.decideExit();
 
         if (decision.kind === 'nav-doc') {
-            // append mode: go back to doc
             this.clearAppendKey();
             location.hash = `#/doc/${decision.docId}`;
             return;
@@ -219,7 +244,6 @@ export class ScanPage extends LitElement {
         const id = this.session.docId;
         if (!id || this.session.pageCount === 0) return;
 
-        // opening doc in new mode = keep it
         if (!this.session.isAppend) this.session.markCommitted();
 
         this.clearAppendKey();
@@ -278,7 +302,6 @@ export class ScanPage extends LitElement {
                 this.newPageIds.add(pageId);
             }
 
-            // saving = committed
             this.session.markCommitted();
 
             this.clearEditor();
@@ -360,6 +383,7 @@ export class ScanPage extends LitElement {
 
     private async stopCamera(): Promise<void> {
         await this.camera.stop();
+        this.stopDetector(); // ensure worker loop is down when camera stops
     }
 
     private async capturePhoto(fromAuto = false): Promise<void> {
@@ -393,7 +417,7 @@ export class ScanPage extends LitElement {
                     {x: q[0].x * sx, y: q[0].y * sy},
                     {x: q[1].x * sx, y: q[1].y * sy},
                     {x: q[2].x * sx, y: q[2].y * sy},
-                    {x: q[3].x * sx, y: q[3].y * sy}
+                    {x: q[3].x * sx, y: q[3].y * sy},
                 ];
 
                 const src = ctx.getImageData(0, 0, w, h);
@@ -408,7 +432,7 @@ export class ScanPage extends LitElement {
             }
 
             const blob: Blob = await new Promise((resolve, reject) =>
-                finalCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Capture failed'))), 'image/jpeg', 0.9)
+                finalCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Capture failed'))), 'image/jpeg', 0.9),
             );
 
             await this.openNewBlobInEditor(blob);
@@ -459,8 +483,6 @@ export class ScanPage extends LitElement {
 
             for (const file of files) {
                 const {master, thumb} = await processPhoto({blob: file, rotation: 0, filter: 'original'} as any);
-
-                // saved immediately, but session stays uncommitted until user saves/opens
                 const pageId = await this.repo.addNewPage(docId, master, thumb);
 
                 importedPageIds.push(pageId);
@@ -481,24 +503,39 @@ export class ScanPage extends LitElement {
         }
     }
 
-    // ----------------- detector -----------------
+    // ----------------- detector (Governor + transfer) -----------------
 
     private startDetector(): void {
         if (this.worker) return;
 
         this.worker = new Worker(new URL('../lib/scan/edge-worker.ts', import.meta.url), {type: 'module'});
+
         this.worker.onmessage = (ev: MessageEvent<any>) => {
             const msg = ev.data;
             if (msg?.type !== 'result') return;
 
             this.detecting = false;
 
+            const tMs = Number(msg.tMs ?? 0);
+            if (tMs > 0) this.detGov.onResult(tMs);
+
+            // if too slow, reset stability so auto-capture won’t fire randomly
+            if (this.detGov.isTooSlowForAutoCapture) {
+                this.stableSince = 0;
+            }
+
             const quad = msg.quad as Point[] | null;
             const confidence = Number(msg.confidence ?? 0);
             const w = Number(msg.width ?? 0);
             const h = Number(msg.height ?? 0);
 
-            const det: DetectedQuad = {quad: quad ? (quad as any) : null, confidence, width: w, height: h};
+            const det: DetectedQuad = {
+                quad: quad ? (quad as any) : null,
+                confidence,
+                width: w,
+                height: h,
+            };
+
             this.lastDetect = det;
 
             if (det.quad && det.confidence >= 0.35) {
@@ -515,18 +552,25 @@ export class ScanPage extends LitElement {
         this.offscreen = document.createElement('canvas');
         this.offCtx = this.offscreen.getContext('2d', {willReadFrequently: true});
 
-        // IMPORTANT: use interval so it resumes when returning to camera stage
-        this.detectorTimer = window.setInterval(() => {
+        const tick = () => {
             if (!this.worker) return;
-            if (!this.camera.isRunning) return;
-            if (this.session.stage !== 'camera') return;
+
+            // don’t burn CPU when not on camera stage
+            if (!this.camera.isRunning || this.session.stage !== 'camera') {
+                this.detectTimer = window.setTimeout(tick, 250);
+                return;
+            }
+
             this.grabAndDetect();
-        }, 140);
+            this.detectTimer = window.setTimeout(tick, this.detGov.intervalMs);
+        };
+
+        tick();
     }
 
     private stopDetector(): void {
-        if (this.detectorTimer) window.clearInterval(this.detectorTimer);
-        this.detectorTimer = null;
+        if (this.detectTimer) window.clearTimeout(this.detectTimer);
+        this.detectTimer = null;
 
         this.worker?.terminate();
         this.worker = null;
@@ -549,7 +593,7 @@ export class ScanPage extends LitElement {
         const v = this.videoEl;
         if (!v || v.videoWidth === 0 || v.videoHeight === 0) return;
 
-        const maxDim = 640;
+        const maxDim = this.detGov.maxDim;
         const scale = Math.min(1, maxDim / Math.max(v.videoWidth, v.videoHeight));
         const w = Math.max(1, Math.round(v.videoWidth * scale));
         const h = Math.max(1, Math.round(v.videoHeight * scale));
@@ -561,7 +605,12 @@ export class ScanPage extends LitElement {
         const img = this.offCtx.getImageData(0, 0, w, h);
 
         this.detecting = true;
-        this.worker.postMessage({type: 'detect', width: w, height: h, rgba: img.data});
+
+        // ✅ zero-copy: transfer the underlying buffer to the worker
+        this.worker.postMessage(
+            {type: 'detect', width: w, height: h, rgba: img.data},
+            [img.data.buffer],
+        );
     }
 
     private quadStabilityScore(q: Quad, det: DetectedQuad): number {
@@ -576,6 +625,7 @@ export class ScanPage extends LitElement {
 
     private maybeAutoCapture(): void {
         if (!this.autoCapture) return;
+        if (this.detGov.isTooSlowForAutoCapture) return; // ✅ governor gate
         if (this.captureInFlight) return;
         if (Date.now() < this.cooldownUntil) return;
         if (this.session.stage !== 'camera') return;
@@ -630,13 +680,15 @@ export class ScanPage extends LitElement {
                                 class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
                                 ?disabled=${this.session.pageCount === 0}
                                 @click=${() => this.openDocument()}
-                        >Open
+                        >
+                            Open
                         </button>
 
                         <button
                                 class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
                                 @click=${() => void this.exitScan()}
-                        >${this.session.exitLabel}
+                        >
+                            ${this.session.exitLabel}
                         </button>
                     </div>
                 </div>
@@ -658,13 +710,15 @@ export class ScanPage extends LitElement {
                             class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
                             ?disabled=${this.session.pageCount === 0}
                             @click=${() => this.openDocument()}
-                    >Open
+                    >
+                        Open
                     </button>
 
                     <button
                             class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
                             @click=${() => void this.exitScan()}
-                    >${this.session.exitLabel}
+                    >
+                        ${this.session.exitLabel}
                     </button>
                 </div>
             </div>
@@ -681,7 +735,7 @@ export class ScanPage extends LitElement {
                         (it) => html`
                             <button
                                     class="relative shrink-0 rounded-lg border ${selected === it.id ? 'border-emerald-500' : 'border-slate-800'}
-                     overflow-hidden ${it.isNew ? '' : 'opacity-60'}"
+                overflow-hidden ${it.isNew ? '' : 'opacity-60'}"
                                     style="width: 76px; height: 96px;"
                                     title=${it.isNew ? 'Edit page' : 'Locked (already saved)'}
                                     @click=${() => {
@@ -692,10 +746,12 @@ export class ScanPage extends LitElement {
                                 <img src=${it.url} class="w-full h-full object-cover" alt="thumb"/>
                                 ${it.isNew
                                         ? html`<span
-                                                class="absolute top-1 left-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-semibold">NEW</span>`
+                                                class="absolute top-1 left-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-semibold"
+                                        >NEW</span
+                                        >`
                                         : null}
                             </button>
-                        `
+                        `,
                 )}
             </div>
         `;
@@ -730,11 +786,10 @@ export class ScanPage extends LitElement {
                 ${this.error
                         ? html`
                             <div class="p-3 rounded-lg bg-red-950/40 border border-red-900 text-red-200">${this.error}
-                            </div>`
+                            </div> `
                         : null}
 
-                ${this.renderBanner()}
-                ${this.renderStrip()}
+                ${this.renderBanner()} ${this.renderStrip()}
 
                 ${stage === 'idle'
                         ? html`
@@ -749,20 +804,23 @@ export class ScanPage extends LitElement {
                                     <button
                                             class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold"
                                             @click=${() => this.beginCameraFromGesture()}
-                                    >Open camera
+                                    >
+                                        Open camera
                                     </button>
 
                                     <button
                                             class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
                                             ?disabled=${this.busy}
                                             @click=${() => this.pickFiles({multiple: true})}
-                                    >Import
+                                    >
+                                        Import
                                     </button>
 
                                     <button
                                             class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800"
                                             @click=${() => void this.exitScan()}
-                                    >${this.session.exitLabel}
+                                    >
+                                        ${this.session.exitLabel}
                                     </button>
                                 </div>
                             </div>
@@ -788,20 +846,23 @@ export class ScanPage extends LitElement {
                                             class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold disabled:opacity-60"
                                             ?disabled=${this.busy}
                                             @click=${() => void this.capturePhoto(false)}
-                                    >Capture
+                                    >
+                                        Capture
                                     </button>
 
                                     <button
                                             class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60"
                                             ?disabled=${this.busy}
                                             @click=${() => this.pickFiles({multiple: true})}
-                                    >Import
+                                    >
+                                        Import
                                     </button>
 
                                     <button
                                             class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800"
                                             @click=${() => void this.exitScan()}
-                                    >${this.session.exitLabel}
+                                    >
+                                        ${this.session.exitLabel}
                                     </button>
                                 </div>
 
@@ -809,10 +870,10 @@ export class ScanPage extends LitElement {
                                         class="text-sm text-slate-300 hover:underline"
                                         @click=${async () => {
                                             await this.stopCamera();
-                                            this.stopDetector();
                                             this.session.setStage('idle');
                                         }}
-                                >← Back
+                                >
+                                    ← Back
                                 </button>
                             </div>
                         `
@@ -829,7 +890,7 @@ export class ScanPage extends LitElement {
                                                     @page-editor-save=${this.onEditorSave}
                                                     @page-editor-cancel=${this.onEditorCancel}
                                             ></page-editor>
-                                        `
+                                        `,
                                 )}
 
                                 <div class="flex justify-end">
@@ -837,7 +898,8 @@ export class ScanPage extends LitElement {
                                             class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 disabled:opacity-60"
                                             ?disabled=${this.busy}
                                             @click=${() => void this.exitScan()}
-                                    >${this.session.exitLabel}
+                                    >
+                                        ${this.session.exitLabel}
                                     </button>
                                 </div>
                             </div>
