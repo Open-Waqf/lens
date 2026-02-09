@@ -74,18 +74,25 @@ export class SettingsPage extends LitElement {
                 'metadata.json': jsonFile('metadata.json', {docs, pages, exportedAt: Date.now()})['metadata.json'],
             };
 
+            let failures = 0;
+
             for (const p of pages) {
                 try {
                     files[p.imagePath] = await store.get(p.imagePath);
                     files[p.thumbPath] = await store.get(p.thumbPath);
-                } catch {
+                } catch (e) {
+                    console.warn(`Backup: Failed to read page ${p.id}`, e);
+                    failures++;
                 }
             }
             for (const d of docs) {
                 if (d.pdfPath && (await store.exists(d.pdfPath))) {
                     try {
                         files[d.pdfPath] = await store.get(d.pdfPath);
-                    } catch {
+                    } catch (e) {
+                        console.warn(`Backup: Failed to read PDF for doc ${d.id}`, e);
+                        // We don't necessarily count missing PDFs as critical failures
+                        // since they can be regenerated, but good to know.
                     }
                 }
             }
@@ -104,7 +111,13 @@ export class SettingsPage extends LitElement {
             const ext = pw ? 'slbk' : 'zip';
 
             await shareOrDownload(finalBytes, `sahifah-backup-${Date.now()}.${ext}`, 'application/octet-stream');
-            this.msg = 'Backup exported successfully.';
+
+            if (failures > 0) {
+                this.msg = `Backup created, but ${failures} files were missing or corrupt. Check console for details.`;
+            } else {
+                this.msg = 'Backup exported successfully.';
+            }
+
         } catch (e) {
             this.err = (e as Error).message;
         } finally {
