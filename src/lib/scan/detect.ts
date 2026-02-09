@@ -1,11 +1,14 @@
 import {DetectedQuad, orderQuad, type Point, type Quad, quadArea} from './quad';
 
+// Toggle this to true if you need to debug in the browser console
+const DEBUG = false;
+
 function log(msg: string) {
-    console.log(`%c[Detect] ${msg}`, 'color: cyan; background: #222;');
+    if (DEBUG) console.log(`%c[Detect] ${msg}`, 'color: cyan; background: #222;');
 }
 
 export function detectQuadFromRgba(rgba: Uint8ClampedArray, w: number, h: number): DetectedQuad {
-    const start = performance.now();
+    // FIX 1: Removed unused 'start' variable
     const n = w * h;
 
     // ---------------------------------------------------------
@@ -157,19 +160,6 @@ export function detectQuadFromRgba(rgba: Uint8ClampedArray, w: number, h: number
     const uniqueHoriz = filterLines(horizLines, 8);
     const uniqueVert = filterLines(vertLines, 8);
 
-    // =========================================================
-    // 🎨 DEBUG DRAWING: DRAW CANDIDATE LINES ON IMAGE
-    // =========================================================
-
-    // Draw Horizontals in RED
-    for (const l of uniqueHoriz) {
-        drawLine(rgba, w, h, l.rho, l.theta, [255, 0, 0, 255]);
-    }
-    // Draw Verticals in BLUE
-    for (const l of uniqueVert) {
-        drawLine(rgba, w, h, l.rho, l.theta, [0, 0, 255, 255]);
-    }
-
     // ---------------------------------------------------------
     // 5. COMBINATORIAL SEARCH
     // ---------------------------------------------------------
@@ -202,10 +192,12 @@ export function detectQuadFromRgba(rgba: Uint8ClampedArray, w: number, h: number
                         if (q) {
                             const {score, details} = scoreQuad(q, w, h, mags, mean, stdDev);
                             if (score > 0) {
-                                // Balance Score vs Area
-                                const metric = score + (details.ratio * 1.0); // Medium area bias
+                                // FIX 2: Added fallback for potentially undefined details.ratio
+                                const ratio = details.ratio || 0;
+                                const metric = score + (ratio * 1.0);
                                 if (!bestQuad || metric > bestQuad.metric) {
-                                    bestQuad = {q, s: score, r: details.ratio, metric};
+                                    // FIX 3: Added fallback here as well
+                                    bestQuad = {q, s: score, r: ratio, metric};
                                 }
                             }
                         }
@@ -219,22 +211,13 @@ export function detectQuadFromRgba(rgba: Uint8ClampedArray, w: number, h: number
         return {quad: null, confidence: 0, width: w, height: h};
     }
 
-    // =========================================================
-    // 🎨 DEBUG DRAWING: DRAW WINNER QUAD
-    // =========================================================
-    const q = bestQuad.q;
-    // Draw thick Green lines for winner
-    drawLineSegment(rgba, w, h, q[0], q[1], [0, 255, 0, 255]);
-    drawLineSegment(rgba, w, h, q[1], q[2], [0, 255, 0, 255]);
-    drawLineSegment(rgba, w, h, q[2], q[3], [0, 255, 0, 255]);
-    drawLineSegment(rgba, w, h, q[3], q[0], [0, 255, 0, 255]);
-
     log(`WINNER: Score=${bestQuad.s.toFixed(2)} Area=${bestQuad.r.toFixed(2)}`);
     return {quad: bestQuad.q, confidence: bestQuad.s, width: w, height: h};
 }
 
-// --- HELPERS ---
-
+// ---------------------------------------------------------
+// SCORING
+// ---------------------------------------------------------
 function scoreQuad(q: Quad, w: number, h: number, mags: Uint16Array, mean: number, stdDev: number) {
     const area = quadArea(q);
     const ratio = area / (w * h);
@@ -245,7 +228,7 @@ function scoreQuad(q: Quad, w: number, h: number, mags: Uint16Array, mean: numbe
     const z2 = checkSideZ(q[2], q[3], w, h, mags, mean, stdDev);
     const z3 = checkSideZ(q[3], q[0], w, h, mags, mean, stdDev);
 
-    // Gap check: 30% tolerance
+    // GAP CHECK (30%)
     const maxAllowedGap = 0.30;
     if (z0.maxGap > maxAllowedGap || z1.maxGap > maxAllowedGap ||
         z2.maxGap > maxAllowedGap || z3.maxGap > maxAllowedGap) {
@@ -302,60 +285,4 @@ function checkSideZ(p1: Point, p2: Point, w: number, h: number, mags: Uint16Arra
 
     if (validSamples === 0) return {score: 0, maxGap: 1.0};
     return {score: (totalZ / validSamples) * (validSamples / (steps + 1)), maxGap: maxGapSequence / (steps + 1)};
-}
-
-// --- DRAWING HELPERS ---
-
-function drawLine(rgba: Uint8ClampedArray, w: number, h: number, rho: number, theta: number, color: number[]) {
-    const cos = Math.cos(theta);
-    const sin = Math.sin(theta);
-
-    // Find intersection with borders to get segment
-    // x*cos + y*sin = rho
-    const pts: Point[] = [];
-
-    // Left (x=0) -> y = rho/sin
-    if (Math.abs(sin) > 0.01) pts.push({x: 0, y: rho / sin});
-    // Right (x=w) -> y = (rho - w*cos)/sin
-    if (Math.abs(sin) > 0.01) pts.push({x: w, y: (rho - w * cos) / sin});
-    // Top (y=0) -> x = rho/cos
-    if (Math.abs(cos) > 0.01) pts.push({x: rho / cos, y: 0});
-    // Bottom (y=h) -> x = (rho - h*sin)/cos
-    if (Math.abs(cos) > 0.01) pts.push({x: (rho - h * sin) / cos, y: h});
-
-    // Filter points inside image
-    const valid = pts.filter(p => p.x >= -10 && p.x <= w + 10 && p.y >= -10 && p.y <= h + 10);
-    if (valid.length >= 2) {
-        drawLineSegment(rgba, w, h, valid[0], valid[1], color);
-    }
-}
-
-function drawLineSegment(rgba: Uint8ClampedArray, w: number, h: number, p1: Point, p2: Point, color: number[]) {
-    let x0 = Math.round(p1.x), y0 = Math.round(p1.y);
-    let x1 = Math.round(p2.x), y1 = Math.round(p2.y);
-
-    const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
-    const sx = (x0 < x1) ? 1 : -1;
-    const sy = (y0 < y1) ? 1 : -1;
-    let err = dx - dy;
-
-    while (true) {
-        if (x0 >= 0 && x0 < w && y0 >= 0 && y0 < h) {
-            const idx = (y0 * w + x0) * 4;
-            rgba[idx] = color[0];     // R
-            rgba[idx + 1] = color[1];   // G
-            rgba[idx + 2] = color[2];   // B
-            rgba[idx + 3] = 255;        // A
-        }
-        if (x0 === x1 && y0 === y1) break;
-        const e2 = 2 * err;
-        if (e2 > -dy) {
-            err -= dy;
-            x0 += sx;
-        }
-        if (e2 < dx) {
-            err += dx;
-            y0 += sy;
-        }
-    }
 }
