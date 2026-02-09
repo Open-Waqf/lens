@@ -22,6 +22,7 @@ import {ConfirmModal} from '../components/confirm-modal';
 import {CameraManager} from '../lib/camera/camera-manager';
 import {ScanSessionState, type ScanStage} from './scan/scan-session-state';
 import {ScanRepo} from './scan/scan-repo';
+import {ocrQueue} from '../services/ocr-queue';
 
 const APPEND_DOC_KEY = 'sahifah.appendToDocId';
 const AUTO_KEY = 'sahifah.autoCapture';
@@ -36,6 +37,8 @@ export class ScanPage extends LitElement {
     createRenderRoot() {
         return this;
     }
+
+    @state() private ocrCount = 0;
 
     @query('video') private videoEl!: HTMLVideoElement;
 
@@ -114,7 +117,13 @@ export class ScanPage extends LitElement {
             if (pending.length === 1) await this.openNewBlobInEditor(pending[0]);
             else await this.batchImport(pending);
         }
+        ocrQueue.addEventListener('change', this.onOcrQueueChange);
     }
+
+    private onOcrQueueChange = () => {
+        this.ocrCount = ocrQueue.activeCount;
+        this.requestUpdate();
+    };
 
     disconnectedCallback(): void {
         window.removeEventListener('hashchange', this.onHashChange);
@@ -125,7 +134,7 @@ export class ScanPage extends LitElement {
         this.stopDetector();
         this.revokeStrip();
         this.clearImportReview();
-
+        ocrQueue.removeEventListener('change', this.onOcrQueueChange);
         super.disconnectedCallback();
     }
 
@@ -322,16 +331,15 @@ export class ScanPage extends LitElement {
         this.busy = true;
         this.error = null;
         this.requestUpdate();
-        await new Promise(r => setTimeout(r, 50));
 
         try {
-            const {master, thumb} = ev.detail;
+            const {master, thumb, extractText} = ev.detail;
             const docId = await this.ensureDocId();
 
             const targetId = this.editingPageId || this.replacePageId;
 
             if (targetId) {
-                await this.repo.updateExistingPage(targetId, master, thumb);
+                await this.repo.updateExistingPage(targetId, master, thumb, extractText);
                 if (this.editingPageId) this.newPageIds.delete(this.editingPageId);
                 this.selectedPageId = targetId; // Keep selection
 
@@ -342,7 +350,7 @@ export class ScanPage extends LitElement {
                     return;
                 }
             } else {
-                const pageId = await this.repo.addNewPage(docId, master, thumb);
+                const pageId = await this.repo.addNewPage(docId, master, thumb, extractText);
                 this.newPageIds.add(pageId);
                 this.selectedPageId = pageId; // Select new page
             }
@@ -826,11 +834,25 @@ export class ScanPage extends LitElement {
         `;
     }
 
+    private renderOcrStatus() {
+        if (this.ocrCount === 0) return null;
+
+        return html`
+            <div class="fixed bottom-4 left-4 right-4 z-50 flex justify-center">
+                <div class="bg-slate-900 border border-slate-700 text-slate-200 px-4 py-2 rounded-full shadow-xl flex items-center gap-3 text-sm">
+                    <div class="w-4 h-4 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+                    <span>Processing text for ${this.ocrCount} page(s)...</span>
+                </div>
+            </div>
+        `;
+    }
+
     render() {
         if (this.showWelcome) return this.renderWelcome();
 
         const stage: ScanStage = this.session.stage;
         return html`
+            ${this.renderOcrStatus()}
             <div class="space-y-4">
                 <div class="flex items-center justify-between">
                     <div class="text-lg font-semibold">

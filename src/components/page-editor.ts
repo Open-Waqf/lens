@@ -9,6 +9,7 @@ import type {WorkerRequest, WorkerResponse} from '../lib/image/worker';
 export type PageEditorSaveDetail = {
     master: { bytes: Uint8Array; width: number; height: number };
     thumb: { bytes: Uint8Array; width: number; height: number };
+    extractText: boolean;
 };
 
 @customElement('page-editor')
@@ -17,6 +18,7 @@ export class PageEditor extends LitElement {
         return this;
     }
 
+    @property({type: Boolean}) extractText = true;
     @property({attribute: false}) blob!: Blob;
     @property({attribute: false}) filter: FilterMode = 'original';
 
@@ -508,6 +510,7 @@ export class PageEditor extends LitElement {
             const detail: PageEditorSaveDetail = {
                 master: {bytes: resM.bytes, width: resM.width!, height: resM.height!},
                 thumb: {bytes: resT.bytes, width: resT.width!, height: resT.height!},
+                extractText: this.extractText,
             };
 
             this.dispatchEvent(
@@ -619,6 +622,15 @@ export class PageEditor extends LitElement {
                     </div>
 
                     <div class="flex gap-2">
+                        <div class="flex items-center gap-2 mb-2 px-1">
+                            <input type="checkbox" id="ocr-check"
+                                   class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-emerald-600 focus:ring-emerald-500"
+                                   .checked=${this.extractText}
+                                   @change=${(e: Event) => this.extractText = (e.target as HTMLInputElement).checked}>
+                            <label for="ocr-check" class="text-xs text-slate-300 select-none cursor-pointer">
+                                Extract Text (OCR)
+                            </label>
+                        </div>
                         <button class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 active:scale-95 transition-all text-slate-950 font-semibold"
                                 ?disabled=${this.busy} @click=${() => void this.onSave()}>
                             ${this.busy ? 'Saving…' : 'Save'}

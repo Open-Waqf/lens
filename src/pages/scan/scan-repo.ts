@@ -7,6 +7,7 @@ import {db} from '../../services/db';
 import {getFileStore} from '../../services/filestore';
 import {recognizeText} from '../../lib/ocr';
 import {bytesToBlob} from "../../lib/bytes";
+import {ocrQueue} from '../../services/ocr-queue';
 
 export type DocStripItem = { id: string; thumbBytes: Uint8Array };
 
@@ -79,6 +80,7 @@ export class ScanRepo {
         docId: string,
         master: PageEditorSaveDetail['master'],
         thumb: PageEditorSaveDetail['thumb'],
+        doOcr: boolean = true
     ): Promise<string> {
         const store = getFileStore();
         const pageId = nanoid();
@@ -139,10 +141,13 @@ export class ScanRepo {
             throw e;
         }
 
-        // 4. Trigger Background OCR (WAIT for it)
-        //
-        // Changing 'void' to 'await' ensures the UI waits for text extraction
-        await this.runBackgroundOcr(pageId, master.bytes, master.width, master.height);
+        if (doOcr) {
+            // NOTIFY QUEUE: "I am starting a job for this page"
+            ocrQueue.addJob(pageId);
+
+            // NO 'await'! This makes the UI instant.
+            this.runBackgroundOcr(pageId, master.bytes, master.width, master.height);
+        }
 
         return pageId;
     }
@@ -151,6 +156,7 @@ export class ScanRepo {
         pageId: string,
         master: PageEditorSaveDetail['master'],
         thumb: PageEditorSaveDetail['thumb'],
+        doOcr: boolean = true
     ): Promise<void> {
         const store = getFileStore();
 
@@ -221,8 +227,11 @@ export class ScanRepo {
             throw e;
         }
 
-        // Trigger OCR for updated image (WAIT for it)
-        await this.runBackgroundOcr(pageId, master.bytes, master.width, master.height);
+        if (doOcr) {
+            ocrQueue.addJob(pageId);
+            // Fire and forget (no await)
+            this.runBackgroundOcr(pageId, master.bytes, master.width, master.height);
+        }
     }
 
     async deleteDocCompletely(docId: string): Promise<void> {
@@ -290,12 +299,14 @@ export class ScanRepo {
                     }
                 }
             });
+            ocrQueue.completeJob(pageId, true);
         } catch (e) {
             console.error('Background OCR failed', e);
             try {
                 await db.pages.update(pageId, {ocrStatus: 'error'});
             } catch {
             }
+            ocrQueue.completeJob(pageId, false);
         }
     }
 }
