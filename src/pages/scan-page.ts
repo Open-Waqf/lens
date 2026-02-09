@@ -942,7 +942,7 @@ export class ScanPage extends LitElement {
                 ` : null}
 
                 ${stage === 'edit' ? html`
-                    <div class="space-y-3">
+                    <div class="space-y-3 pb-24">
                         ${this.importReviewTotal > 0 ? html`
                             <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 text-slate-200 flex items-center justify-between gap-3">
                                 <div class="text-sm">Reviewing imported pages <span
@@ -956,7 +956,7 @@ export class ScanPage extends LitElement {
                                          @page-editor-cancel=${this.onEditorCancel}
                             ></page-editor>
                         `)}
-                        <div class="flex justify-end">
+                        <div class="flex justify-end mt-6 pb-10">
                             <button class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 disabled:opacity-60 min-h-[44px]"
                                     ?disabled=${this.busy} @click=${() => void this.exitScan()}>
                                 ${this.session.exitLabel}
