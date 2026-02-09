@@ -6,11 +6,21 @@ let workerPromise: Promise<Worker> | null = null;
 async function getWorker(): Promise<Worker> {
     if (!workerPromise) {
         workerPromise = (async () => {
+            // 1. Get the base URL (handles localhost and production subpaths automatically)
+            // In Vite, files in 'public/tesseract' are available at '/tesseract'
+            const base = import.meta.env.BASE_URL || '/';
+            const tessPath = `${base}tesseract/`.replace('//', '/'); // Ensure no double slashes
+
+            console.log(`OCR: Loading Tesseract assets from ${tessPath}`);
+
             const w = await createWorker('eng', 1, {
-                workerPath: new URL('/tesseract/worker.min.js', import.meta.url).href,
-                corePath: new URL('/tesseract/tesseract-core.wasm.js', import.meta.url).href,
-                langPath: new URL('/tesseract/', import.meta.url).href,
+                // 2. Point directly to where the browser serves the file
+                workerPath: `${tessPath}worker.min.js`,
+                corePath: `${tessPath}tesseract-core.wasm.js`,
+                langPath: `${tessPath}`, // Must end in a slash /
+                gzip: true, // Explicitly tell it to look for .gz files
             });
+
             await w.setParameters({
                 tessedit_pageseg_mode: PSM.AUTO,
                 tessedit_create_tsv: '1',
@@ -43,7 +53,7 @@ export async function recognizeText(
         if (data.tsv) {
             const tsvRaw = data.tsv as string;
             // DEBUG: See the first 200 chars to confirm format
-            console.log('OCR TSV Preview:', tsvRaw.substring(0, 200).replace(/\n/g, '\\n'));
+            // console.log('OCR TSV Preview:', tsvRaw.substring(0, 200).replace(/\n/g, '\\n'));
 
             // Handle both \n and \r\n
             const lines = tsvRaw.split(/\r?\n/);
@@ -51,7 +61,6 @@ export async function recognizeText(
             for (let i = 0; i < lines.length; i++) {
                 const row = lines[i].split('\t');
                 // TSV Standard: level|page_num|block_num|par_num|line_num|word_num|left|top|width|height|conf|text
-                // That is 12 columns.
                 if (row.length < 12) continue;
 
                 // We want level 5 (Word)
@@ -82,8 +91,6 @@ export async function recognizeText(
         }
 
         // EMERGENCY FALLBACK:
-        // If parsing failed but we have text, return the whole text as one big block.
-        // This ensures SEARCH works, even if the red boxes are missing.
         if (words.length === 0 && data.text && data.text.length > 0) {
             console.warn('OCR: Coordinate parsing failed. Falling back to full-page text.');
             words.push({
@@ -98,6 +105,10 @@ export async function recognizeText(
 
     } catch (e) {
         console.error('OCR Failed', e);
+        // Reset the worker promise so we can try to re-initialize on next attempt if it was a transient error
+        if (workerPromise) {
+            workerPromise = null;
+        }
         return [];
     } finally {
         if (url) URL.revokeObjectURL(url);
