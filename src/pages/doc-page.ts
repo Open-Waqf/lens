@@ -225,18 +225,10 @@ export class DocPage extends LitElement {
         });
         if (!ok) return;
         this.busy = true;
-        try {
-            const page = await db.pages.get(pageId);
-            if (page) {
-                const store = getFileStore();
-                await store.del(page.imagePath);
-                await store.del(page.thumbPath);
-                await db.pages.delete(pageId);
-            }
-            if (this.doc) {
-                const newIds = this.doc.pageIds.filter(id => id !== pageId);
-                await this.saveMeta({pageIds: newIds});
-            }
+        try {// FIX: Delegate to ScanRepo to ensure files are deleted AND search index is rebuilt
+            await this.repo.deletePage(pageId);
+
+            // We need to reload to update the UI list
             await this.load();
         } catch (e) {
             this.error = (e as Error).message;

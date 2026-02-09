@@ -142,10 +142,7 @@ export class ScanRepo {
         }
 
         if (doOcr) {
-            // NOTIFY QUEUE: "I am starting a job for this page"
             ocrQueue.addJob(pageId);
-
-            // NO 'await'! This makes the UI instant.
             this.runBackgroundOcr(pageId, master.bytes, master.width, master.height);
         }
 
@@ -199,13 +196,14 @@ export class ScanRepo {
                     height: master.height,
                     rotation: 0,
                     ocrStatus: 'pending', // Reset OCR status on edit
-                    words: [], // Clear old words
+                    words: [], // Clear old words immediately so search doesn't match old text
                 });
 
                 doc.updatedAt = Date.now();
                 await db.docs.put(doc);
             });
 
+            // Clean up old files
             try {
                 await store.del(oldPage.imagePath);
             } catch {
@@ -214,6 +212,9 @@ export class ScanRepo {
                 await store.del(oldPage.thumbPath);
             } catch {
             }
+
+            // Since we cleared words, we should rebuild index immediately to remove old text
+            await this.rebuildDocIndex(docId);
 
         } catch (e) {
             try {
@@ -229,9 +230,40 @@ export class ScanRepo {
 
         if (doOcr) {
             ocrQueue.addJob(pageId);
-            // Fire and forget (no await)
             this.runBackgroundOcr(pageId, master.bytes, master.width, master.height);
         }
+    }
+
+    async deletePage(pageId: string): Promise<void> {
+        const page = await db.pages.get(pageId);
+        if (!page) return;
+        const {docId} = page;
+
+        const store = getFileStore();
+
+        // 1. DB Updates
+        await db.transaction('rw', db.docs, db.pages, async () => {
+            await db.pages.delete(pageId);
+            const doc = await db.docs.get(docId);
+            if (doc) {
+                doc.pageIds = doc.pageIds.filter(id => id !== pageId);
+                doc.updatedAt = Date.now();
+                await db.docs.put(doc);
+            }
+        });
+
+        // 2. File Cleanup
+        try {
+            await store.del(page.imagePath);
+        } catch {
+        }
+        try {
+            await store.del(page.thumbPath);
+        } catch {
+        }
+
+        // 3. Rebuild Index (Removes text of deleted page)
+        await this.rebuildDocIndex(docId);
     }
 
     async deleteDocCompletely(docId: string): Promise<void> {
@@ -265,16 +297,28 @@ export class ScanRepo {
     }
 
     /**
-     * Runs OCR in the background, saves words to the Page,
-     * AND updates the Document's search index.
+     * CRITICAL FIX: Rebuilds the search index from scratch using all current pages.
+     * This prevents "ghost text" from lingering after edits/deletes.
      */
+    private async rebuildDocIndex(docId: string): Promise<void> {
+        const pages = await db.pages.where('docId').equals(docId).toArray();
+        // Sort by their order in the doc if needed, but for search 'bag of words' is fine.
+        // If we want exact phrase search, we should respect doc.pageIds order.
+
+        const fullText = pages
+            .map(p => p.words?.map(w => w.text).join(' ') ?? '')
+            .join(' ')
+            .trim();
+
+        await db.docs.update(docId, {searchIndex: fullText});
+    }
+
     private async runBackgroundOcr(pageId: string, bytes: Uint8Array, w: number, h: number) {
         try {
             const blob = bytesToBlob(bytes, 'image/jpeg');
 
             // 1. Run Intelligence
             const words = await recognizeText(blob, w, h);
-            const fullText = words.map(w => w.text).join(' ');
 
             // 2. Commit to Memory (DB)
             await db.transaction('rw', db.pages, db.docs, async () => {
@@ -287,18 +331,18 @@ export class ScanRepo {
                         words,
                         ocrStatus: 'done'
                     });
-
-                    // Update Parent Document Index
-                    const doc = await db.docs.get(p.docId);
-                    if (doc) {
-                        // Append new text to existing index
-                        const prevIndex = doc.searchIndex ?? '';
-                        await db.docs.update(p.docId, {
-                            searchIndex: (prevIndex + ' ' + fullText).trim()
-                        });
-                    }
                 }
             });
+
+            // 3. Rebuild Index (Cleanest way to handle the new text)
+            // We fetch the latest state of all pages and update the doc.
+            // We do this OUTSIDE the transaction above to keep it short,
+            // and because rebuildDocIndex starts its own transaction.
+            const p = await db.pages.get(pageId);
+            if (p) {
+                await this.rebuildDocIndex(p.docId);
+            }
+
             ocrQueue.completeJob(pageId, true);
         } catch (e) {
             console.error('Background OCR failed', e);

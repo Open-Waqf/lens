@@ -1,9 +1,7 @@
 import {PDFDocument, rgb} from 'pdf-lib';
-import type {PageRecord} from '../domain/types';
+import type {OcrWord, PageRecord} from '../domain/types';
 import type {FileStore} from '../services/filestore/opfs-store';
 import {bytesToBlob} from './bytes';
-
-const MAX_PAGES_SAFE = 50;
 
 export type PdfQuality = 'original' | 'email';
 
@@ -17,10 +15,8 @@ export async function buildPdfForDoc(
     pages: PageRecord[],
     opts: PdfOptions = {quality: 'original'}
 ): Promise<Uint8Array> {
-    if (pages.length > MAX_PAGES_SAFE) {
-        throw new Error(`PDF too large (${pages.length} pages). Please split the document.`);
-    }
-
+    // Limit removed to support large documents.
+    // Memory is managed by processing pages one-by-one and grouping text lines.
     const pdf = await PDFDocument.create();
     const total = pages.length;
 
@@ -31,38 +27,42 @@ export async function buildPdfForDoc(
         let jpgBytes: Uint8Array | null = await store.get(p.imagePath);
 
         try {
-            // #18 PDF Quality Toggle logic
             if (opts.quality === 'email') {
-                jpgBytes = await compressForEmail(jpgBytes);
+                const compressed = await compressForEmail(jpgBytes);
+                jpgBytes = compressed;
             }
 
             const img = await pdf.embedJpg(jpgBytes);
-            jpgBytes = null; // Release memory
+            jpgBytes = null; // Immediate memory release
 
             const page = pdf.addPage([img.width, img.height]);
+            const h = img.height;
+            const w = img.width;
 
-            // 1. Draw the image (Visual Layer)
-            page.drawImage(img, {x: 0, y: 0, width: img.width, height: img.height});
+            // 1. Draw Visual Layer
+            page.drawImage(img, {x: 0, y: 0, width: w, height: h});
 
-            // 2. Draw invisible text (Search Layer)
+            // 2. Draw Optimized Search Layer (Grouped by lines)
             if (p.words && p.words.length > 0) {
-                const h = img.height;
-                const w = img.width;
+                const lines = groupWordsIntoLines(p.words);
 
-                for (const word of p.words) {
-                    const [nx, ny, _nw, nh] = word.box;
-
-                    // Denormalize to PDF units
-                    const px = nx * w;
-                    const py = ny * h; // Top-left Y
-                    const ph = nh * h;
+                for (const line of lines) {
+                    // Use the average height of words in the line for font size
+                    const avgHeight = line.words.reduce((sum, w) => sum + w.box[3], 0) / line.words.length;
+                    const fontSize = avgHeight * h;
 
                     // PDF Coordinate System is Bottom-Left.
-                    page.drawText(word.text, {
+                    // Y = PageHeight - (TopOffset + LineHeight)
+                    const firstWord = line.words[0];
+                    const px = firstWord.box[0] * w;
+                    const py = firstWord.box[1] * h;
+                    const ph = firstWord.box[3] * h;
+
+                    page.drawText(line.text, {
                         x: px,
-                        y: h - (py + ph), // Flip Y
-                        size: ph, // Font size ~ bounding box height
-                        opacity: 0, // INVISIBLE
+                        y: h - (py + ph),
+                        size: fontSize,
+                        opacity: 0, // Keep invisible
                         color: rgb(0, 0, 0),
                     });
                 }
@@ -70,14 +70,54 @@ export async function buildPdfForDoc(
 
         } catch (e) {
             console.error(`Failed to embed page ${p.id}`, e);
-            throw new Error('Failed to generate PDF. One or more pages may be corrupted.');
+            throw new Error(`Failed to generate PDF at page ${i + 1}.`);
         }
     }
 
     return await pdf.save();
 }
 
-// Helper: Resize to max 1200px and compress to 0.6 quality
+/**
+ * Groups individual OCR words into lines to reduce PDF object count.
+ * This significantly shrinks the file size for text-heavy documents.
+ */
+function groupWordsIntoLines(words: OcrWord[]): Array<{ text: string, words: OcrWord[] }> {
+    const lines: Array<{ text: string, words: OcrWord[] }> = [];
+    if (words.length === 0) return lines;
+
+    // Sort words: Top-to-Bottom, then Left-to-Right
+    const sorted = [...words].sort((a, b) => a.box[1] - b.box[1] || a.box[0] - b.box[0]);
+
+    let currentLine: OcrWord[] = [sorted[0]];
+
+    for (let i = 1; i < sorted.length; i++) {
+        const prev = sorted[i - 1];
+        const curr = sorted[i];
+
+        // If the vertical start of the current word is within the height of the previous word,
+        // they likely belong to the same visual line.
+        const verticalOverlap = Math.abs(curr.box[1] - prev.box[1]) < (prev.box[3] * 0.5);
+
+        if (verticalOverlap) {
+            currentLine.push(curr);
+        } else {
+            lines.push({
+                text: currentLine.map(w => w.text).join(' '),
+                words: currentLine
+            });
+            currentLine = [curr];
+        }
+    }
+
+    // Push last line
+    lines.push({
+        text: currentLine.map(w => w.text).join(' '),
+        words: currentLine
+    });
+
+    return lines;
+}
+
 async function compressForEmail(originalBytes: Uint8Array): Promise<Uint8Array> {
     const blob = bytesToBlob(originalBytes, 'image/jpeg');
     const bitmap = await createImageBitmap(blob);
@@ -90,8 +130,6 @@ async function compressForEmail(originalBytes: Uint8Array): Promise<Uint8Array> 
     const canvas = new OffscreenCanvas(w, h);
     const ctx = canvas.getContext('2d')!;
     ctx.drawImage(bitmap, 0, 0, w, h);
-
-    // Release bitmap memory immediately
     bitmap.close();
 
     const blobOut = await canvas.convertToBlob({type: 'image/jpeg', quality: 0.6});
