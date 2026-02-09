@@ -20,6 +20,7 @@ export interface DocRecord {
     // NEW: The "Brain" memory
     // Contains aggregated text from all pages for instant search
     searchIndex?: string;
+    vaultEnabled?: boolean;
 }
 
 export interface PageRecord {
@@ -34,4 +35,8 @@ export interface PageRecord {
     reviewed?: 0 | 1;
     words?: OcrWord[];
     ocrStatus?: 'pending' | 'done' | 'error';
+}
+
+export interface AppSettings {
+    requireAuth: boolean; // Biometric/Passcode lock
 }

@@ -1,6 +1,8 @@
-// src/services/ocr-queue.ts
-
-type OcrJob = { pageId: string; status: 'processing' | 'done' | 'error' };
+type OcrJob = {
+    pageId: string;
+    docTitle: string; // NEW
+    status: 'processing' | 'done' | 'error'
+};
 
 class OcrQueueService extends EventTarget {
     private jobs: OcrJob[] = [];
@@ -9,8 +11,15 @@ class OcrQueueService extends EventTarget {
         return this.jobs.filter(j => j.status === 'processing').length;
     }
 
-    addJob(pageId: string) {
-        this.jobs.push({pageId, status: 'processing'});
+    get activeTitles() {
+        const titles = this.jobs
+            .filter(j => j.status === 'processing')
+            .map(j => j.docTitle);
+        return Array.from(new Set(titles));
+    }
+
+    addJob(pageId: string, docTitle: string) {
+        this.jobs.push({pageId, docTitle, status: 'processing'});
         this.notify();
     }
 

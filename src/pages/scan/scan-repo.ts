@@ -142,7 +142,8 @@ export class ScanRepo {
         }
 
         if (doOcr) {
-            ocrQueue.addJob(pageId);
+            const doc = await db.docs.get(docId);
+            ocrQueue.addJob(pageId, doc?.title || 'Document');
             this.runBackgroundOcr(pageId, master.bytes, master.width, master.height);
         }
 
@@ -241,7 +242,8 @@ export class ScanRepo {
         }
 
         if (doOcr) {
-            ocrQueue.addJob(pageId);
+            const doc = await db.docs.get(docId);
+            ocrQueue.addJob(pageId, doc?.title || 'Document');
             this.runBackgroundOcr(pageId, master.bytes, master.width, master.height);
         }
     }

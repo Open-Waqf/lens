@@ -19,6 +19,9 @@ import type {DocRecord, PageRecord} from '../domain/types';
 
 type RestoreMode = 'merge' | 'erase';
 
+const AUTH_KEY = 'sahifah.requireAuth';
+const VAULT_KEY = 'sahifah.defaultVault';
+
 @customElement('settings-page')
 export class SettingsPage extends LitElement {
     createRenderRoot() {
@@ -37,6 +40,10 @@ export class SettingsPage extends LitElement {
     @state() private storageQuota = 0;
     @state() private lastBackupDate: number | null = null;
 
+    // Phase 3 State
+    @state() private requireAuth = localStorage.getItem(AUTH_KEY) === '1';
+    @state() private defaultVault = localStorage.getItem(VAULT_KEY) === '1';
+
     async connectedCallback() {
         super.connectedCallback();
         this.lastBackupDate = Number(localStorage.getItem('sahifah.lastBackup')) || null;
@@ -54,6 +61,16 @@ export class SettingsPage extends LitElement {
                 console.warn('Storage estimate failed', e);
             }
         }
+    }
+
+    private toggleAuth() {
+        this.requireAuth = !this.requireAuth;
+        localStorage.setItem(AUTH_KEY, this.requireAuth ? '1' : '0');
+    }
+
+    private toggleDefaultVault() {
+        this.defaultVault = !this.defaultVault;
+        localStorage.setItem(VAULT_KEY, this.defaultVault ? '1' : '0');
     }
 
     private formatBytes(bytes: number): string {
@@ -325,168 +342,233 @@ export class SettingsPage extends LitElement {
         }
     }
 
+    render() {
+        return html`
+            <div class="space-y-6 pb-20">
+                ${this.renderHeader()}
+
+                ${this.renderAlerts()}
+
+                ${this.renderPrivacySection()}
+
+                ${this.renderSecuritySection()}
+
+                ${this.renderStorageSection()}
+
+                ${this.renderDataManagement()}
+
+                ${this.renderSystemInfo()}
+
+                ${this.renderDangerZone()}
+            </div>
+        `;
+    }
+
+    private renderHeader() {
+        return html`
+            <div class="flex items-center gap-3">
+                <button class="p-2 rounded-full hover:bg-slate-800" @click=${() => location.hash = '#/library'}>
+                    <svg class="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M15 19l-7-7 7-7"></path>
+                    </svg>
+                </button>
+                <h1 class="text-xl font-bold text-slate-100">Settings</h1>
+                <div class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">v${pkg.version}</div>
+            </div>
+        `;
+    }
+
+    private renderAlerts() {
+        return html`
+            ${this.msg ? html`
+                <div class="p-4 rounded-lg bg-slate-800 text-emerald-400 border border-emerald-900/50">${this.msg}
+                </div>` : null}
+            ${this.err ? html`
+                <div class="p-4 rounded-lg bg-red-950/40 text-red-200 border border-red-900">${this.err}</div>` : null}
+        `;
+    }
+
+    private renderPrivacySection() {
+        return html`
+            <section class="p-4 rounded-xl border border-slate-700 bg-slate-800/50 space-y-2">
+                <div class="flex items-center gap-2 text-emerald-400 font-semibold text-sm">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                    </svg>
+                    Privacy & Security
+                </div>
+                <p class="text-xs text-slate-300 leading-relaxed">
+                    This app is <strong>Offline Only</strong>. Your documents are stored locally and are never sent to
+                    any cloud server.
+                </p>
+            </section>
+        `;
+    }
+
+    private renderSecuritySection() {
+        return html`
+            <section class="p-4 rounded-xl border border-slate-700 bg-slate-800/50 space-y-4">
+                <div class="flex items-center gap-2 text-emerald-400 font-semibold text-sm">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                    </svg>
+                    Advanced Protection
+                </div>
+
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="text-sm text-slate-200">App Lock</div>
+                        <div class="text-[10px] text-slate-500">Require Biometrics to open app</div>
+                    </div>
+                    <button class="relative h-6 w-11 rounded-full transition-colors ${this.requireAuth ? 'bg-emerald-600' : 'bg-slate-700'}"
+                            @click=${this.toggleAuth}>
+                        <span class="absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${this.requireAuth ? 'translate-x-5' : ''}"></span>
+                    </button>
+                </div>
+
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="text-sm text-slate-200">Vault Mode (Default)</div>
+                        <div class="text-[10px] text-slate-500">Encrypt image files at rest by default</div>
+                    </div>
+                    <button class="relative h-6 w-11 rounded-full transition-colors ${this.defaultVault ? 'bg-emerald-600' : 'bg-slate-700'}"
+                            @click=${this.toggleDefaultVault}>
+                        <span class="absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${this.defaultVault ? 'translate-x-5' : ''}"></span>
+                    </button>
+                </div>
+            </section>
+        `;
+    }
+
+    private renderStorageSection() {
+        const pct = this.storageQuota > 0 ? (this.storageUsed / this.storageQuota) * 100 : 0;
+        const color = pct > 90 ? 'bg-red-500' : (pct > 70 ? 'bg-amber-500' : 'bg-emerald-500');
+        return html`
+            <section class="space-y-2">
+                <div class="flex items-center justify-between text-xs text-slate-400 uppercase tracking-wider font-semibold">
+                    <span>Local Storage</span>
+                    <span>${this.formatBytes(this.storageUsed)} / ${this.formatBytes(this.storageQuota)}</span>
+                </div>
+                <div class="h-4 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                    <div class="h-full ${color} transition-all duration-500" style="width: ${Math.max(2, pct)}%"></div>
+                </div>
+                <div class="text-[10px] text-slate-500">Managed by browser. The OS may clear this if storage is low.
+                </div>
+            </section>
+        `;
+    }
+
+    private renderDataManagement() {
+        return html`
+            <section class="space-y-3">
+                <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">Data Management</h2>
+                ${this.renderBackupStatus()}
+                <div class="grid gap-3">
+                    <button class="flex items-center justify-between p-4 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors"
+                            ?disabled=${this.busy} @click=${() => this.exportBackup()}>
+                        <div class="flex items-center gap-3">
+                            <div class="p-2 rounded-lg bg-emerald-900/30 text-emerald-400">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                                </svg>
+                            </div>
+                            <div class="text-left">
+                                <div class="text-slate-200 font-medium">Export Backup</div>
+                                <div class="text-xs text-slate-500">Save library to .slbk file</div>
+                            </div>
+                        </div>
+                    </button>
+
+                    <label class="flex items-center justify-between p-4 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors cursor-pointer">
+                        <div class="flex items-center gap-3">
+                            <div class="p-2 rounded-lg bg-blue-900/30 text-blue-400">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m-4 4v12"></path>
+                                </svg>
+                            </div>
+                            <div class="text-left">
+                                <div class="text-slate-200 font-medium">Restore Backup</div>
+                                <div class="text-xs text-slate-500">Merge or replace library</div>
+                            </div>
+                        </div>
+                        <input class="hidden" type="file" accept=".slbk,.zip" ?disabled=${this.busy}
+                               @change=${(e: Event) => {
+                                   const f = (e.target as HTMLInputElement).files?.[0];
+                                   if (f) void this.importBackup(f);
+                               }}/>
+                    </label>
+                </div>
+            </section>
+        `;
+    }
+
+    private renderSystemInfo() {
+        return html`
+            <div class="p-4 rounded-xl border border-slate-800 bg-slate-950/50 space-y-2">
+                <div class="text-xs font-mono text-slate-500">System Capabilities</div>
+                <div class="text-xs text-slate-600">Capacitor: ${this.caps.isCapacitor} • OPFS: ${this.caps.hasOPFS} •
+                    Share: ${this.caps.hasWebShare}
+                </div>
+            </div>
+        `;
+    }
+
+    private renderDangerZone() {
+        return html`
+            <section class="space-y-3 pt-6 border-t border-slate-800">
+                <h2 class="text-sm font-semibold text-red-400 uppercase tracking-wider">Danger Zone</h2>
+
+                ${!this.showDangerZone ? html`
+                    <button class="w-full p-4 rounded-xl bg-slate-900 border border-red-900/30 text-red-400 hover:bg-red-950/20 transition-colors text-sm font-medium"
+                            @click=${() => this.showDangerZone = true}>
+                        Show Destructive Options
+                    </button>
+                ` : html`
+                    <div class="p-4 rounded-xl bg-red-950/10 border border-red-900/50 space-y-4">
+                        <div class="text-sm text-red-200">
+                            <p class="font-bold mb-1">Erase All Data</p>
+                            <p class="opacity-80">Permanently delete all documents and reset app.</p>
+                        </div>
+                        <div class="space-y-2">
+                            <label class="text-xs text-red-400">Type "DELETE" to confirm</label>
+                            <input type="text"
+                                   class="w-full bg-slate-950 border border-red-900/50 rounded-lg px-3 py-2 text-red-100 focus:outline-none"
+                                   placeholder="DELETE"
+                                   .value=${this.deleteConfirmation}
+                                   @input=${(e: Event) => this.deleteConfirmation = (e.target as HTMLInputElement).value}
+                            />
+                        </div>
+                        <button class="w-full py-3 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold disabled:opacity-50"
+                                ?disabled=${this.deleteConfirmation !== 'DELETE' || this.busy}
+                                @click=${() => this.nukeEverything()}>
+                            ${this.busy ? 'Erasing...' : 'Erase Everything'}
+                        </button>
+                    </div>
+                `}
+            </section>
+        `;
+    }
+
     private renderBackupStatus() {
         if (!this.lastBackupDate) {
             return html`
                 <div class="p-3 rounded-lg bg-amber-950/20 border border-amber-900/50 flex items-center gap-3">
                     <div class="text-amber-500 font-bold text-lg">!</div>
-                    <div class="text-xs text-amber-200">
-                        You have never backed up your library. Export an encrypted backup to prevent data loss.
-                    </div>
+                    <div class="text-xs text-amber-200">Never backed up. Export a backup to prevent data loss.</div>
                 </div>
             `;
         }
-
         const daysSince = Math.floor((Date.now() - this.lastBackupDate) / (1000 * 60 * 60 * 24));
         const isOverdue = daysSince > 30;
-
         return html`
             <div class="text-[10px] ${isOverdue ? 'text-amber-500 font-bold' : 'text-slate-500'}">
-                Last backup: ${new Date(this.lastBackupDate).toLocaleDateString()}
-                    (${daysSince} days ago) ${isOverdue ? '— Backup Recommended' : ''}
-            </div>
-        `;
-    }
-
-    render() {
-        const pct = this.storageQuota > 0 ? (this.storageUsed / this.storageQuota) * 100 : 0;
-        const color = pct > 90 ? 'bg-red-500' : (pct > 70 ? 'bg-amber-500' : 'bg-emerald-500');
-
-        return html`
-            <div class="space-y-6 pb-20">
-                <div class="flex items-center gap-3">
-                    <button class="p-2 rounded-full hover:bg-slate-800" @click=${() => location.hash = '#/library'}>
-                        <svg class="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                  d="M15 19l-7-7 7-7"></path>
-                        </svg>
-                    </button>
-                    <h1 class="text-xl font-bold text-slate-100">Settings</h1>
-                    <div class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">v${pkg.version}
-                    </div>
-                </div>
-
-                ${this.msg ? html`
-                    <div class="p-4 rounded-lg bg-slate-800 text-emerald-400 border border-emerald-900/50">${this.msg}
-                    </div>` : null}
-                ${this.err ? html`
-                    <div class="p-4 rounded-lg bg-red-950/40 text-red-200 border border-red-900">${this.err}
-                    </div>` : null}
-
-                <section class="p-4 rounded-xl border border-slate-700 bg-slate-800/50 space-y-2">
-                    <div class="flex items-center gap-2 text-emerald-400 font-semibold text-sm">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                  d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
-                        </svg>
-                        Privacy & Security
-                    </div>
-                    <p class="text-xs text-slate-300 leading-relaxed">
-                        This app is <strong>Offline Only</strong>. Your documents are stored locally on this device and
-                        are never sent to any cloud server.
-                    </p>
-                    <p class="text-xs text-slate-400">
-                        We cannot see, read, or recover your data. Please use the Backup feature to keep your data safe.
-                    </p>
-                </section>
-
-                <section class="space-y-2">
-                    <div class="flex items-center justify-between text-xs text-slate-400 uppercase tracking-wider font-semibold">
-                        <span>Local Storage</span>
-                        <span>${this.formatBytes(this.storageUsed)} / ${this.formatBytes(this.storageQuota)}</span>
-                    </div>
-                    <div class="h-4 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
-                        <div class="h-full ${color} transition-all duration-500"
-                             style="width: ${Math.max(2, pct)}%"></div>
-                    </div>
-                    <div class="text-[10px] text-slate-500">
-                        Managed by browser. The OS may clear this if device storage is critically low.
-                    </div>
-                </section>
-
-                <section class="space-y-3">
-                    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">Data Management</h2>
-                    ${this.renderBackupStatus()}
-                    <div class="grid gap-3">
-                        <button class="flex items-center justify-between p-4 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors"
-                                ?disabled=${this.busy} @click=${() => this.exportBackup()}>
-                            <div class="flex items-center gap-3">
-                                <div class="p-2 rounded-lg bg-emerald-900/30 text-emerald-400">
-                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-                                    </svg>
-                                </div>
-                                <div class="text-left">
-                                    <div class="text-slate-200 font-medium">Export Backup</div>
-                                    <div class="text-xs text-slate-500">Save library to .slbk file</div>
-                                </div>
-                            </div>
-                        </button>
-
-                        <label class="flex items-center justify-between p-4 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors cursor-pointer">
-                            <div class="flex items-center gap-3">
-                                <div class="p-2 rounded-lg bg-blue-900/30 text-blue-400">
-                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m-4 4v12"></path>
-                                    </svg>
-                                </div>
-                                <div class="text-left">
-                                    <div class="text-slate-200 font-medium">Restore Backup</div>
-                                    <div class="text-xs text-slate-500">Merge or replace library</div>
-                                </div>
-                            </div>
-                            <input class="hidden" type="file" accept=".slbk,.zip" ?disabled=${this.busy}
-                                   @change=${(e: Event) => {
-                                       const f = (e.target as HTMLInputElement).files?.[0];
-                                       if (f) void this.importBackup(f);
-                                   }}/>
-                        </label>
-                    </div>
-                </section>
-
-                <div class="p-4 rounded-xl border border-slate-800 bg-slate-950/50 space-y-2">
-                    <div class="text-xs font-mono text-slate-500">System Capabilities</div>
-                    <div class="text-xs text-slate-600">Capacitor: ${this.caps.isCapacitor} • OPFS: ${this.caps.hasOPFS}
-                        • Share: ${this.caps.hasWebShare}
-                    </div>
-                </div>
-
-                <section class="space-y-3 pt-6 border-t border-slate-800">
-                    <h2 class="text-sm font-semibold text-red-400 uppercase tracking-wider">Danger Zone</h2>
-
-                    ${!this.showDangerZone ? html`
-                        <button class="w-full p-4 rounded-xl bg-slate-900 border border-red-900/30 text-red-400 hover:bg-red-950/20 transition-colors text-sm font-medium"
-                                @click=${() => this.showDangerZone = true}>
-                            Show Destructive Options
-                        </button>
-                    ` : html`
-                        <div class="p-4 rounded-xl bg-red-950/10 border border-red-900/50 space-y-4">
-                            <div class="text-sm text-red-200">
-                                <p class="font-bold mb-1">Erase All Data</p>
-                                <p class="opacity-80">This will permanently delete all scanned documents and reset the
-                                    app to factory settings. This action cannot be undone.</p>
-                            </div>
-
-                            <div class="space-y-2">
-                                <label class="text-xs text-red-400">Type "DELETE" to confirm</label>
-                                <input type="text"
-                                       class="w-full bg-slate-950 border border-red-900/50 rounded-lg px-3 py-2 text-red-100 placeholder-red-900/50 focus:outline-none focus:border-red-500"
-                                       placeholder="DELETE"
-                                       .value=${this.deleteConfirmation}
-                                       @input=${(e: Event) => this.deleteConfirmation = (e.target as HTMLInputElement).value}
-                                />
-                            </div>
-
-                            <button class="w-full py-3 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                    ?disabled=${this.deleteConfirmation !== 'DELETE' || this.busy}
-                                    @click=${() => this.nukeEverything()}>
-                                ${this.busy ? 'Erasing...' : 'Erase Everything'}
-                            </button>
-                        </div>
-                    `}
-                </section>
+                Last backup: ${new Date(this.lastBackupDate).toLocaleDateString()} (${daysSince} days ago)
+                ${isOverdue ? '— Backup Recommended' : ''}
             </div>
         `;
     }

@@ -8,6 +8,7 @@ import type {DocRecord} from '../domain/types';
 import {ScanRepo} from './scan/scan-repo';
 import {bytesToBlob} from '../lib/bytes';
 import {ConfirmModal} from '../components/confirm-modal';
+import { ocrQueue } from '../services/ocr-queue';
 
 type ViewMode = 'list' | 'gallery';
 
@@ -17,6 +18,7 @@ export class LibraryPage extends LitElement {
         return this;
     }
 
+    @state() private ocrActiveCount = 0;
     private repo = new ScanRepo();
 
     @state() private docs: DocRecord[] = [];
@@ -34,8 +36,14 @@ export class LibraryPage extends LitElement {
     // Highlight logic
     @state() private highlightDocId: string | null = null;
 
+    private _onOcrChange = () => {
+        this.ocrActiveCount = ocrQueue.activeCount; //
+    };
+
     async connectedCallback() {
         super.connectedCallback();
+        ocrQueue.addEventListener('change', this._onOcrChange); //
+        this.ocrActiveCount = ocrQueue.activeCount;
         const savedView = localStorage.getItem('sahifah.libraryView');
         if (savedView === 'gallery') this.viewMode = 'gallery';
 
@@ -56,6 +64,7 @@ export class LibraryPage extends LitElement {
     disconnectedCallback() {
         super.disconnectedCallback();
         for (const url of this.thumbnails.values()) URL.revokeObjectURL(url);
+        ocrQueue.removeEventListener('change', this._onOcrChange); //
     }
 
     private async loadDocs() {
@@ -231,11 +240,26 @@ export class LibraryPage extends LitElement {
      * Renders the sticky header with title, controls, search, and tags
      */
     private renderHeader(isGallery: boolean) {
+        const activeTitles = ocrQueue.activeTitles;
+        const currentTask = activeTitles.length > 0 ? activeTitles[0] : null;
+
         return html`
             <div class="sticky top-0 bg-black/80 backdrop-blur-md pt-4 pb-2 z-10 space-y-3">
                 <div class="flex items-center justify-between gap-3">
-                    <h1 class="text-2xl font-bold text-slate-100">Library</h1>
-
+                    <div class="flex items-center gap-3">
+                        <h1 class="text-2xl font-bold text-slate-100">Library</h1>
+                        ${this.ocrActiveCount > 0 ? html`
+                            <div class="flex items-center gap-2 px-2 py-1 rounded-lg bg-emerald-950/40 border border-emerald-900/30 max-w-[180px]">
+                                <div class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0"></div>
+                                <div class="flex flex-col min-w-0">
+                                    <span class="text-[9px] font-bold text-emerald-500 uppercase leading-none">Analyzing</span>
+                                    <span class="text-[10px] text-emerald-200 truncate font-medium">
+                                        ${currentTask || 'Documents...'}
+                                    </span>
+                                </div>
+                            </div>
+                        ` : null}
+                    </div>
                     <div class="flex items-center gap-1">
                         ${this.renderActionButtons(isGallery)}
                     </div>

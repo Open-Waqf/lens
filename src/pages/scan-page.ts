@@ -38,8 +38,6 @@ export class ScanPage extends LitElement {
         return this;
     }
 
-    @state() private ocrCount = 0;
-
     @query('video') private videoEl!: HTMLVideoElement;
 
     private camera = new CameraManager();
@@ -121,7 +119,6 @@ export class ScanPage extends LitElement {
     }
 
     private onOcrQueueChange = () => {
-        this.ocrCount = ocrQueue.activeCount;
         this.requestUpdate();
     };
 
@@ -834,25 +831,11 @@ export class ScanPage extends LitElement {
         `;
     }
 
-    private renderOcrStatus() {
-        if (this.ocrCount === 0) return null;
-
-        return html`
-            <div class="fixed bottom-4 left-4 right-4 z-50 flex justify-center">
-                <div class="bg-slate-900 border border-slate-700 text-slate-200 px-4 py-2 rounded-full shadow-xl flex items-center gap-3 text-sm">
-                    <div class="w-4 h-4 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-                    <span>Processing text for ${this.ocrCount} page(s)...</span>
-                </div>
-            </div>
-        `;
-    }
-
     render() {
         if (this.showWelcome) return this.renderWelcome();
 
         const stage: ScanStage = this.session.stage;
         return html`
-            ${this.renderOcrStatus()}
             <div class="space-y-4">
                 <div class="flex items-center justify-between">
                     <div class="text-lg font-semibold">
