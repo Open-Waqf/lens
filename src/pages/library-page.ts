@@ -27,6 +27,10 @@ export class LibraryPage extends LitElement {
     @state() private selectionMode = false;
     @state() private selectedIds = new Set<string>();
 
+    @state() private selectedTag: string | null = null;
+    @state() private groupByFolder = false;
+    @state() private allTags: string[] = [];
+
     // Highlight logic
     @state() private highlightDocId: string | null = null;
 
@@ -58,6 +62,7 @@ export class LibraryPage extends LitElement {
         const all = await db.docs.orderBy('updatedAt').reverse().toArray();
         this.docs = all;
         this.loadThumbnails(all);
+        this.allTags = await this.repo.getAllTags();
     }
 
     private async loadThumbnails(docs: DocRecord[]) {
@@ -113,128 +118,243 @@ export class LibraryPage extends LitElement {
     }
 
     private get filteredDocs() {
-        const q = this.query.trim().toLowerCase();
-        if (!q) return this.docs;
+        let list = this.docs;
 
-        return this.docs.filter(d => {
-            if (d.title.toLowerCase().includes(q)) return true;
-            if (d.tags.some(t => t.toLowerCase().includes(q))) return true;
-            if (d.searchIndex && d.searchIndex.toLowerCase().includes(q)) return true;
-            return false;
-        });
+        // 1. Apply Tag Filter first
+        if (this.selectedTag) {
+            list = list.filter(d => d.tags.includes(this.selectedTag!));
+        }
+
+        // 2. Apply Search Query
+        const q = this.query.trim().toLowerCase();
+        if (q) {
+            list = list.filter(d => {
+                if (d.title.toLowerCase().includes(q)) return true;
+                if (d.tags.some(t => t.toLowerCase().includes(q))) return true;
+                if (d.searchIndex && d.searchIndex.toLowerCase().includes(q)) return true;
+                if (d.folder && d.folder.toLowerCase().includes(q)) return true; // Include folder in search
+                return false;
+            });
+        }
+
+        return list;
     }
 
+    private get groupedDocs() {
+        const flatList = this.filteredDocs;
+        if (!this.groupByFolder) return {'All Documents': flatList};
+
+        const groups: Record<string, DocRecord[]> = {};
+        for (const doc of flatList) {
+            const folder = doc.folder || 'Unsorted';
+            if (!groups[folder]) groups[folder] = [];
+            groups[folder].push(doc);
+        }
+        return groups;
+    }
+
+    private renderTagBar() {
+        return html`
+            <div class="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+                <button
+                        class="px-3 py-1 rounded-full text-xs font-medium transition-colors ${!this.selectedTag ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'}"
+                        @click=${() => this.selectedTag = null}>
+                    All
+                </button>
+                ${this.allTags.map(tag => html`
+                    <button
+                            class="px-3 py-1 rounded-full text-xs font-medium transition-colors ${this.selectedTag === tag ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'}"
+                            @click=${() => this.selectedTag = tag}>
+                        ${tag}
+                    </button>
+                `)}
+            </div>
+        `;
+    }
+
+    /**
+     * Main render entry point
+     */
     render() {
-        const list = this.filteredDocs;
+        const groups = this.groupedDocs;
         const isGallery = this.viewMode === 'gallery';
+        const hasDocs = Object.values(groups).some(g => g.length > 0);
 
         return html`
             <div class="space-y-4 pb-20">
-                <div class="sticky top-0 bg-black/80 backdrop-blur-md pt-4 pb-2 z-10 space-y-3">
-                    <div class="flex items-center justify-between gap-3">
-                        <h1 class="text-2xl font-bold text-slate-100">Library</h1>
+                ${this.renderHeader(isGallery)}
 
-                        <div class="flex items-center gap-1">
-                            ${this.selectionMode ? html`
-                                <button class="px-3 py-1.5 text-xs font-bold text-red-400 bg-red-950/30 rounded-lg border border-red-900/50"
-                                        @click=${this.deleteSelected}
-                                        ?disabled=${this.selectedIds.size === 0}>
-                                    Delete (${this.selectedIds.size})
-                                </button>
-                                <button class="p-2 rounded-full hover:bg-slate-800 text-slate-400"
-                                        @click=${this.toggleSelectionMode}>
-                                    Cancel
-                                </button>
-                            ` : html`
-                                <button class="p-2 rounded-full hover:bg-slate-800 text-slate-400"
-                                        @click=${this.toggleSelectionMode}
-                                        title="Select">
-                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                    </svg>
-                                </button>
-                            `}
-
-                            <button class="p-2 rounded-full hover:bg-slate-800 text-slate-400"
-                                    @click=${this.toggleView}
-                                    title=${isGallery ? 'List View' : 'Gallery View'}>
-                                ${isGallery ? html`
-                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                              d="M4 6h16M4 12h16M4 18h16"></path>
-                                    </svg>
-                                ` : html`
-                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                              d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path>
-                                    </svg>
-                                `}
-                            </button>
-
-                            <button class="p-2 rounded-full hover:bg-slate-800 text-slate-400"
-                                    @click=${() => location.hash = '#/settings'}>
-                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                          d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                                </svg>
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="relative">
-                        <input
-                                type="text"
-                                class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-600 transition-colors"
-                                placeholder="Search docs & content..."
-                                .value=${live(this.query)}
-                                @input=${(e: InputEvent) => this.query = (e.target as HTMLInputElement).value}
-                        >
-                        <svg class="w-5 h-5 text-slate-500 absolute left-3 top-3.5" fill="none" stroke="currentColor"
-                             viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                        </svg>
-                    </div>
-                </div>
-
-                ${list.length === 0
-                        ? html`
-                            <div class="flex flex-col items-center justify-center py-20 text-slate-500 text-center space-y-4">
-                                <div class="w-24 h-24 bg-slate-900 rounded-full flex items-center justify-center mb-2">
-                                    <svg class="w-10 h-10 text-slate-700" fill="none" stroke="currentColor"
-                                         viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                              d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                                    </svg>
-                                </div>
-                                <div>
-                                    <h3 class="text-lg font-medium text-slate-300">
-                                        ${this.query ? 'No matching documents' : 'No scans yet'}
-                                    </h3>
-                                    <p class="text-sm text-slate-500 max-w-xs mx-auto mt-1">
-                                        ${this.query ? 'Try a different keyword or check your spelling.' : 'Tap the + button to capture your first document.'}
-                                    </p>
-                                </div>
-                            </div>
-                        `
+                ${!hasDocs
+                        ? this.renderEmptyState()
                         : html`
-                            <div class="grid ${isGallery ? 'grid-cols-2 gap-3' : 'grid-cols-1 gap-3'}">
-                                ${repeat(list, (d) => d.id, (d) => this.renderDocItem(d, isGallery))}
+                            <div class="space-y-8">
+                                ${Object.entries(groups).map(([folderName, docs]) =>
+                                        this.renderFolderGroup(folderName, docs, isGallery)
+                                )}
                             </div>
                         `
                 }
 
-                <button
-                        class="fixed bottom-6 right-6 w-14 h-14 bg-emerald-500 hover:bg-emerald-400 rounded-full shadow-lg shadow-emerald-900/40 flex items-center justify-center text-slate-900 transition-transform active:scale-95 z-20"
-                        @click=${() => location.hash = '#/scan?new=1'}
-                >
-                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                ${this.renderFab()}
+            </div>
+        `;
+    }
+
+    /**
+     * Renders the sticky header with title, controls, search, and tags
+     */
+    private renderHeader(isGallery: boolean) {
+        return html`
+            <div class="sticky top-0 bg-black/80 backdrop-blur-md pt-4 pb-2 z-10 space-y-3">
+                <div class="flex items-center justify-between gap-3">
+                    <h1 class="text-2xl font-bold text-slate-100">Library</h1>
+
+                    <div class="flex items-center gap-1">
+                        ${this.renderActionButtons(isGallery)}
+                    </div>
+                </div>
+
+                <div class="relative">
+                    <input
+                            type="text"
+                            class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-600 transition-colors"
+                            placeholder="Search docs & content..."
+                            .value=${live(this.query)}
+                            @input=${(e: InputEvent) => this.query = (e.target as HTMLInputElement).value}
+                    >
+                    <svg class="w-5 h-5 text-slate-500 absolute left-3 top-3.5" fill="none" stroke="currentColor"
+                         viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                    </svg>
+                </div>
+
+                ${this.allTags.length > 0 ? this.renderTagBar() : null}
+            </div>
+        `;
+    }
+
+    /**
+     * Renders header action buttons (Selection, Grouping, View Mode, Settings)
+     */
+    private renderActionButtons(isGallery: boolean) {
+        return html`
+            ${this.selectionMode ? html`
+                <button class="px-3 py-1.5 text-xs font-bold text-red-400 bg-red-950/30 rounded-lg border border-red-900/50"
+                        @click=${this.deleteSelected}
+                        ?disabled=${this.selectedIds.size === 0}>
+                    Delete (${this.selectedIds.size})
+                </button>
+                <button class="p-2 rounded-full hover:bg-slate-800 text-slate-400" @click=${this.toggleSelectionMode}>
+                    Cancel
+                </button>
+            ` : html`
+                <button class="p-2 rounded-full ${this.groupByFolder ? 'text-emerald-400 bg-emerald-950/30' : 'text-slate-400'}"
+                        @click=${() => this.groupByFolder = !this.groupByFolder}
+                        title="Group by Folder">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
                     </svg>
                 </button>
+                <button class="p-2 rounded-full hover:bg-slate-800 text-slate-400" @click=${this.toggleSelectionMode}
+                        title="Select">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                </button>
+            `}
+
+            <button class="p-2 rounded-full hover:bg-slate-800 text-slate-400" @click=${this.toggleView}
+                    title=${isGallery ? 'List View' : 'Gallery View'}>
+                ${isGallery
+                        ? html`
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M4 6h16M4 12h16M4 18h16"></path>
+                            </svg>`
+                        : html`
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path>
+                            </svg>`}
+            </button>
+
+            <button class="p-2 rounded-full hover:bg-slate-800 text-slate-400"
+                    @click=${() => location.hash = '#/settings'}>
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                </svg>
+            </button>
+        `;
+    }
+
+    /**
+     * Renders a single folder section with its documents
+     */
+    private renderFolderGroup(folderName: string, docs: DocRecord[], isGallery: boolean) {
+        if (docs.length === 0) return null;
+        return html`
+            <div class="space-y-3">
+                ${this.groupByFolder ? html`
+                    <h2 class="text-xs font-bold text-slate-500 uppercase tracking-widest px-1 flex items-center gap-2">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
+                        </svg>
+                        ${folderName} (${docs.length})
+                    </h2>
+                ` : null}
+
+                <div class="grid ${isGallery ? 'grid-cols-2 gap-3' : 'grid-cols-1 gap-3'}">
+                    ${repeat(docs, (d) => d.id, (d) => this.renderDocItem(d, isGallery))}
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Renders the Floating Action Button
+     */
+    private renderFab() {
+        return html`
+            <button
+                    class="fixed bottom-6 right-6 w-14 h-14 bg-emerald-500 hover:bg-emerald-400 rounded-full shadow-lg shadow-emerald-900/40 flex items-center justify-center text-slate-900 transition-transform active:scale-95 z-20"
+                    @click=${() => location.hash = '#/scan?new=1'}
+            >
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                </svg>
+            </button>
+        `;
+    }
+
+    /**
+     * Renders the empty state when no documents match
+     */
+    private renderEmptyState() {
+        return html`
+            <div class="flex flex-col items-center justify-center py-20 text-slate-500 text-center space-y-4">
+                <div class="w-24 h-24 bg-slate-900 rounded-full flex items-center justify-center mb-2">
+                    <svg class="w-10 h-10 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                </div>
+                <div>
+                    <h3 class="text-lg font-medium text-slate-300">
+                        ${this.query || this.selectedTag ? 'No matching documents' : 'No scans yet'}
+                    </h3>
+                    <p class="text-sm text-slate-500 max-w-xs mx-auto mt-1">
+                        ${this.query || this.selectedTag
+                                ? 'Try a different keyword or tag.'
+                                : 'Tap the + button to capture your first document.'}
+                    </p>
+                </div>
             </div>
         `;
     }

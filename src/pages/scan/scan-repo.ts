@@ -149,6 +149,18 @@ export class ScanRepo {
         return pageId;
     }
 
+    async getAllFolders(): Promise<string[]> {
+        const docs = await db.docs.toArray();
+        const folders = docs.map(d => d.folder).filter((f): f is string => !!f);
+        return Array.from(new Set(folders)).sort();
+    }
+
+    async getAllTags(): Promise<string[]> {
+        const docs = await db.docs.toArray();
+        const tags = docs.flatMap(d => d.tags);
+        return Array.from(new Set(tags)).sort();
+    }
+
     async updateExistingPage(
         pageId: string,
         master: PageEditorSaveDetail['master'],
