@@ -153,6 +153,31 @@ export class LibraryPage extends LitElement {
         return groups;
     }
 
+    private renderSafetyPrompt() {
+        const lastBackup = localStorage.getItem('sahifah.lastBackup');
+        if (lastBackup || this.docs.length < 5) return null;
+
+        return html`
+            <div class="mx-1 p-4 rounded-xl bg-gradient-to-br from-amber-900/40 to-slate-900 border border-amber-900/50 space-y-2 mb-4">
+                <div class="flex items-center gap-2 text-amber-400 font-bold text-sm">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                    </svg>
+                    Protect Your Data
+                </div>
+                <p class="text-xs text-slate-300">
+                    You have ${this.docs.length} documents stored locally. If you lose your device or clear browser
+                    data, these will be lost forever.
+                </p>
+                <button @click=${() => location.hash = '#/settings'}
+                        class="text-xs font-bold text-amber-400 hover:underline">
+                    Create an Encrypted Backup now →
+                </button>
+            </div>
+        `;
+    }
+
     private renderTagBar() {
         return html`
             <div class="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
@@ -183,6 +208,8 @@ export class LibraryPage extends LitElement {
         return html`
             <div class="space-y-4 pb-20">
                 ${this.renderHeader(isGallery)}
+
+                ${this.renderSafetyPrompt()}
 
                 ${!hasDocs
                         ? this.renderEmptyState()

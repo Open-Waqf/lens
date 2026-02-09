@@ -1,14 +1,17 @@
-export async function requestStoragePersistence(): Promise<void> {
-    try {
-        if (!('storage' in navigator)) return;
-        // Ask browser to persist storage (reduce eviction risk)
-        // Not guaranteed, but helps on Chromium-based browsers.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const storage = navigator.storage as any;
-        if (typeof storage.persist === 'function') {
-            await storage.persist();
-        }
-    } catch {
-        // ignore
+export async function tryPersistStorage(): Promise<boolean> {
+    if (!navigator.storage || !navigator.storage.persist) {
+        return false;
     }
+
+    // 1. Check if already persisted
+    const alreadyPersisted = await navigator.storage.persisted();
+    if (alreadyPersisted) {
+        console.log('Storage is already persistent.');
+        return true;
+    }
+
+    // 2. Request persistence
+    const isPersisted = await navigator.storage.persist();
+    console.log(`Storage persistence request: ${isPersisted ? 'GRANTED' : 'DENIED'}`);
+    return isPersisted;
 }

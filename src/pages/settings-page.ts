@@ -4,6 +4,7 @@ import {nanoid} from 'nanoid';
 
 import {db} from '../services/db';
 import {getPlatformCaps} from '../services/platform';
+import {tryPersistStorage} from '../services/persist';
 import {getFileStore} from '../services/filestore';
 import {shareOrDownload} from '../services/share';
 import {jsonFile, makeZip} from '../lib/zip';
@@ -34,10 +35,13 @@ export class SettingsPage extends LitElement {
 
     @state() private storageUsed = 0;
     @state() private storageQuota = 0;
+    @state() private lastBackupDate: number | null = null;
 
     async connectedCallback() {
         super.connectedCallback();
+        this.lastBackupDate = Number(localStorage.getItem('sahifah.lastBackup')) || null;
         void this.loadStorageStats();
+        void tryPersistStorage();
     }
 
     private async loadStorageStats() {
@@ -115,6 +119,11 @@ export class SettingsPage extends LitElement {
             } else {
                 this.msg = 'Backup exported successfully.';
             }
+
+            const now = Date.now();
+            localStorage.setItem('sahifah.lastBackup', String(now));
+            this.lastBackupDate = now;
+            this.msg = 'Backup exported successfully.';
 
         } catch (e) {
             this.err = (e as Error).message;
@@ -316,6 +325,29 @@ export class SettingsPage extends LitElement {
         }
     }
 
+    private renderBackupStatus() {
+        if (!this.lastBackupDate) {
+            return html`
+                <div class="p-3 rounded-lg bg-amber-950/20 border border-amber-900/50 flex items-center gap-3">
+                    <div class="text-amber-500 font-bold text-lg">!</div>
+                    <div class="text-xs text-amber-200">
+                        You have never backed up your library. Export an encrypted backup to prevent data loss.
+                    </div>
+                </div>
+            `;
+        }
+
+        const daysSince = Math.floor((Date.now() - this.lastBackupDate) / (1000 * 60 * 60 * 24));
+        const isOverdue = daysSince > 30;
+
+        return html`
+            <div class="text-[10px] ${isOverdue ? 'text-amber-500 font-bold' : 'text-slate-500'}">
+                Last backup: ${new Date(this.lastBackupDate).toLocaleDateString()}
+                    (${daysSince} days ago) ${isOverdue ? '— Backup Recommended' : ''}
+            </div>
+        `;
+    }
+
     render() {
         const pct = this.storageQuota > 0 ? (this.storageUsed / this.storageQuota) * 100 : 0;
         const color = pct > 90 ? 'bg-red-500' : (pct > 70 ? 'bg-amber-500' : 'bg-emerald-500');
@@ -374,7 +406,7 @@ export class SettingsPage extends LitElement {
 
                 <section class="space-y-3">
                     <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">Data Management</h2>
-
+                    ${this.renderBackupStatus()}
                     <div class="grid gap-3">
                         <button class="flex items-center justify-between p-4 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors"
                                 ?disabled=${this.busy} @click=${() => this.exportBackup()}>
