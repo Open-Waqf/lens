@@ -18,7 +18,6 @@ import {getPlatformCaps} from '../services/platform';
 import '../components/scan-overlay';
 import '../components/page-editor';
 import type {PageEditorSaveDetail} from '../components/page-editor';
-// 1. Import ConfirmModal
 import {ConfirmModal} from '../components/confirm-modal';
 
 import {CameraManager} from '../lib/camera/camera-manager';
@@ -60,6 +59,9 @@ export class ScanPage extends LitElement {
     @state() private editingPageId: string | null = null;
     @state() private replacePageId: string | null = null;
     @state() private editorKey = 0;
+
+    // New state for persistent selection highlight
+    @state() private selectedPageId: string | null = null;
 
     @state() private importReviewTotal = 0;
     @state() private importReviewIndex = 0;
@@ -149,6 +151,7 @@ export class ScanPage extends LitElement {
         this.clearEditor();
         this.newPageIds.clear();
         this.clearImportReview();
+        this.selectedPageId = null; // Clear selection on load
 
         this.lastDetect = null;
         this.smoothedQuad = null;
@@ -214,7 +217,6 @@ export class ScanPage extends LitElement {
         }
 
         if (decision.kind === 'confirm-discard') {
-            // 2. Use Modal instead of confirm()
             const ok = await ConfirmModal.ask({
                 title: 'Discard Scan?',
                 description: decision.message,
@@ -279,6 +281,7 @@ export class ScanPage extends LitElement {
 
             this.captured = bytesToBlob(bytes, 'image/jpeg');
             this.editingPageId = pageId;
+            this.selectedPageId = pageId; // Set persistent selection
             this.session.setStage('edit');
             this.editorKey++;
         } catch (e) {
@@ -286,7 +289,6 @@ export class ScanPage extends LitElement {
         }
     }
 
-    // 3. Make async and use Modal
     private onEditorCancel = async () => {
         if (this.importReviewQueue.length > 0) {
             const remaining = this.importReviewQueue.length;
@@ -326,6 +328,7 @@ export class ScanPage extends LitElement {
             if (targetId) {
                 await this.repo.updateExistingPage(targetId, master, thumb);
                 if (this.editingPageId) this.newPageIds.delete(this.editingPageId);
+                this.selectedPageId = targetId; // Keep selection
 
                 if (this.replacePageId) {
                     this.replacePageId = null;
@@ -336,6 +339,7 @@ export class ScanPage extends LitElement {
             } else {
                 const pageId = await this.repo.addNewPage(docId, master, thumb);
                 this.newPageIds.add(pageId);
+                this.selectedPageId = pageId; // Select new page
             }
 
             this.session.markCommitted();
@@ -399,6 +403,7 @@ export class ScanPage extends LitElement {
         this.strip = items;
     }
 
+    // ... (beginCameraFromGesture, invokeNativeScanner, stopCamera, capturePhoto, pickFiles, batchImport, startDetector, stopDetector, grabAndDetect, quadStabilityScore, maybeAutoCapture - No Changes) ...
     private beginCameraFromGesture(): void {
         this.error = null;
         if (this.caps.isCapacitor) {
@@ -438,7 +443,6 @@ export class ScanPage extends LitElement {
                 else await this.batchImport(files);
             }
         } catch (e) {
-            // console.warn(e);
         } finally {
             this.busy = false;
         }
@@ -452,7 +456,6 @@ export class ScanPage extends LitElement {
         this.error = null;
         if (this.captureInFlight) return;
 
-        // #5 Haptics on capture
         void this.triggerHaptic();
 
         this.captureInFlight = true;
@@ -584,7 +587,6 @@ export class ScanPage extends LitElement {
                 const q = det.quad as Quad;
                 this.smoothedQuad = this.smoothedQuad ? lerpQuad(this.smoothedQuad, q, 0.35) : q;
 
-                // #2 Live Guidance Logic
                 if (det.confidence < 0.65) {
                     this.guidance = 'Hold steady';
                 } else {
@@ -768,16 +770,16 @@ export class ScanPage extends LitElement {
 
     private renderStrip() {
         if (!this.strip.length) return null;
-        const selected = this.editingPageId;
+        // Logic change: highlight based on selectedPageId (persisted) or fallback to currently editing
+        const selected = this.editingPageId || this.selectedPageId;
+
         return html`
             <div class="flex gap-3 overflow-x-auto py-2 px-1">
                 ${this.strip.map((it) => html`
-                    <button class="relative shrink-0 rounded-lg border ${selected === it.id ? 'border-emerald-500 ring-2 ring-emerald-500/20' : 'border-slate-800'} overflow-hidden ${it.isNew ? '' : 'opacity-60'} transition-all active:scale-95"
+                    <button class="relative shrink-0 rounded-lg border ${selected === it.id ? 'border-emerald-500 ring-2 ring-emerald-500/20' : 'border-slate-800'} overflow-hidden transition-all active:scale-95"
                             style="width: 84px; height: 108px;"
-                            title=${it.isNew ? 'Edit page' : 'Locked (already saved)'}
-                            @click=${() => {
-                                if (it.isNew) void this.openExistingPageInEditor(it.id);
-                            }}>
+                            title="Edit page"
+                            @click=${() => void this.openExistingPageInEditor(it.id)}>
                         <img src=${it.url} class="w-full h-full object-cover" alt="thumb"/>
                         ${it.isNew ? html`<span
                                 class="absolute top-1 left-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500 text-white font-bold shadow-sm">NEW</span>` : null}
@@ -835,18 +837,20 @@ export class ScanPage extends LitElement {
                         ${this.replacePageId ? 'Retake Page' : (this.session.isAppend ? 'Add pages' : 'Scan')}
                     </div>
                     ${!this.caps.isCapacitor ? html`
-
-                        <button class="relative h-8 w-14 rounded-full bg-slate-800 transition-colors duration-200 focus:outline-none ${this.autoCapture ? 'bg-emerald-600/20' : ''}"
-                                @click=${() => {
-                                    this.autoCapture = !this.autoCapture;
-                                    try {
-                                        localStorage.setItem(AUTO_KEY, this.autoCapture ? '1' : '0');
-                                    } catch {
-                                    }
-                                }}>
-                            <span class="sr-only">Auto Capture</span>
-                            <span class="${this.autoCapture ? 'translate-x-7 bg-emerald-500' : 'translate-x-1 bg-slate-400'} inline-block h-6 w-6 transform rounded-full transition duration-200 ease-in-out mt-1 shadow-sm"></span>
-                        </button>
+                        <div class="flex items-center gap-2">
+                            <span class="text-sm font-medium text-slate-200">Auto</span>
+                            <button class="relative h-7 w-12 rounded-full bg-slate-800 transition-colors duration-200 focus:outline-none ${this.autoCapture ? 'bg-emerald-600/30' : ''}"
+                                    @click=${() => {
+                                        this.autoCapture = !this.autoCapture;
+                                        try {
+                                            localStorage.setItem(AUTO_KEY, this.autoCapture ? '1' : '0');
+                                        } catch {
+                                        }
+                                    }}>
+                                <span class="sr-only">Auto Capture</span>
+                                <span class="absolute top-1 left-1 ${this.autoCapture ? 'translate-x-5 bg-emerald-500' : 'translate-x-0 bg-slate-400'} inline-block h-5 w-5 transform rounded-full transition duration-200 ease-in-out shadow-sm"></span>
+                            </button>
+                        </div>
                     ` : null}
                 </div>
 

@@ -27,10 +27,25 @@ export class LibraryPage extends LitElement {
     @state() private selectionMode = false;
     @state() private selectedIds = new Set<string>();
 
+    // Highlight logic
+    @state() private highlightDocId: string | null = null;
+
     async connectedCallback() {
         super.connectedCallback();
         const savedView = localStorage.getItem('sahifah.libraryView');
         if (savedView === 'gallery') this.viewMode = 'gallery';
+
+        // Check for new doc highlight
+        const justSaved = sessionStorage.getItem('sahifah.justSavedDocId');
+        if (justSaved) {
+            this.highlightDocId = justSaved;
+            sessionStorage.removeItem('sahifah.justSavedDocId');
+            // Remove highlight after 3s
+            setTimeout(() => {
+                this.highlightDocId = null;
+            }, 3000);
+        }
+
         await this.loadDocs();
     }
 
@@ -229,6 +244,10 @@ export class LibraryPage extends LitElement {
         const date = new Date(doc.updatedAt).toLocaleDateString();
         const selected = this.selectedIds.has(doc.id);
 
+        // Highlight logic
+        const isHighlight = this.highlightDocId === doc.id;
+        const highlightClass = isHighlight ? 'ring-2 ring-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.3)] z-10' : '';
+
         const baseClasses = "group relative bg-slate-900 border rounded-xl overflow-hidden transition-all cursor-pointer";
         const stateClasses = selected
             ? "border-emerald-500 ring-1 ring-emerald-500/50 bg-emerald-900/10"
@@ -236,7 +255,7 @@ export class LibraryPage extends LitElement {
         const layoutClasses = isGallery ? "flex-col" : "flex";
 
         return html`
-            <div class="${baseClasses} ${stateClasses} ${layoutClasses}"
+            <div class="${baseClasses} ${stateClasses} ${layoutClasses} ${highlightClass}"
                  @click=${() => {
                      if (this.selectionMode) this.toggleSelection(doc.id);
                      else location.hash = `#/doc/${doc.id}`;

@@ -50,6 +50,7 @@ export class DocPage extends LitElement {
 
     // Search State
     @state() private searchQuery = '';
+    @state() private showExtractedText = false;
 
     async connectedCallback(): Promise<void> {
         super.connectedCallback();
@@ -400,6 +401,42 @@ export class DocPage extends LitElement {
                                 </button>
                             ` : null}
                         </div>
+                    </div>
+
+                    <div class="h-px bg-slate-800 my-2"></div>
+
+                    <div>
+                        <button @click=${() => this.showExtractedText = !this.showExtractedText}
+                                class="flex items-center gap-2 text-sm text-emerald-400 font-medium hover:text-emerald-300">
+                            <svg class="w-4 h-4 transition-transform ${this.showExtractedText ? 'rotate-90' : ''}"
+                                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M9 5l7 7-7 7"></path>
+                            </svg>
+                            ${this.showExtractedText ? 'Hide Extracted Text' : 'Show Extracted Text'}
+                        </button>
+                        ${this.showExtractedText ? html`
+                            <div class="mt-3 space-y-4 max-h-[40vh] overflow-y-auto pr-2 custom-scrollbar">
+                                ${this.pages.map((p, i) => {
+                                    const text = p.words?.map(w => w.text).join(' ').trim();
+                                    if (!text) return null;
+                                    return html`
+                                        <div class="space-y-1">
+                                            <div class="text-xs text-slate-500 font-bold uppercase tracking-wider">Page
+                                                ${i + 1}
+                                            </div>
+                                            <div class="text-sm text-slate-300 whitespace-pre-wrap select-text bg-black/50 p-3 rounded-lg border border-slate-800/50">
+                                                ${text}
+                                            </div>
+                                        </div>
+                                    `;
+                                })}
+                                ${!this.pages.some(p => p.words?.length) ? html`
+                                    <div class="text-sm text-slate-500 italic">No text detected in this document yet.
+                                    </div>
+                                ` : null}
+                            </div>
+                        ` : null}
                     </div>
 
                     <div class="h-px bg-slate-800 my-2"></div>
