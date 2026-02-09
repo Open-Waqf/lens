@@ -91,8 +91,6 @@ export class SettingsPage extends LitElement {
                         files[d.pdfPath] = await store.get(d.pdfPath);
                     } catch (e) {
                         console.warn(`Backup: Failed to read PDF for doc ${d.id}`, e);
-                        // We don't necessarily count missing PDFs as critical failures
-                        // since they can be regenerated, but good to know.
                     }
                 }
             }
@@ -159,6 +157,11 @@ export class SettingsPage extends LitElement {
 
             const store = getFileStore();
 
+            // =========================================================
+            // STRATEGY: Drive restore by METADATA, not by iterating files.
+            // This avoids guessing paths via Regex which fails on versioned files.
+            // =========================================================
+
             if (mode === 'erase') {
                 try {
                     await opfsRemoveTree('docs');
@@ -170,10 +173,21 @@ export class SettingsPage extends LitElement {
                     await db.pages.clear();
                 });
 
-                for (const [name, bytes] of Object.entries(unz)) {
-                    if (name === 'metadata.json') continue;
-                    if (!name.startsWith('docs/')) continue;
-                    await store.put(name, bytes as Uint8Array, guessMime(name));
+                // Restore Pages Files
+                for (const p of pages) {
+                    if (unz[p.imagePath]) {
+                        await store.put(p.imagePath, unz[p.imagePath], 'image/jpeg');
+                    }
+                    if (unz[p.thumbPath]) {
+                        await store.put(p.thumbPath, unz[p.thumbPath], 'image/jpeg');
+                    }
+                }
+
+                // Restore Doc PDFs if present
+                for (const d of docs) {
+                    if (d.pdfPath && unz[d.pdfPath]) {
+                        await store.put(d.pdfPath, unz[d.pdfPath], 'application/pdf');
+                    }
                 }
 
                 await db.transaction('rw', db.docs, db.pages, async () => {
@@ -182,48 +196,62 @@ export class SettingsPage extends LitElement {
                 });
 
                 this.msg = 'Library replaced from backup.';
+
             } else {
+                // MERGE MODE
                 const docIdMap = new Map<string, string>();
                 for (const d of docs) docIdMap.set(d.id, nanoid());
 
                 const pageIdMap = new Map<string, string>();
                 for (const p of pages) pageIdMap.set(p.id, nanoid());
 
-                const rewritePath = (path: string): string => {
-                    const m = path.match(/^docs\/([^/]+)\/(pages|thumbs)\/([^/.]+)(\.[^/]+)$/);
-                    if (m) {
-                        const [, oldDocId, kind, oldPageId, ext] = m;
-                        const newDocId = docIdMap.get(oldDocId);
-                        const newPageId = pageIdMap.get(oldPageId);
-                        if (!newDocId || !newPageId) return path;
-                        return `docs/${newDocId}/${kind}/${newPageId}${ext}`;
+                const newDocs: DocRecord[] = [];
+                const newPages: PageRecord[] = [];
+
+                // 1. Prepare Docs
+                for (const d of docs) {
+                    const newId = docIdMap.get(d.id)!;
+                    // Remap page IDs
+                    const newPageIds = (d.pageIds ?? [])
+                        .map(pid => pageIdMap.get(pid))
+                        .filter(Boolean) as string[];
+
+                    newDocs.push({
+                        ...d,
+                        id: newId,
+                        pageIds: newPageIds,
+                        updatedAt: Date.now(),
+                        pdfPath: undefined // Don't restore PDF in merge, let user regenerate
+                    });
+                }
+
+                // 2. Process Pages & Files
+                for (const p of pages) {
+                    const newId = pageIdMap.get(p.id)!;
+                    const newDocId = docIdMap.get(p.docId)!;
+                    if (!newDocId) continue; // Orphan page?
+
+                    // Canonical paths for the merged copy
+                    const newImagePath = `docs/${newDocId}/pages/${newId}.jpg`;
+                    const newThumbPath = `docs/${newDocId}/thumbs/${newId}.jpg`;
+
+                    // Write Image
+                    if (unz[p.imagePath]) {
+                        await store.put(newImagePath, unz[p.imagePath], 'image/jpeg');
                     }
-                    return path; // Fallback
-                };
 
-                const newDocs = docs.map((d) => ({
-                    ...d,
-                    id: docIdMap.get(d.id)!,
-                    pageIds: (d.pageIds ?? []).map((pid) => pageIdMap.get(pid)!).filter(Boolean),
-                    updatedAt: Date.now(),
-                    pdfPath: undefined
-                }));
-
-                const newPages = pages.map((p) => ({
-                    ...p,
-                    id: pageIdMap.get(p.id)!,
-                    docId: docIdMap.get(p.docId)!,
-                    imagePath: rewritePath(p.imagePath),
-                    thumbPath: rewritePath(p.thumbPath),
-                }));
-
-                for (const [name, bytes] of Object.entries(unz)) {
-                    if (!name.startsWith('docs/')) continue;
-                    const m = name.match(/^docs\/([^/]+)\//);
-                    if (m && docIdMap.has(m[1])) {
-                        const newName = rewritePath(name);
-                        await store.put(newName, bytes as Uint8Array, guessMime(newName));
+                    // Write Thumb
+                    if (unz[p.thumbPath]) {
+                        await store.put(newThumbPath, unz[p.thumbPath], 'image/jpeg');
                     }
+
+                    newPages.push({
+                        ...p,
+                        id: newId,
+                        docId: newDocId,
+                        imagePath: newImagePath,
+                        thumbPath: newThumbPath
+                    });
                 }
 
                 await db.transaction('rw', db.docs, db.pages, async () => {
@@ -430,10 +458,4 @@ export class SettingsPage extends LitElement {
             </div>
         `;
     }
-}
-
-function guessMime(path: string): string {
-    if (path.endsWith('.jpg') || path.endsWith('.jpeg')) return 'image/jpeg';
-    if (path.endsWith('.png')) return 'image/png';
-    return 'application/octet-stream';
 }
