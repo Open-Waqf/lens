@@ -317,9 +317,10 @@ export class DocPage extends LitElement {
 
         if (this.editingPage && this.editingBlob) {
             return html`
-                <div class="fixed inset-0 z-50 bg-black">
+                <div class="fixed inset-0 z-50 bg-black overflow-y-auto">
                     <page-editor
                             .blob=${this.editingBlob}
+                            ?disableAutoDetect=${true}
                             @page-editor-save=${this.onEditorSave}
                             @page-editor-cancel=${() => {
                                 this.editingPage = null;

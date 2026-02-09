@@ -7,7 +7,6 @@ import {Haptics, ImpactStyle} from '@capacitor/haptics';
 
 import type {DetectedQuad, Point, Quad} from '../lib/scan/quad';
 import {lerpQuad, quadArea} from '../lib/scan/quad';
-import {computeOutputSize, warpRgbaToCanvas} from '../lib/image/warp';
 
 import {takePendingImport} from '../services/pending-import';
 import {bytesToBlob} from '../lib/bytes';
@@ -84,6 +83,8 @@ export class ScanPage extends LitElement {
 
     @state() private lastDetect: DetectedQuad | null = null;
     @state() private smoothedQuad: Quad | null = null;
+
+    @state() private editorInitialQuad: Quad | null = null;
 
     private stableSince = 0;
     private cooldownUntil = 0;
@@ -257,6 +258,7 @@ export class ScanPage extends LitElement {
     private clearEditor() {
         this.captured = null;
         this.editingPageId = null;
+        this.editorInitialQuad = null;
         this.editorKey++;
     }
 
@@ -266,9 +268,10 @@ export class ScanPage extends LitElement {
         this.importReviewIndex = 0;
     }
 
-    private async openNewBlobInEditor(blob: Blob): Promise<void> {
+    private async openNewBlobInEditor(blob: Blob, initialQuad: Quad | null = null): Promise<void> {
         this.captured = blob;
         this.editingPageId = null;
+        this.editorInitialQuad = initialQuad;
         this.session.setStage('edit');
         this.editorKey++;
     }
@@ -403,7 +406,6 @@ export class ScanPage extends LitElement {
         this.strip = items;
     }
 
-    // ... (beginCameraFromGesture, invokeNativeScanner, stopCamera, capturePhoto, pickFiles, batchImport, startDetector, stopDetector, grabAndDetect, quadStabilityScore, maybeAutoCapture - No Changes) ...
     private beginCameraFromGesture(): void {
         this.error = null;
         if (this.caps.isCapacitor) {
@@ -471,32 +473,29 @@ export class ScanPage extends LitElement {
             const ctx = canvas.getContext('2d')!;
             ctx.drawImage(v, 0, 0, w, h);
 
+            let detectedQuadForEditor: Quad | null = null;
+
             const det = this.lastDetect;
             const q = this.smoothedQuad;
-            let finalCanvas: HTMLCanvasElement = canvas;
 
-            if (det?.quad && q && det.confidence >= 0.65) {
+            if (det?.quad && q && det.confidence >= 0.50) {
+                // Map the smoothed quad (which is 0..1 or relative to detect size) to the canvas size
                 const sx = w / det.width;
                 const sy = h / det.height;
-                const mapped: Quad = [
+
+                detectedQuadForEditor = [
                     {x: q[0].x * sx, y: q[0].y * sy},
                     {x: q[1].x * sx, y: q[1].y * sy},
                     {x: q[2].x * sx, y: q[2].y * sy},
                     {x: q[3].x * sx, y: q[3].y * sy},
                 ];
-                const src = ctx.getImageData(0, 0, w, h);
-                const out = computeOutputSize(mapped);
-                const cap = 1800;
-                const s2 = Math.min(1, cap / Math.max(out.w, out.h));
-                const outW = Math.max(1, Math.round(out.w * s2));
-                const outH = Math.max(1, Math.round(out.h * s2));
-                finalCanvas = warpRgbaToCanvas(src.data, w, h, mapped, outW, outH);
             }
 
             const blob: Blob = await new Promise((resolve, reject) =>
-                finalCanvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Capture failed'))), 'image/jpeg', 0.9),
+                canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Capture failed'))), 'image/jpeg', 0.95),
             );
-            await this.openNewBlobInEditor(blob);
+
+            await this.openNewBlobInEditor(blob, detectedQuadForEditor);
         } catch (e) {
             this.error = (e as Error).message ?? String(e);
             if (fromAuto) this.cooldownUntil = Date.now() + 1500;
@@ -770,7 +769,6 @@ export class ScanPage extends LitElement {
 
     private renderStrip() {
         if (!this.strip.length) return null;
-        // Logic change: highlight based on selectedPageId (persisted) or fallback to currently editing
         const selected = this.editingPageId || this.selectedPageId;
 
         return html`
@@ -951,9 +949,12 @@ export class ScanPage extends LitElement {
                                 <div class="text-xs text-slate-400">Save to continue</div>
                             </div>` : null}
                         ${keyed(this.editorKey, html`
-                            <page-editor .blob=${this.captured!}
-                                         @page-editor-save=${this.onEditorSave}
-                                         @page-editor-cancel=${this.onEditorCancel}
+                            <page-editor
+                                    .blob=${this.captured!}
+                                    .initialQuad=${this.editorInitialQuad}
+                                    ?disableAutoDetect=${!!this.editingPageId}
+                                    @page-editor-save=${this.onEditorSave}
+                                    @page-editor-cancel=${this.onEditorCancel}
                             ></page-editor>
                         `)}
                         <div class="flex justify-end mt-6 pb-10">

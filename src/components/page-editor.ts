@@ -1,6 +1,5 @@
 import {html, LitElement} from 'lit';
 import {customElement, property, query, state} from 'lit/decorators.js';
-
 import type {FilterMode} from '../domain/types';
 import type {Point, Quad} from '../lib/scan/quad';
 import {quadArea} from '../lib/scan/quad';
@@ -21,34 +20,31 @@ export class PageEditor extends LitElement {
     @property({attribute: false}) blob!: Blob;
     @property({attribute: false}) filter: FilterMode = 'original';
 
+    // NEW PROPERTY
+    @property({type: Boolean}) disableAutoDetect = false;
+
+    // ... (keep state properties: rotation, busy, err, sourceBitmap, baseCanvas, etc.) ...
     @state() private rotation: 0 | 90 | 180 | 270 = 0;
     @state() private busy = false;
     @state() private err: string | null = null;
-
     private sourceBitmap: ImageBitmap | null = null;
     private baseCanvas: HTMLCanvasElement | null = null;
     private baseW = 0;
     private baseH = 0;
-
     @state() private quad: Quad | null = null;
-
     private _previewTimer: number | null = null;
     private _previewToken = 0;
-
     private worker: Worker | null = null;
-
     @query('canvas[data-edges]') private edgesEl!: HTMLCanvasElement;
     private dragIdx: number | null = null;
-
     @query('canvas[data-preview]') private previewEl!: HTMLCanvasElement;
     @query('canvas[data-magnify]') private magnifyEl!: HTMLCanvasElement;
-
     private history: Array<{ quad: Quad; filter: FilterMode; rotation: 0 | 90 | 180 | 270 }> = [];
-
     @state() private showMagnify = false;
     @state() private magnifyX = 0;
     @state() private magnifyY = 0;
 
+    // ... (keep pushHistory, undo, disconnectedCallback) ...
     private pushHistory(): void {
         if (!this.quad) return;
         if (this.history.length > 80) this.history.shift();
@@ -93,6 +89,7 @@ export class PageEditor extends LitElement {
         void this.loadBlob();
     }
 
+    // ... (keep rotate90) ...
     rotate90() {
         if (!this.baseCanvas || !this.quad) return;
         this.pushHistory();
@@ -118,16 +115,24 @@ export class PageEditor extends LitElement {
             if (this.sourceBitmap) this.sourceBitmap.close();
             this.sourceBitmap = await createImageBitmap(this.blob);
             this.updateBaseCanvasFromSource();
+
+            // Start with full quad
             this.quad = fullQuad(this.baseW, this.baseH);
             await this.updateComplete;
             this.drawEdges();
-            void this.autoDetectEdges();
-            this.queuePreview();
+
+            // LOGIC CHANGE: Only auto-detect if NOT disabled
+            if (!this.disableAutoDetect) {
+                void this.autoDetectEdges();
+            } else {
+                this.queuePreview();
+            }
         } catch (e) {
             this.err = "Failed to load image";
         }
     }
 
+    // ... (Rest of file remains unchanged: updateBaseCanvasFromSource, drawEdges, pickHandle, events, etc.)
     private updateBaseCanvasFromSource(): void {
         if (!this.sourceBitmap) return;
         const img = this.sourceBitmap;
@@ -135,18 +140,15 @@ export class PageEditor extends LitElement {
         const swap = rot === 90 || rot === 270;
         const w = swap ? img.height : img.width;
         const h = swap ? img.width : img.height;
-
         const c = document.createElement('canvas');
         c.width = w;
         c.height = h;
         const ctx = c.getContext('2d', {willReadFrequently: true})!;
-
         ctx.save();
         ctx.translate(w / 2, h / 2);
         ctx.rotate((rot * Math.PI) / 180);
         ctx.drawImage(img, -img.width / 2, -img.height / 2);
         ctx.restore();
-
         this.baseCanvas = c;
         this.baseW = w;
         this.baseH = h;
@@ -257,28 +259,19 @@ export class PageEditor extends LitElement {
         const sample = Math.max(18, Math.round(size / zoom));
         const sx = clamp(this.magnifyX - sample / 2, 0, this.baseW - sample);
         const sy = clamp(this.magnifyY - sample / 2, 0, this.baseH - sample);
-
         ctx.imageSmoothingEnabled = false;
         ctx.drawImage(this.baseCanvas, sx, sy, sample, sample, 0, 0, size, size);
-
-        // Border
         ctx.strokeStyle = 'rgba(16,185,129,0.95)';
         ctx.lineWidth = 3;
         ctx.strokeRect(1.5, 1.5, size - 3, size - 3);
-
-        // Crosshair - Double stroke for contrast
         ctx.beginPath();
         ctx.moveTo(size / 2, 0);
         ctx.lineTo(size / 2, size);
         ctx.moveTo(0, size / 2);
         ctx.lineTo(size, size / 2);
-
-        // Thick black stroke for visibility on light backgrounds
         ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
         ctx.lineWidth = 3;
         ctx.stroke();
-
-        // Thin white stroke for visibility on dark backgrounds
         ctx.strokeStyle = 'rgba(255, 255, 255, 1.0)';
         ctx.lineWidth = 1;
         ctx.stroke();
@@ -288,22 +281,18 @@ export class PageEditor extends LitElement {
         if (!this.baseCanvas || !this.quad) return;
         this.startWorker();
         this.pushHistory();
-
         const maxDim = 640;
         const scale = Math.min(1, maxDim / Math.max(this.baseW, this.baseH));
         const w = Math.max(1, Math.round(this.baseW * scale));
         const h = Math.max(1, Math.round(this.baseH * scale));
-
         const tmp = document.createElement('canvas');
         tmp.width = w;
         tmp.height = h;
         const tctx = tmp.getContext('2d', {willReadFrequently: true})!;
         tctx.drawImage(this.baseCanvas, 0, 0, w, h);
         const img = tctx.getImageData(0, 0, w, h);
-
         const quad = await this.detectQuad(img.data, w, h);
         if (!quad) return;
-
         const sx = this.baseW / w;
         const sy = this.baseH / h;
         const mapped: Quad = [
@@ -312,7 +301,6 @@ export class PageEditor extends LitElement {
             {x: quad[2].x * sx, y: quad[2].y * sy},
             {x: quad[3].x * sx, y: quad[3].y * sy},
         ];
-
         if (quadArea(mapped) / (this.baseW * this.baseH) < 0.08) return;
         this.quad = mapped;
         this.drawEdges();
@@ -355,7 +343,6 @@ export class PageEditor extends LitElement {
         if (!this.sourceBitmap || !this.quad) return;
         const token = ++this._previewToken;
         this.busy = true;
-
         try {
             const mappedQuad = this.mapQuadToSource(this.quad);
             const outSize = computeOutputSize(mappedQuad);
@@ -363,7 +350,6 @@ export class PageEditor extends LitElement {
             const scale = Math.min(1, maxPreview / Math.max(outSize.w, outSize.h));
             const pW = Math.round(outSize.w * scale);
             const pH = Math.round(outSize.h * scale);
-
             const res = await this.runWorkerTask({
                 id: `prev-${token}`,
                 bitmap: await createImageBitmap(this.sourceBitmap),
@@ -374,12 +360,9 @@ export class PageEditor extends LitElement {
                 outH: pH,
                 encode: false
             });
-
             if (token !== this._previewToken) return;
-
             if (!res.ok) throw new Error(res.error);
             if (!res.bitmap) throw new Error('No bitmap returned');
-
             const out = this.previewEl;
             if (!out) return;
             const dpr = window.devicePixelRatio || 1;
@@ -390,7 +373,6 @@ export class PageEditor extends LitElement {
             const ctx = out.getContext('2d')!;
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
             ctx.clearRect(0, 0, cw, ch);
-
             const s = Math.min(cw / res.width!, ch / res.height!);
             const dw = res.width! * s;
             const dh = res.height! * s;
@@ -398,7 +380,6 @@ export class PageEditor extends LitElement {
             const dy = (ch - dh) / 2;
             ctx.drawImage(res.bitmap, dx, dy, dw, dh);
             res.bitmap.close();
-
         } catch (e) {
         } finally {
             if (token === this._previewToken) this.busy = false;
@@ -409,11 +390,9 @@ export class PageEditor extends LitElement {
         if (!this.sourceBitmap || !this.quad) return;
         this.err = null;
         this.busy = true;
-
         try {
             const mappedQuad = this.mapQuadToSource(this.quad);
             const rawSize = computeOutputSize(mappedQuad);
-
             const masterMax = 2200;
             const thumbMax = 360;
             const mScale = Math.min(1, masterMax / Math.max(rawSize.w, rawSize.h));
@@ -422,7 +401,6 @@ export class PageEditor extends LitElement {
             const mH = Math.round(rawSize.h * mScale);
             const tW = Math.round(rawSize.w * tScale);
             const tH = Math.round(rawSize.h * tScale);
-
             const masterTask = this.runWorkerTask({
                 id: `save-m-${Date.now()}`,
                 blob: this.blob,
@@ -434,7 +412,6 @@ export class PageEditor extends LitElement {
                 encode: true,
                 quality: 0.86
             });
-
             const thumbTask = this.runWorkerTask({
                 id: `save-t-${Date.now()}`,
                 blob: this.blob,
@@ -446,20 +423,15 @@ export class PageEditor extends LitElement {
                 encode: true,
                 quality: 0.82
             });
-
             const [resM, resT] = await Promise.all([masterTask, thumbTask]);
-
             if (!resM.ok) throw new Error(resM.error || 'Failed to encode master');
             if (!resT.ok) throw new Error(resT.error || 'Failed to encode thumb');
-
             if (!resM.bytes) throw new Error('Missing master bytes');
             if (!resT.bytes) throw new Error('Missing thumb bytes');
-
             const detail: PageEditorSaveDetail = {
                 master: {bytes: resM.bytes, width: resM.width!, height: resM.height!},
                 thumb: {bytes: resT.bytes, width: resT.width!, height: resT.height!},
             };
-
             this.dispatchEvent(
                 new CustomEvent<PageEditorSaveDetail>('page-editor-save', {detail, bubbles: true, composed: true}),
             );
