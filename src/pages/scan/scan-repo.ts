@@ -139,8 +139,10 @@ export class ScanRepo {
             throw e;
         }
 
-        // 4. Trigger Background OCR (Fire and Forget)
-        void this.runBackgroundOcr(pageId, master.bytes, master.width, master.height);
+        // 4. Trigger Background OCR (WAIT for it)
+        //
+        // Changing 'void' to 'await' ensures the UI waits for text extraction
+        await this.runBackgroundOcr(pageId, master.bytes, master.width, master.height);
 
         return pageId;
     }
@@ -219,8 +221,8 @@ export class ScanRepo {
             throw e;
         }
 
-        // Trigger OCR for updated image
-        void this.runBackgroundOcr(pageId, master.bytes, master.width, master.height);
+        // Trigger OCR for updated image (WAIT for it)
+        await this.runBackgroundOcr(pageId, master.bytes, master.width, master.height);
     }
 
     async deleteDocCompletely(docId: string): Promise<void> {

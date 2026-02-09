@@ -321,6 +321,8 @@ export class ScanPage extends LitElement {
     private onEditorSave = async (ev: CustomEvent<PageEditorSaveDetail>) => {
         this.busy = true;
         this.error = null;
+        this.requestUpdate();
+        await new Promise(r => setTimeout(r, 50));
 
         try {
             const {master, thumb} = ev.detail;

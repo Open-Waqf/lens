@@ -55,7 +55,8 @@ export class PageEditor extends LitElement {
         });
     }
 
-    private undo(): void {
+    private async undo(): Promise<void> {
+        await new Promise(r => setTimeout(r, 50));
         const last = this.history.pop();
         if (!last) return;
         const rotChanged = last.rotation !== this.rotation;
@@ -193,18 +194,38 @@ export class PageEditor extends LitElement {
 
     private pickHandle(ev: PointerEvent): number | null {
         if (!this.edgesEl || !this.quad) return null;
+
         const rect = this.edgesEl.getBoundingClientRect();
         const x = ev.clientX - rect.left;
         const y = ev.clientY - rect.top;
+
+        // Visual scaling factors (Screen Pixels vs Internal Canvas Pixels)
+        // We need these to convert the mouse click into the Internal Canvas space
+        // because that is where we drew the circles.
+        const canvasScaleX = this.edgesEl.width / rect.width;
+        const canvasScaleY = this.edgesEl.height / rect.height;
+
+        const clickX = x * canvasScaleX;
+        const clickY = y * canvasScaleY;
+
+        // Source scaling factors (Source Image vs Internal Canvas Pixels)
         const sx = this.edgesEl.width / this.baseW;
         const sy = this.edgesEl.height / this.baseH;
+
         let best: { i: number; d: number } | null = null;
+
         for (let i = 0; i < 4; i++) {
             const p = this.quad[i];
+
+            // Where the point is drawn on the internal canvas
             const px = p.x * sx;
             const py = p.y * sy;
-            const d = Math.hypot(px - x, py - y);
-            if (d < 18 && (!best || d < best.d)) best = {i, d};
+
+            // Distance in Canvas Pixels
+            const d = Math.hypot(px - clickX, py - clickY);
+
+            // Check distance (40 is the hit radius)
+            if (d < 40 && (!best || d < best.d)) best = {i, d};
         }
         return best ? best.i : null;
     }
@@ -221,14 +242,20 @@ export class PageEditor extends LitElement {
 
     private onPointerMove = (ev: PointerEvent) => {
         if (this.dragIdx == null || !this.quad) return;
+
         const rect = this.edgesEl.getBoundingClientRect();
         const x = ev.clientX - rect.left;
         const y = ev.clientY - rect.top;
-        const ix = clamp((x / this.edgesEl.width) * this.baseW, 0, this.baseW - 1);
-        const iy = clamp((y / this.edgesEl.height) * this.baseH, 0, this.baseH - 1);
+
+        // FIX: Divide by the VISIBLE size (rect), not the internal canvas size.
+        // Then multiply by the source image size (baseW) to get the correct coordinate.
+        const ix = clamp((x / rect.width) * this.baseW, 0, this.baseW - 1);
+        const iy = clamp((y / rect.height) * this.baseH, 0, this.baseH - 1);
+
         const q = [...this.quad] as Quad;
         q[this.dragIdx] = {x: ix, y: iy};
         this.quad = q;
+
         this.magnifyX = ix;
         this.magnifyY = iy;
         this.drawMagnifier();
@@ -282,32 +309,47 @@ export class PageEditor extends LitElement {
 
     private async autoDetectEdges(): Promise<void> {
         if (!this.baseCanvas || !this.quad) return;
-        this.startWorker();
-        this.pushHistory();
-        const maxDim = 640;
-        const scale = Math.min(1, maxDim / Math.max(this.baseW, this.baseH));
-        const w = Math.max(1, Math.round(this.baseW * scale));
-        const h = Math.max(1, Math.round(this.baseH * scale));
-        const tmp = document.createElement('canvas');
-        tmp.width = w;
-        tmp.height = h;
-        const tctx = tmp.getContext('2d', {willReadFrequently: true})!;
-        tctx.drawImage(this.baseCanvas, 0, 0, w, h);
-        const img = tctx.getImageData(0, 0, w, h);
-        const quad = await this.detectQuad(img.data, w, h);
-        if (!quad) return;
-        const sx = this.baseW / w;
-        const sy = this.baseH / h;
-        const mapped: Quad = [
-            {x: quad[0].x * sx, y: quad[0].y * sy},
-            {x: quad[1].x * sx, y: quad[1].y * sy},
-            {x: quad[2].x * sx, y: quad[2].y * sy},
-            {x: quad[3].x * sx, y: quad[3].y * sy},
-        ];
-        if (quadArea(mapped) / (this.baseW * this.baseH) < 0.08) return;
-        this.quad = mapped;
-        this.drawEdges();
-        this.queuePreview();
+
+        this.busy = true;
+        this.requestUpdate();
+        await new Promise(r => setTimeout(r, 50));
+
+        try {
+            this.startWorker();
+            this.pushHistory();
+            const maxDim = 640;
+            const scale = Math.min(1, maxDim / Math.max(this.baseW, this.baseH));
+            const w = Math.max(1, Math.round(this.baseW * scale));
+            const h = Math.max(1, Math.round(this.baseH * scale));
+            const tmp = document.createElement('canvas');
+            tmp.width = w;
+            tmp.height = h;
+            const tctx = tmp.getContext('2d', {willReadFrequently: true})!;
+            tctx.drawImage(this.baseCanvas, 0, 0, w, h);
+            const img = tctx.getImageData(0, 0, w, h);
+            const quad = await this.detectQuad(img.data, w, h);
+
+            if (!quad) return; // If no quad found, we stop here
+
+            const sx = this.baseW / w;
+            const sy = this.baseH / h;
+            const mapped: Quad = [
+                {x: quad[0].x * sx, y: quad[0].y * sy},
+                {x: quad[1].x * sx, y: quad[1].y * sy},
+                {x: quad[2].x * sx, y: quad[2].y * sy},
+                {x: quad[3].x * sx, y: quad[3].y * sy},
+            ];
+
+            if (quadArea(mapped) / (this.baseW * this.baseH) < 0.08) return;
+
+            this.quad = mapped;
+            this.drawEdges();
+            this.queuePreview();
+
+        } finally {
+            // FIX: Always turn off busy flag, otherwise the UI stays frozen
+            this.busy = false;
+        }
     }
 
     private detectQuad(rgba: Uint8ClampedArray, w: number, h: number): Promise<Quad | null> {
@@ -393,17 +435,45 @@ export class PageEditor extends LitElement {
         if (!this.sourceBitmap || !this.quad) return;
         this.err = null;
         this.busy = true;
+
+        // 1. UI Animation: Wait for button to show "pressed" state
+        this.requestUpdate();
+        await new Promise(r => setTimeout(r, 50));
+
         try {
             const mappedQuad = this.mapQuadToSource(this.quad);
             const rawSize = computeOutputSize(mappedQuad);
-            const masterMax = 2200;
-            const thumbMax = 360;
-            const mScale = Math.min(1, masterMax / Math.max(rawSize.w, rawSize.h));
-            const tScale = Math.min(1, thumbMax / Math.max(rawSize.w, rawSize.h));
+
+            // --- RESOLUTION FIX START ---
+            // Tesseract needs ~1600px+ height for good accuracy.
+            // If the cropped area is smaller, we UPSCALE it.
+            const MIN_OCR_DIM = 1600;
+            const MAX_DIM = 2500; // Cap at 2500 to prevent huge file sizes
+
+            const largestDim = Math.max(rawSize.w, rawSize.h);
+            let mScale = 1;
+
+            if (largestDim < MIN_OCR_DIM) {
+                // Image is too small for OCR -> Upscale
+                mScale = MIN_OCR_DIM / largestDim;
+            } else if (largestDim > MAX_DIM) {
+                // Image is too huge -> Downscale
+                mScale = MAX_DIM / largestDim;
+            }
+
             const mW = Math.round(rawSize.w * mScale);
             const mH = Math.round(rawSize.h * mScale);
+
+            console.log(`OCR Output Size: ${mW}x${mH} (Source Crop was: ${rawSize.w}x${rawSize.h})`);
+            // --- RESOLUTION FIX END ---
+
+            // Calculate Thumbnail Size (Keep small, ~360px)
+            const THUMB_MAX = 360;
+            const tScale = Math.min(1, THUMB_MAX / largestDim);
             const tW = Math.round(rawSize.w * tScale);
             const tH = Math.round(rawSize.h * tScale);
+
+            // 2. Run Worker Tasks
             const masterTask = this.runWorkerTask({
                 id: `save-m-${Date.now()}`,
                 blob: this.blob,
@@ -413,8 +483,9 @@ export class PageEditor extends LitElement {
                 outW: mW,
                 outH: mH,
                 encode: true,
-                quality: 0.86
+                quality: 0.92 // High quality JPEG for OCR
             });
+
             const thumbTask = this.runWorkerTask({
                 id: `save-t-${Date.now()}`,
                 blob: this.blob,
@@ -426,15 +497,19 @@ export class PageEditor extends LitElement {
                 encode: true,
                 quality: 0.82
             });
+
             const [resM, resT] = await Promise.all([masterTask, thumbTask]);
+
             if (!resM.ok) throw new Error(resM.error || 'Failed to encode master');
             if (!resT.ok) throw new Error(resT.error || 'Failed to encode thumb');
             if (!resM.bytes) throw new Error('Missing master bytes');
             if (!resT.bytes) throw new Error('Missing thumb bytes');
+
             const detail: PageEditorSaveDetail = {
                 master: {bytes: resM.bytes, width: resM.width!, height: resM.height!},
                 thumb: {bytes: resT.bytes, width: resT.width!, height: resT.height!},
             };
+
             this.dispatchEvent(
                 new CustomEvent<PageEditorSaveDetail>('page-editor-save', {detail, bubbles: true, composed: true}),
             );
@@ -491,11 +566,13 @@ export class PageEditor extends LitElement {
                     <div class="flex items-center justify-between">
                         <div class="text-sm font-medium text-slate-200">Edges</div>
                         <div class="flex gap-2">
-                            <button class="px-3 py-2 rounded-xl bg-slate-800 text-sm" ?disabled=${this.busy}
+                            <button class="px-3 py-2 rounded-xl bg-slate-800 text-sm active:scale-95 transition-transform"
+                                    ?disabled=${this.busy}
                                     @click=${() => void this.autoDetectEdges()}>Auto
                             </button>
-                            <button class="px-3 py-2 rounded-xl bg-slate-800 text-sm"
-                                    ?disabled=${this.busy || this.history.length === 0} @click=${() => this.undo()}>
+                            <button class="px-3 py-2 rounded-xl bg-slate-800 text-sm active:scale-95 transition-transform"
+                                    ?disabled=${this.busy || this.history.length === 0}
+                                    @click=${() => this.undo()}>
                                 Undo
                             </button>
                         </div>
@@ -542,7 +619,7 @@ export class PageEditor extends LitElement {
                     </div>
 
                     <div class="flex gap-2">
-                        <button class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-semibold"
+                        <button class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 active:scale-95 transition-all text-slate-950 font-semibold"
                                 ?disabled=${this.busy} @click=${() => void this.onSave()}>
                             ${this.busy ? 'Saving…' : 'Save'}
                         </button>
