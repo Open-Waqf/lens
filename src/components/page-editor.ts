@@ -89,19 +89,22 @@ export class PageEditor extends LitElement {
         void this.loadBlob();
     }
 
-    // ... (keep rotate90) ...
     rotate90() {
         if (!this.baseCanvas || !this.quad) return;
         this.pushHistory();
         const oldH = this.baseH;
         this.rotation = ((this.rotation + 90) % 360) as 0 | 90 | 180 | 270;
         this.updateBaseCanvasFromSource();
+
+        // FIXED: Shift the array indices so [0] is always the Visual Top-Left
+        const q = this.quad;
         this.quad = [
-            rot90(this.quad[0], oldH),
-            rot90(this.quad[1], oldH),
-            rot90(this.quad[2], oldH),
-            rot90(this.quad[3], oldH),
+            rot90(q[3], oldH), // Old Bottom-Left -> New Top-Left (Index 0)
+            rot90(q[0], oldH), // Old Top-Left    -> New Top-Right
+            rot90(q[1], oldH), // Old Top-Right   -> New Bottom-Right
+            rot90(q[2], oldH), // Old Bottom-Right-> New Bottom-Left
         ];
+
         this.drawEdges();
         this.queuePreview();
     }
