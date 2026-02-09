@@ -228,16 +228,23 @@ export class SettingsPage extends LitElement {
     }
 
     private async askRestoreMode(count: number): Promise<RestoreMode | null> {
-        const raw = prompt(
-            `Backup contains ${count} documents.\n\nType MERGE to add them to your library.\nType ERASE to replace your library (destroys current data).`,
-            'MERGE',
-        );
-        if (!raw) return null;
-        const v = raw.trim().toUpperCase();
+        // We can't easily use ConfirmModal for a custom 3-way choice (Cancel/Merge/Erase)
+        // without adding custom button logic to ConfirmModal.
+        // For now, let's keep it simple by using two steps or a prompt.
+        // Let's stick to the prompt text based approach for simplicity as implemented previously,
+        // but using ConfirmModal.prompt to be consistent with UI.
+
+        const res = await ConfirmModal.prompt({
+            title: 'Restore Backup',
+            description: `Backup contains ${count} documents.\nType MERGE to add them.\nType ERASE to replace your library.`,
+            placeholder: 'MERGE or ERASE',
+            confirm: 'Continue'
+        });
+
+        if (!res) return null;
+        const v = res.trim().toUpperCase();
         if (v === 'MERGE') return 'merge';
-        if (v === 'ERASE') {
-            return 'erase';
-        }
+        if (v === 'ERASE') return 'erase';
         return null;
     }
 
@@ -247,9 +254,15 @@ export class SettingsPage extends LitElement {
             return;
         }
 
-        if (!confirm('Final Warning: This will wipe ALL documents and settings. This cannot be undone.')) {
-            return;
-        }
+        // Replaced native confirm with ConfirmModal
+        const ok = await ConfirmModal.ask({
+            title: 'Final Warning',
+            description: 'This will wipe ALL documents and settings. This cannot be undone.',
+            confirm: 'Wipe Everything',
+            destructive: true
+        });
+
+        if (!ok) return;
 
         this.busy = true;
         this.msg = 'Wiping data...';

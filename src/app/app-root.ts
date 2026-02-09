@@ -6,6 +6,9 @@ import '../pages/library-page';
 import '../pages/doc-page';
 import '../pages/settings-page';
 
+// 1. Import ConfirmModal
+import {ConfirmModal} from '../components/confirm-modal';
+
 import {getPersistenceStatus, type PersistenceStatus} from '../services/storage-persistence';
 import {garbageCollectOpfsDocs} from '../services/opfs-gc';
 import {resetAllStorage} from '../services/reset-storage';
@@ -125,11 +128,15 @@ export class AppRoot extends LitElement {
         `;
     }
 
-    // UPDATED: Renamed to match the new UI call and added safety check
+    // UPDATED: Used ConfirmModal instead of native confirm
     private async resetAndReload(): Promise<void> {
-        const ok = confirm(
-            'Reset storage will erase ALL local documents, pages, and settings on this device.\n\nThis cannot be undone.',
-        );
+        const ok = await ConfirmModal.ask({
+            title: 'Factory Reset?',
+            description: 'Reset storage will erase ALL local documents, pages, and settings on this device.\n\nThis cannot be undone.',
+            confirm: 'Reset Everything',
+            destructive: true
+        });
+
         if (!ok) return;
 
         this.resetting = true;
