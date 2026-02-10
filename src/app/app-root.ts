@@ -5,7 +5,8 @@ import '../pages/scan-page';
 import '../pages/library-page';
 import '../pages/doc-page';
 import '../pages/settings-page';
-import '../components/auth-lock'; // Key import
+import '../components/auth-lock';
+
 import {ConfirmModal} from '../components/confirm-modal';
 import {getPersistenceStatus, type PersistenceStatus} from '../services/storage-persistence';
 import {garbageCollectOpfsDocs} from '../services/opfs-gc';
@@ -34,6 +35,8 @@ type Fatal = { message: string; detail?: string };
 
 @customElement('app-root')
 export class AppRoot extends LitElement {
+    // 1. Add Loading State (True by default)
+    @state() private _isLoading = true;
     @state() private _isLocked = true;
 
     createRenderRoot() {
@@ -47,7 +50,9 @@ export class AppRoot extends LitElement {
 
     connectedCallback(): void {
         super.connectedCallback();
+        // Start the check immediately
         this._checkAuth();
+
         window.addEventListener('hashchange', this._onHash);
         window.addEventListener('error', this._onGlobalError);
         window.addEventListener('unhandledrejection', this._onUnhandled);
@@ -78,9 +83,17 @@ export class AppRoot extends LitElement {
     }
 
     private async _checkAuth() {
-        // Just check the status. Do NOT trigger a prompt here.
-        // The <auth-lock> component will handle the prompt when it renders.
-        this._isLocked = !(await AuthService.isAuthenticated());
+        try {
+            // 2. Wait for the check to complete
+            const isAuth = await AuthService.isAuthenticated();
+            this._isLocked = !isAuth;
+        } catch (e) {
+            console.error("Auth check failed", e);
+            this._isLocked = false; // Fail open or closed depending on preference (Open is safer for UX bugs)
+        } finally {
+            // 3. Stop loading only after we know the status
+            this._isLoading = false;
+        }
     }
 
     disconnectedCallback(): void {
@@ -189,10 +202,18 @@ export class AppRoot extends LitElement {
     }
 
     render() {
+        // 4. Render NOTHING (or a spinner) while loading.
+        // This prevents <auth-lock> from ever being created if disabled.
+        if (this._isLoading) {
+            return html`
+                <div class="fixed inset-0 bg-slate-950 z-[9999]"></div>`;
+        }
+
         if (this._isLocked) {
             return html`
                 <auth-lock @unlocked=${() => this._isLocked = false}></auth-lock>`;
         }
+
         if (this.fatal) return this.renderFatal();
 
         const r = this.route;
