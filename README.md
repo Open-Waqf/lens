@@ -4,7 +4,7 @@
 > A high-performance, local-first document scanner and vault. No accounts, no ads, no cloud.
 
 <div align="center">
-<a href="https://lens.open-waqf.org">
+<a href="[https://lens.openwaqf.org](https://www.google.com/search?q=https://lens.openwaqf.org)">
 <img src="public/icons/icon-512.png" alt="Sahifah Lens Logo" width="100" height="100" style="border-radius: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
 </a>
 </div>
@@ -13,52 +13,106 @@ Sahifah Lens allows users to digitize documents, perform OCR, and organize their
 device. Built on the principle of **Amanah** (Trust), it ensures that your sensitive documents never leave your physical
 control.
 
-Unlike cloud-based scanners, **zero data is ever uploaded to a server**. All image processing and text recognition
-happen locally using your device's hardware via WebWorkers.
-
 ---
 
 ## 🌟 Key Features
 
 ### 🛡️ Privacy & Sovereignty
 
-* **Zero-Cloud Architecture:** Your documents are stored in the **Origin Private File System (OPFS)** and IndexedDB,
-  isolated from other websites.
-* **Encrypted Backups:** Export your entire library as a password-protected `.slbk` vault using AES-GCM encryption.
-* **Nuclear Reset:** A "Reset Storage" kill-switch immediately erases all local documents, pages, and settings from the
-  device.
-* **Offline First:** Fully functional in airplane mode; your library stays in your pocket, not on a server.
+* **Zero-Cloud Architecture:** Documents are stored in the **Origin Private File System (OPFS)**, isolated from other
+  websites.
+* **Stream-Encrypted Backups:** Export your library as a `.slbk` vault using AES-GCM with a unified chunk-streaming
+  protocol (Magic: `SLBK`).
+* **Nuclear Reset:** A "Reset Storage" kill-switch erases all local documents and database entries instantly.
+* **Offline First:** Fully functional in airplane mode; OCR and image processing are 100% local.
 
 ### 📸 Intelligent Scanning
 
-* **Edge Detection:** Real-time document boundary detection using custom computer vision workers.
-* **Magic Filters:** On-device image enhancement including adaptive black-and-white thresholding for crisp,
-  printer-ready documents.
+* **Edge Detection:** Real-time boundary detection via Computer Vision workers.
+* **Non-Blocking Pipeline:** Uses `Uint8Array` byte-streaming and `OffscreenCanvas` to keep the UI at 60fps during heavy
+  processing.
 * **Perspective Correction:** Automatically warps and crops images to fix camera angles.
 
 ### 🔍 Deep Search & OCR
 
-* **On-Device OCR:** Uses **Tesseract.js** to extract text from images without an internet connection.
-* **Searchable Library:** Instantly find documents by their content via a local search index.
-* **PDF Generation:** Compile your scans into professional, searchable PDFs with invisible text layers locally.
+* **On-Device OCR:** Uses **Tesseract.js** in WebWorkers to extract text without internet.
+* **PDF Generation:** Compile professional, searchable PDFs with invisible text layers locally.
 
 ---
 
 ## 🏗️ Technical Architecture
 
-* **Core:** TypeScript, Vite, Lit (Web Components).
-* **Storage:** OPFS for binary files and Dexie (IndexedDB) for metadata.
-* **OCR Engine:** Tesseract.js running in local WebWorkers.
-* **Native Layer:** Capacitor for Camera, Filesystem, and Share APIs on Android/iOS.
+* **UI:** TypeScript + Lit (Web Components) + Tailwind CSS.
+* **Persistence:** Dexie.js (IndexedDB) for metadata; OPFS for high-performance binary storage.
+* **Crypto:** Web Crypto API using PBKDF2 for key derivation and AES-GCM for stream encryption.
+* **Native:** Capacitor 5+ for high-quality camera access and native system sharing.
+
+---
+
+## 🛠️ Developer Setup
+
+Follow these steps to set up the development environment.
+
+### 1. Prerequisites
+
+* **Node.js:** v18 or later.
+* **Package Manager:** `npm`.
+* **Mobile (Optional):** Android Studio or Xcode for native testing.
+
+### 2. Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/open-waqf/lens.git
+cd lens
+
+# Install dependencies
+npm install
+
+```
+
+### 3. Development
+
+```bash
+# Start the Vite dev server
+npm run dev
+
+```
+
+> **Note:** OCR and Service Workers behave differently in dev mode. For full performance testing, use `npm run preview`.
+
+### 4. Native Setup (Android/iOS)
+
+```bash
+# Build the web assets
+npm run build
+
+# Sync with Capacitor
+npx cap sync
+
+# Open in Android Studio / Xcode
+npx cap open android
+npx cap open ios
+
+```
+
+### 5. Type-Checking
+
+We use strict TypeScript rules to ensure memory safety. Always check your types before committing:
+
+```bash
+npm run typecheck
+
+```
 
 ---
 
 ## ⚠️ Disclaimers
 
-* **Local Storage:** Documents are stored unencrypted in the browser's private directory (OPFS). Use device-level
-  encryption for maximum security.
-* **Storage Persistence:** On some mobile devices, the OS may clear browser data if storage is low. **Always export an
-  Encrypted Backup** to secure your data permanently.
+* **Storage Persistence:** On mobile, the OS may clear browser data if storage is low. **Always export an Encrypted
+  Backup** to secure your data permanently.
+* **Sovereignty:** You are responsible for your own keys/passwords. There is no "Forgot Password" link because there is
+  no server.
 
 <div align="center">
 <p><em>Built with ❤️ for the Ummah and Humanity.</em></p>
