@@ -224,3 +224,56 @@ function writeU32LE(buf: Uint8Array, offset: number, v: number): void {
 function readU32LE(buf: Uint8Array, offset: number): number {
     return (buf[offset] | (buf[offset + 1] << 8) | (buf[offset + 2] << 16) | (buf[offset + 3] << 24)) >>> 0;
 }
+
+// Add this to src/lib/crypto/pbe.ts
+
+/**
+ * Encrypts a stream of data chunks on the fly.
+ * Yields encrypted blocks including the V2 Header and Chunk Metadata.
+ */
+export async function* encryptStream(
+    source: AsyncGenerator<Uint8Array>,
+    password: string
+): AsyncGenerator<Uint8Array> {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iterations = 210_000;
+    const key = await deriveAesKey(password, salt, iterations);
+
+    // 1. Yield Header
+    const headerLen = 4 + 1 + 4 + 1 + salt.length;
+    const header = new Uint8Array(headerLen);
+    let off = 0;
+    header.set(MAGIC, off);
+    off += 4;
+    header[off++] = VERSION_V2;
+    writeU32LE(header, off, iterations);
+    off += 4;
+    header[off++] = salt.length;
+    header.set(salt, off);
+    yield header;
+
+    // 2. Encrypt Source Chunks
+    for await (const plainChunk of source) {
+        // Encrypt this chunk
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const cipherBuf = await crypto.subtle.encrypt(
+            {name: 'AES-GCM', iv: toArrayBuffer(iv)},
+            key,
+            toArrayBuffer(plainChunk)
+        );
+        const cipherChunk = new Uint8Array(cipherBuf);
+
+        // Prepare Output Frame: [Len 4][IV 12][Cipher N]
+        const frameLen = 4 + 12 + cipherChunk.length;
+        const frame = new Uint8Array(frameLen);
+
+        let p = 0;
+        writeU32LE(frame, p, cipherChunk.length);
+        p += 4;
+        frame.set(iv, p);
+        p += 12;
+        frame.set(cipherChunk, p);
+
+        yield frame;
+    }
+}

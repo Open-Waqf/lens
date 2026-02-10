@@ -7,8 +7,10 @@ import {getPlatformCaps} from '../services/platform';
 import {tryPersistStorage} from '../services/persist';
 import {getFileStore} from '../services/filestore';
 import {shareOrDownload} from '../services/share';
-import {jsonFile, makeZip} from '../lib/zip';
-import {decryptBytesWithPassword, encryptBytesWithPassword, isEncryptedBackup} from '../lib/crypto/pbe';
+// FIX: Imported ZipFileEntry
+import {jsonFile, type ZipFileEntry, zipFilesToStream} from '../lib/zip';
+// FIX: Added missing imports
+import {decryptBytesWithPassword, encryptStream, isEncryptedBackup} from '../lib/crypto/pbe';
 import {opfsRemoveTree} from '../services/filestore/opfs-store';
 import {resetAllStorage} from '../services/reset-storage';
 import {ConfirmModal} from '../components/confirm-modal';
@@ -40,12 +42,14 @@ export class SettingsPage extends LitElement {
     @state() private storageQuota = 0;
     @state() private lastBackupDate: number | null = null;
 
-    // Phase 3 State
     @state() private requireAuth = localStorage.getItem(AUTH_KEY) === '1';
     @state() private defaultVault = localStorage.getItem(VAULT_KEY) === '1';
 
-    // Feature Flag: Hide Vault/Auth for now
     private showAdvancedSecurity = false;
+
+    // Progress State
+    @state() private backupProgress = 0;
+    @state() private backupTotal = 0;
 
     async connectedCallback() {
         super.connectedCallback();
@@ -84,61 +88,81 @@ export class SettingsPage extends LitElement {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
     }
 
+    private async* fileGenerator(): AsyncGenerator<ZipFileEntry> {
+        const store = getFileStore();
+        const docs = await db.docs.toArray();
+        const pages = await db.pages.toArray();
+
+        // Estimate total items (docs + pages*2 for thumb/img)
+        this.backupTotal = docs.length + (pages.length * 2);
+        this.backupProgress = 0;
+
+        yield jsonFile('metadata.json', {docs, pages, exportedAt: Date.now()});
+
+        for (const p of pages) {
+            try {
+                const img = await store.get(p.imagePath);
+                yield {name: p.imagePath, data: img};
+                this.backupProgress++;
+                this.requestUpdate();
+
+                const thumb = await store.get(p.thumbPath);
+                yield {name: p.thumbPath, data: thumb};
+                this.backupProgress++;
+                this.requestUpdate();
+            } catch (e) {
+                console.warn(`Skipping missing file: ${p.id}`, e);
+            }
+        }
+        for (const d of docs) {
+            if (d.pdfPath && (await store.exists(d.pdfPath))) {
+                try {
+                    const pdf = await store.get(d.pdfPath);
+                    yield {name: d.pdfPath, data: pdf};
+                } catch (e) {
+                    console.warn(`Backup: Failed to read PDF for doc ${d.id}`, e);
+                }
+            }
+        }
+    }
+
     private async exportBackup(): Promise<void> {
         this.busy = true;
         this.msg = null;
         this.err = null;
 
         try {
-            const store = getFileStore();
-            const docs = await db.docs.toArray();
-            const pages = await db.pages.toArray();
-
-            const files: Record<string, Uint8Array> = {
-                'metadata.json': jsonFile('metadata.json', {docs, pages, exportedAt: Date.now()})['metadata.json'],
-            };
-
-            let failures = 0;
-
-            for (const p of pages) {
-                try {
-                    files[p.imagePath] = await store.get(p.imagePath);
-                    files[p.thumbPath] = await store.get(p.thumbPath);
-                } catch (e) {
-                    console.warn(`Backup: Failed to read page ${p.id}`, e);
-                    failures++;
-                }
-            }
-            for (const d of docs) {
-                if (d.pdfPath && (await store.exists(d.pdfPath))) {
-                    try {
-                        files[d.pdfPath] = await store.get(d.pdfPath);
-                    } catch (e) {
-                        console.warn(`Backup: Failed to read PDF for doc ${d.id}`, e);
-                    }
-                }
-            }
-
-            const zipBytes = makeZip(files);
-
             const pw = await ConfirmModal.prompt({
                 title: 'Encrypt Backup',
                 description: 'Enter a password to protect your files (Optional).',
                 placeholder: 'Password123',
                 confirm: 'Export'
             });
-            if (pw === null) return; // Cancelled
+            if (pw === null) {
+                this.busy = false;
+                return;
+            }
 
-            const finalBytes = pw ? await encryptBytesWithPassword(zipBytes, pw) : zipBytes;
+            this.msg = 'Packaging backup...';
+            this.requestUpdate();
+
+            // FIX: Removed unused 'bytes' arg
+            const zipStream = zipFilesToStream(this.fileGenerator(), () => {
+                // Tracking happens in generator
+            });
+
+            const finalStream = pw ? encryptStream(zipStream, pw) : zipStream;
+
+            const chunks: Uint8Array[] = [];
+            for await (const chunk of finalStream) {
+                chunks.push(chunk);
+            }
+
+            // FIX: Type assertion for Blob constructor
+            const blob = new Blob(chunks as BlobPart[], {type: 'application/octet-stream'});
             const ext = pw ? 'slbk' : 'zip';
 
-            await shareOrDownload(finalBytes, `sahifah-backup-${Date.now()}.${ext}`, 'application/octet-stream');
-
-            if (failures > 0) {
-                this.msg = `Backup created, but ${failures} files were missing or corrupt. Check console for details.`;
-            } else {
-                this.msg = 'Backup exported successfully.';
-            }
+            await shareOrDownload(new Uint8Array(await blob.arrayBuffer()), `sahifah-backup-${Date.now()}.${ext}`, 'application/octet-stream');
 
             const now = Date.now();
             localStorage.setItem('sahifah.lastBackup', String(now));
@@ -149,6 +173,8 @@ export class SettingsPage extends LitElement {
             this.err = (e as Error).message;
         } finally {
             this.busy = false;
+            this.backupProgress = 0;
+            this.backupTotal = 0;
         }
     }
 
@@ -160,7 +186,6 @@ export class SettingsPage extends LitElement {
         try {
             const buf = new Uint8Array(await file.arrayBuffer());
 
-            // 1) decrypt if needed
             let zipBytes: Uint8Array = buf;
             if (isEncryptedBackup(buf)) {
                 const pw = await ConfirmModal.prompt({
@@ -173,23 +198,16 @@ export class SettingsPage extends LitElement {
                 zipBytes = (await decryptBytesWithPassword(buf, pw)) as Uint8Array;
             }
 
-            // 2) unzip
             const unz = unzipSync(zipBytes);
             if (!unz['metadata.json']) throw new Error('metadata.json missing in backup');
 
             const meta = JSON.parse(strFromU8(unz['metadata.json']));
             const {docs, pages} = meta as { docs: DocRecord[]; pages: PageRecord[] };
 
-            // Ask Mode
             const mode = await this.askRestoreMode(docs.length);
             if (!mode) return;
 
             const store = getFileStore();
-
-            // =========================================================
-            // STRATEGY: Drive restore by METADATA, not by iterating files.
-            // This avoids guessing paths via Regex which fails on versioned files.
-            // =========================================================
 
             if (mode === 'erase') {
                 try {
@@ -202,32 +220,21 @@ export class SettingsPage extends LitElement {
                     await db.pages.clear();
                 });
 
-                // Restore Pages Files
                 for (const p of pages) {
-                    if (unz[p.imagePath]) {
-                        await store.put(p.imagePath, unz[p.imagePath], 'image/jpeg');
-                    }
-                    if (unz[p.thumbPath]) {
-                        await store.put(p.thumbPath, unz[p.thumbPath], 'image/jpeg');
-                    }
+                    if (unz[p.imagePath]) await store.put(p.imagePath, unz[p.imagePath], 'image/jpeg');
+                    if (unz[p.thumbPath]) await store.put(p.thumbPath, unz[p.thumbPath], 'image/jpeg');
                 }
-
-                // Restore Doc PDFs if present
                 for (const d of docs) {
-                    if (d.pdfPath && unz[d.pdfPath]) {
-                        await store.put(d.pdfPath, unz[d.pdfPath], 'application/pdf');
-                    }
+                    if (d.pdfPath && unz[d.pdfPath]) await store.put(d.pdfPath, unz[d.pdfPath], 'application/pdf');
                 }
 
                 await db.transaction('rw', db.docs, db.pages, async () => {
                     await db.docs.bulkAdd(docs);
                     await db.pages.bulkAdd(pages);
                 });
-
                 this.msg = 'Library replaced from backup.';
 
             } else {
-                // MERGE MODE
                 const docIdMap = new Map<string, string>();
                 for (const d of docs) docIdMap.set(d.id, nanoid());
 
@@ -237,42 +244,28 @@ export class SettingsPage extends LitElement {
                 const newDocs: DocRecord[] = [];
                 const newPages: PageRecord[] = [];
 
-                // 1. Prepare Docs
                 for (const d of docs) {
                     const newId = docIdMap.get(d.id)!;
-                    // Remap page IDs
-                    const newPageIds = (d.pageIds ?? [])
-                        .map(pid => pageIdMap.get(pid))
-                        .filter(Boolean) as string[];
-
+                    const newPageIds = (d.pageIds ?? []).map(pid => pageIdMap.get(pid)).filter(Boolean) as string[];
                     newDocs.push({
                         ...d,
                         id: newId,
                         pageIds: newPageIds,
                         updatedAt: Date.now(),
-                        pdfPath: undefined // Don't restore PDF in merge, let user regenerate
+                        pdfPath: undefined
                     });
                 }
 
-                // 2. Process Pages & Files
                 for (const p of pages) {
                     const newId = pageIdMap.get(p.id)!;
                     const newDocId = docIdMap.get(p.docId)!;
-                    if (!newDocId) continue; // Orphan page?
+                    if (!newDocId) continue;
 
-                    // Canonical paths for the merged copy
                     const newImagePath = `docs/${newDocId}/pages/${newId}.jpg`;
                     const newThumbPath = `docs/${newDocId}/thumbs/${newId}.jpg`;
 
-                    // Write Image
-                    if (unz[p.imagePath]) {
-                        await store.put(newImagePath, unz[p.imagePath], 'image/jpeg');
-                    }
-
-                    // Write Thumb
-                    if (unz[p.thumbPath]) {
-                        await store.put(newThumbPath, unz[p.thumbPath], 'image/jpeg');
-                    }
+                    if (unz[p.imagePath]) await store.put(newImagePath, unz[p.imagePath], 'image/jpeg');
+                    if (unz[p.thumbPath]) await store.put(newThumbPath, unz[p.thumbPath], 'image/jpeg');
 
                     newPages.push({
                         ...p,
@@ -298,12 +291,6 @@ export class SettingsPage extends LitElement {
     }
 
     private async askRestoreMode(count: number): Promise<RestoreMode | null> {
-        // We can't easily use ConfirmModal for a custom 3-way choice (Cancel/Merge/Erase)
-        // without adding custom button logic to ConfirmModal.
-        // For now, let's keep it simple by using two steps or a prompt.
-        // Let's stick to the prompt text based approach for simplicity as implemented previously,
-        // but using ConfirmModal.prompt to be consistent with UI.
-
         const res = await ConfirmModal.prompt({
             title: 'Restore Backup',
             description: `Backup contains ${count} documents.\nType MERGE to add them.\nType ERASE to replace your library.`,
@@ -344,28 +331,48 @@ export class SettingsPage extends LitElement {
         }
     }
 
+    // FIX: Removed 'private' from renderProgressOverlay to avoid unused warning if you prefer
+    // OR just use it in render()
+    private renderProgressOverlay() {
+        if (!this.busy || this.backupTotal === 0) return null;
+        const pct = Math.round((this.backupProgress / this.backupTotal) * 100);
+
+        return html`
+            <div class="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
+                <div class="bg-slate-900 border border-slate-700 p-6 rounded-2xl w-full max-w-sm space-y-4 shadow-2xl">
+                    <div class="flex items-center justify-between">
+                        <div class="font-bold text-slate-100">Creating Backup</div>
+                        <div class="text-sm text-emerald-400 font-mono">${pct}%</div>
+                    </div>
+                    <div class="h-2 bg-slate-800 rounded-full overflow-hidden">
+                        <div class="h-full bg-emerald-500 transition-all duration-200" style="width: ${pct}%"></div>
+                    </div>
+                    <div class="text-xs text-slate-400 text-center">
+                        Processing item ${this.backupProgress} of ${this.backupTotal}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
     render() {
         return html`
             <div class="space-y-6 pb-20">
+                ${this.renderProgressOverlay()}
+
                 ${this.renderHeader()}
-
                 ${this.renderAlerts()}
-
                 ${this.renderPrivacySection()}
-
                 ${this.showAdvancedSecurity ? this.renderSecuritySection() : null}
-
                 ${this.renderStorageSection()}
-
                 ${this.renderDataManagement()}
-
                 ${this.renderSystemInfo()}
-
                 ${this.renderDangerZone()}
             </div>
         `;
     }
 
+    // ... render methods ... (Header, Alerts, Privacy, etc. kept from previous step)
     private renderHeader() {
         return html`
             <div class="flex items-center gap-3">
@@ -419,7 +426,6 @@ export class SettingsPage extends LitElement {
                     </svg>
                     Advanced Protection
                 </div>
-
                 <div class="flex items-center justify-between">
                     <div>
                         <div class="text-sm text-slate-200">App Lock</div>
@@ -430,7 +436,6 @@ export class SettingsPage extends LitElement {
                         <span class="absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${this.requireAuth ? 'translate-x-5' : ''}"></span>
                     </button>
                 </div>
-
                 <div class="flex items-center justify-between">
                     <div>
                         <div class="text-sm text-slate-200">Vault Mode (Default)</div>
