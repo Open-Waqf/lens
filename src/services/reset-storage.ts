@@ -1,3 +1,5 @@
+import {Capacitor} from '@capacitor/core';
+import {Directory, Filesystem} from '@capacitor/filesystem';
 import {db} from './db';
 import {opfsRemoveTree} from './filestore/opfs-store';
 
@@ -13,25 +15,43 @@ export async function resetAllStorage(): Promise<void> {
     try {
         await db.delete();
     } catch {
-        // fallback to clearing tables if delete fails
+        // Fallback: clear tables if delete fails
         try {
             await db.transaction('rw', db.docs, db.pages, async () => {
                 await db.pages.clear();
                 await db.docs.clear();
             });
         } catch {
-            // ignore
         }
     }
 
     // 2) OPFS (best effort)
-    try {
-        await opfsRemoveTree('docs');
-    } catch {
-    }
-    try {
-        await opfsRemoveTree('exports');
-    } catch {
+    if (Capacitor.isNativePlatform()) {
+        // CAPACITOR: Wipes native files from Directory.Data
+        try {
+            await Filesystem.rmdir({
+                path: 'docs',
+                directory: Directory.Data,
+                recursive: true
+            });
+            await Filesystem.rmdir({
+                path: 'exports', // if you use this folder
+                directory: Directory.Data,
+                recursive: true
+            });
+        } catch (e) {
+            // Ignore error if folder doesn't exist
+        }
+    } else {
+        // WEB: Wipes OPFS
+        try {
+            await opfsRemoveTree('docs');
+        } catch {
+        }
+        try {
+            await opfsRemoveTree('exports');
+        } catch {
+        }
     }
 
     // 3) local/session storage (best effort)
