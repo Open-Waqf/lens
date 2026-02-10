@@ -19,6 +19,8 @@ import {strFromU8, unzipSync} from 'fflate';
 import type {DocRecord, PageRecord} from '../domain/types';
 import {OPFSStreamWriter} from '../services/filestore/opfs-store';
 
+import {repairLibrary} from '../services/repair';
+
 type RestoreMode = 'merge' | 'erase';
 
 @customElement('settings-page')
@@ -49,12 +51,43 @@ export class SettingsPage extends LitElement {
     @state() private backupProgress = 0;
     @state() private backupTotal = 0;
 
+    @state() private showRepairTool = false;
+    @state() private repairProgress = '';
+
     async connectedCallback() {
         super.connectedCallback();
         await this._refreshSettings();
         this.lastBackupDate = Number(localStorage.getItem('sahifah.lastBackup')) || null;
         void this.loadStorageStats();
         void tryPersistStorage();
+        if (location.hash.includes('repair=1')) {
+            this.showRepairTool = true;
+        }
+
+        // 3. SECRET COMMAND: Expose a global function for manual trigger
+        // Usage: Type 'sahifahRepair()' in DevTools Console
+        (window as any).sahifahRepair = () => {
+            this.showRepairTool = true;
+            this.msg = "Maintenance Mode Enabled 🛠️";
+            this.requestUpdate();
+        };
+    }
+
+    private async runRepair() {
+        this.busy = true;
+        this.repairProgress = 'Starting scan...';
+
+        try {
+            await repairLibrary((_curr, _total, msg) => {
+                this.repairProgress = msg;
+                this.requestUpdate();
+            });
+            this.msg = "Library repair complete.";
+        } catch (e) {
+            this.err = "Repair failed: " + String(e);
+        } finally {
+            this.busy = false;
+        }
     }
 
     private async _refreshSettings() {
@@ -523,6 +556,7 @@ export class SettingsPage extends LitElement {
                 <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">Data Management</h2>
                 ${this.renderBackupStatus()}
                 <div class="grid gap-3">
+
                     <button class="flex items-center justify-between p-4 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors"
                             ?disabled=${this.busy} @click=${() => this.exportBackup()}>
                         <div class="flex items-center gap-3">
@@ -558,6 +592,27 @@ export class SettingsPage extends LitElement {
                                    if (f) void this.importBackup(f);
                                }}/>
                     </label>
+
+                    ${this.showRepairTool ? html`
+                        <button class="flex items-center justify-between p-4 rounded-xl bg-indigo-950/30 border border-indigo-500/30 hover:bg-indigo-900/40 transition-colors"
+                                ?disabled=${this.busy} @click=${() => this.runRepair()}>
+                            <div class="flex items-center gap-3">
+                                <div class="p-2 rounded-lg bg-indigo-900/50 text-indigo-400">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                              d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path>
+                                    </svg>
+                                </div>
+                                <div class="text-left">
+                                    <div class="text-indigo-200 font-medium">Repair Thumbnails</div>
+                                    <div class="text-xs text-indigo-400">Regenerate missing preview images</div>
+                                </div>
+                            </div>
+                            ${this.repairProgress ? html`<span
+                                    class="text-xs font-mono text-indigo-300">${this.repairProgress}</span>` : null}
+                        </button>
+                    ` : null}
+
                 </div>
             </section>
         `;
