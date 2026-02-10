@@ -5,7 +5,6 @@ import type {PageEditorSaveDetail} from '../../components/page-editor';
 
 import {db} from '../../services/db';
 import {getFileStore} from '../../services/filestore';
-import {recognizeText} from '../../lib/ocr';
 import {bytesToBlob} from "../../lib/bytes";
 import {ocrQueue} from '../../services/ocr-queue';
 
@@ -330,6 +329,8 @@ export class ScanRepo {
     private async runBackgroundOcr(pageId: string, bytes: Uint8Array, w: number, h: number) {
         try {
             const blob = bytesToBlob(bytes, 'image/jpeg');
+
+            const {recognizeText} = await import('../../lib/ocr');
 
             // 1. Run Intelligence
             const words = await recognizeText(blob, w, h);
