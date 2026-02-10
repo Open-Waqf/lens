@@ -44,6 +44,9 @@ export class SettingsPage extends LitElement {
     @state() private requireAuth = localStorage.getItem(AUTH_KEY) === '1';
     @state() private defaultVault = localStorage.getItem(VAULT_KEY) === '1';
 
+    // Feature Flag: Hide Vault/Auth for now
+    private showAdvancedSecurity = false;
+
     async connectedCallback() {
         super.connectedCallback();
         this.lastBackupDate = Number(localStorage.getItem('sahifah.lastBackup')) || null;
@@ -321,7 +324,6 @@ export class SettingsPage extends LitElement {
             return;
         }
 
-        // Replaced native confirm with ConfirmModal
         const ok = await ConfirmModal.ask({
             title: 'Final Warning',
             description: 'This will wipe ALL documents and settings. This cannot be undone.',
@@ -351,7 +353,7 @@ export class SettingsPage extends LitElement {
 
                 ${this.renderPrivacySection()}
 
-                ${this.renderSecuritySection()}
+                ${this.showAdvancedSecurity ? this.renderSecuritySection() : null}
 
                 ${this.renderStorageSection()}
 
