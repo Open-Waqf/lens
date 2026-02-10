@@ -1,0 +1,51 @@
+name: Deploy Open Waqf Signer
+
+on:
+  push:
+    branches:
+      - develop
+    paths-ignore:
+      - '*.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - 'docs/**'
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps
+
+      - name: Run Safety Tests
+        run: npx playwright test
+
+      - name: Build (Clean Up)
+        run: npm run build
+
+      - name: Copy CNAME
+        run: echo "lens.open-waqf.org" > dist/CNAME
+
+      - name: Deploy to Deploy Branch
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: dist
+          branch: deploy
+          clean: true
+          git-config-name: "Open Waqf Bot"
+          git-config-email: "bot@open-waqf.org"
+          commit-message: "deploy: update signer (automated)"
