@@ -14,7 +14,8 @@ export default defineConfig({
         VitePWA({
             strategies: 'generateSW',
             registerType: 'autoUpdate',
-            filename: 'manifest.json',
+            filename: 'sw.js',
+            manifestFilename: 'manifest.json',
             manifest: {
                 name: 'Sahifah Lens',
                 short_name: 'Lens',

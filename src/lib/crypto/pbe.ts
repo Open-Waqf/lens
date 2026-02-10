@@ -1,5 +1,3 @@
-// src/lib/crypto/pbe.ts
-
 const MAGIC = new Uint8Array([0x53, 0x4c, 0x42, 0x4b]); // "SLBK"
 const VERSION_V1 = 1;
 const VERSION_V2 = 2; // Chunked Streaming Format
@@ -224,8 +222,6 @@ function writeU32LE(buf: Uint8Array, offset: number, v: number): void {
 function readU32LE(buf: Uint8Array, offset: number): number {
     return (buf[offset] | (buf[offset + 1] << 8) | (buf[offset + 2] << 16) | (buf[offset + 3] << 24)) >>> 0;
 }
-
-// Add this to src/lib/crypto/pbe.ts
 
 /**
  * Encrypts a stream of data chunks on the fly.

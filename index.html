@@ -6,7 +6,10 @@
           content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"/>
 
     <title>Sahifah Lens</title>
-    <meta name="description" content="Private, local-first document scanner. No cloud, no tracking."/>
+    <meta name="description"
+          content="A local-first, zero-cloud document scanner. Perform OCR and create searchable PDFs entirely offline. No accounts, no tracking, total sovereignty.">
+    <meta name="keywords"
+          content="private scanner, offline OCR, local-first PWA, Tesseract.js scanner, secure document vault, no-cloud PDF scanner">
 
     <meta name="theme-color" content="#0F172A"/>
 
@@ -16,8 +19,9 @@
     <link rel="manifest" href="/manifest.json"/>
 
     <meta property="og:type" content="website">
-    <meta property="og:title" content="Sahifah Lens - Private Scanner">
-    <meta property="og:description" content="Offline-first, encrypted document scanning. No cloud, no tracking.">
+    <meta property="og:title" content="Sahifah Lens: The Scanner That Trusts No One But You">
+    <meta property="og:description"
+          content="Digitize sensitive documents without the cloud. Local OCR and encrypted backups on your device.">
     <meta property="og:image" content="https://lens.open-waqf.org/og-image.jpg">
     <meta property="og:url" content="https://lens.open-waqf.org/">
 
@@ -41,5 +45,20 @@
 <app-root></app-root>
 
 <script type="module" src="/src/main.ts"></script>
+<script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Sahifah Lens",
+        "operatingSystem": "Android, iOS, Web",
+        "applicationCategory": "UtilitiesApplication",
+        "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+        },
+        "featureList": "Offline OCR, Edge Detection, Searchable PDF, Encrypted Backups, Privacy Reset"
+    }
+</script>
 </body>
 </html>

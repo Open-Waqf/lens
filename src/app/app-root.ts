@@ -6,11 +6,14 @@ import '../pages/library-page';
 import '../pages/doc-page';
 import '../pages/settings-page';
 
-// 1. Import ConfirmModal
+// 1. Import the AuthLock component so the tag <auth-lock> works
+import '../components/auth-lock';
+
 import {ConfirmModal} from '../components/confirm-modal';
 
 import {getPersistenceStatus, type PersistenceStatus} from '../services/storage-persistence';
 import {garbageCollectOpfsDocs} from '../services/opfs-gc';
+import {AuthService} from '../services/auth-service';
 import {resetAllStorage} from '../services/reset-storage';
 
 type Route =
@@ -35,6 +38,8 @@ type Fatal = { message: string; detail?: string };
 
 @customElement('app-root')
 export class AppRoot extends LitElement {
+    @state() private _isLocked = true;
+
     createRenderRoot() {
         return this;
     }
@@ -46,6 +51,7 @@ export class AppRoot extends LitElement {
 
     connectedCallback(): void {
         super.connectedCallback();
+        this._checkAuth();
         window.addEventListener('hashchange', this._onHash);
 
         // Global crash catcher
@@ -76,6 +82,22 @@ export class AppRoot extends LitElement {
             if (typeof ric === 'function') ric(() => void run(), {timeout: 2500});
             else setTimeout(() => void run(), 800);
         } catch {
+        }
+    }
+
+    private async _checkAuth() {
+        // If auth is not required in settings, unlock immediately
+        this._isLocked = !(await AuthService.isAuthenticated());
+
+        // Auto-prompt on launch if locked
+        if (this._isLocked) {
+            this._attemptAutoUnlock();
+        }
+    }
+
+    private async _attemptAutoUnlock() {
+        if (await AuthService.promptAuth()) {
+            this._isLocked = false;
         }
     }
 
@@ -128,7 +150,6 @@ export class AppRoot extends LitElement {
         `;
     }
 
-    // UPDATED: Used ConfirmModal instead of native confirm
     private async resetAndReload(): Promise<void> {
         const ok = await ConfirmModal.ask({
             title: 'Factory Reset?',
@@ -149,7 +170,6 @@ export class AppRoot extends LitElement {
         }
     }
 
-    // UPDATED: Better Fatal Error UI (Safe Reload)
     private renderFatal() {
         if (!this.fatal) return null;
 
@@ -218,7 +238,12 @@ export class AppRoot extends LitElement {
     }
 
     render() {
-        // Fatal error takes over everything
+        if (this._isLocked) {
+            // This component will now render correctly because it is imported
+            return html`
+                <auth-lock @unlocked=${() => this._isLocked = false}></auth-lock>`;
+        }
+
         if (this.fatal) return this.renderFatal();
 
         const r = this.route;

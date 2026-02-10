@@ -1,1 +1,18 @@
 @import "tailwindcss";
+
+@layer base {
+    :root {
+        /* Default (Light Mode) */
+        --bg-default: #ffffff;
+        --text-default: #09090b; /* Almost black */
+        --primary: #2563eb; /* Blue 600 */
+    }
+
+    @media (prefers-color-scheme: dark) {
+        :root {
+            /* Dark Mode Overrides */
+            --bg-default: #09090b; /* Zinc 950 */
+            --text-default: #ffffff;
+        }
+    }
+}

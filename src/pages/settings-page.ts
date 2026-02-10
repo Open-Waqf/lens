@@ -7,21 +7,18 @@ import {getPlatformCaps} from '../services/platform';
 import {tryPersistStorage} from '../services/persist';
 import {getFileStore, removeFileTree} from '../services/filestore';
 import {shareOrDownload} from '../services/share';
-// FIX: Imported ZipFileEntry
 import {jsonFile, type ZipFileEntry, zipFilesToStream} from '../lib/zip';
-// FIX: Added missing imports
 import {decryptBytesWithPassword, encryptStream, isEncryptedBackup} from '../lib/crypto/pbe';
 import {resetAllStorage} from '../services/reset-storage';
 import {ConfirmModal} from '../components/confirm-modal';
 import pkg from '../../package.json'
+import {settings} from '../services/settings';
+import {AuthService} from '../services/auth-service';
 
 import {strFromU8, unzipSync} from 'fflate';
 import type {DocRecord, PageRecord} from '../domain/types';
 
 type RestoreMode = 'merge' | 'erase';
-
-const AUTH_KEY = 'sahifah.requireAuth';
-const VAULT_KEY = 'sahifah.defaultVault';
 
 @customElement('settings-page')
 export class SettingsPage extends LitElement {
@@ -41,8 +38,9 @@ export class SettingsPage extends LitElement {
     @state() private storageQuota = 0;
     @state() private lastBackupDate: number | null = null;
 
-    @state() private requireAuth = localStorage.getItem(AUTH_KEY) === '1';
-    @state() private defaultVault = localStorage.getItem(VAULT_KEY) === '1';
+    // Initialize with defaults, update in connectedCallback
+    @state() private requireAuth = false;
+    @state() private defaultVault = false;
 
     private showAdvancedSecurity = false;
 
@@ -52,9 +50,16 @@ export class SettingsPage extends LitElement {
 
     async connectedCallback() {
         super.connectedCallback();
+        await this._refreshSettings();
         this.lastBackupDate = Number(localStorage.getItem('sahifah.lastBackup')) || null;
         void this.loadStorageStats();
         void tryPersistStorage();
+    }
+
+    private async _refreshSettings() {
+        const s = await settings.get();
+        this.requireAuth = s.requireAuth;
+        this.defaultVault = s.defaultVault;
     }
 
     private async loadStorageStats() {
@@ -69,14 +74,27 @@ export class SettingsPage extends LitElement {
         }
     }
 
-    private toggleAuth() {
-        this.requireAuth = !this.requireAuth;
-        localStorage.setItem(AUTH_KEY, this.requireAuth ? '1' : '0');
+    private async toggleAuth() {
+        const nextState = !this.requireAuth;
+
+        if (nextState === true) {
+            const success = await AuthService.setupAuth();
+            if (!success) {
+                this.requireAuth = false;
+                this.msg = "Setup cancelled or not supported.";
+                return;
+            }
+        }
+
+        this.requireAuth = nextState;
+
+        // Use the new secure setter
+        await settings.setAuth(nextState);
     }
 
     private toggleDefaultVault() {
         this.defaultVault = !this.defaultVault;
-        localStorage.setItem(VAULT_KEY, this.defaultVault ? '1' : '0');
+        settings.setVault(this.defaultVault);
     }
 
     private formatBytes(bytes: number): string {
@@ -92,7 +110,6 @@ export class SettingsPage extends LitElement {
         const docs = await db.docs.toArray();
         const pages = await db.pages.toArray();
 
-        // Estimate total items (docs + pages*2 for thumb/img)
         this.backupTotal = docs.length + (pages.length * 2);
         this.backupProgress = 0;
 
@@ -145,11 +162,8 @@ export class SettingsPage extends LitElement {
             this.msg = 'Packaging backup...';
             this.requestUpdate();
 
-            // FIX: Removed unused 'bytes' arg
             const zipStream = zipFilesToStream(this.fileGenerator(), () => {
-                // Tracking happens in generator
             });
-
             const finalStream = pw ? encryptStream(zipStream, pw) : zipStream;
 
             const chunks: Uint8Array[] = [];
@@ -157,7 +171,6 @@ export class SettingsPage extends LitElement {
                 chunks.push(chunk);
             }
 
-            // FIX: Type assertion for Blob constructor
             const blob = new Blob(chunks as BlobPart[], {type: 'application/octet-stream'});
             const ext = pw ? 'slbk' : 'zip';
 
@@ -330,8 +343,6 @@ export class SettingsPage extends LitElement {
         }
     }
 
-    // FIX: Removed 'private' from renderProgressOverlay to avoid unused warning if you prefer
-    // OR just use it in render()
     private renderProgressOverlay() {
         if (!this.busy || this.backupTotal === 0) return null;
         const pct = Math.round((this.backupProgress / this.backupTotal) * 100);
@@ -358,11 +369,12 @@ export class SettingsPage extends LitElement {
         return html`
             <div class="space-y-6 pb-20">
                 ${this.renderProgressOverlay()}
-
                 ${this.renderHeader()}
                 ${this.renderAlerts()}
                 ${this.renderPrivacySection()}
-                ${this.showAdvancedSecurity ? this.renderSecuritySection() : null}
+
+                ${this.renderSecuritySection()}
+
                 ${this.renderStorageSection()}
                 ${this.renderDataManagement()}
                 ${this.renderSystemInfo()}
@@ -371,7 +383,6 @@ export class SettingsPage extends LitElement {
         `;
     }
 
-    // ... render methods ... (Header, Alerts, Privacy, etc. kept from previous step)
     private renderHeader() {
         return html`
             <div class="flex items-center gap-3">
@@ -425,6 +436,7 @@ export class SettingsPage extends LitElement {
                     </svg>
                     Advanced Protection
                 </div>
+
                 <div class="flex items-center justify-between">
                     <div>
                         <div class="text-sm text-slate-200">App Lock</div>
@@ -435,16 +447,19 @@ export class SettingsPage extends LitElement {
                         <span class="absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${this.requireAuth ? 'translate-x-5' : ''}"></span>
                     </button>
                 </div>
-                <div class="flex items-center justify-between">
-                    <div>
-                        <div class="text-sm text-slate-200">Vault Mode (Default)</div>
-                        <div class="text-[10px] text-slate-500">Encrypt image files at rest by default</div>
+
+                ${this.showAdvancedSecurity ? html`
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <div class="text-sm text-slate-200">Vault Mode (Default)</div>
+                            <div class="text-[10px] text-slate-500">Encrypt image files at rest by default</div>
+                        </div>
+                        <button class="relative h-6 w-11 rounded-full transition-colors ${this.defaultVault ? 'bg-emerald-600' : 'bg-slate-700'}"
+                                @click=${this.toggleDefaultVault}>
+                            <span class="absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${this.defaultVault ? 'translate-x-5' : ''}"></span>
+                        </button>
                     </div>
-                    <button class="relative h-6 w-11 rounded-full transition-colors ${this.defaultVault ? 'bg-emerald-600' : 'bg-slate-700'}"
-                            @click=${this.toggleDefaultVault}>
-                        <span class="absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${this.defaultVault ? 'translate-x-5' : ''}"></span>
-                    </button>
-                </div>
+                ` : null}
             </section>
         `;
     }

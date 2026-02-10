@@ -5,7 +5,11 @@
   "display": "standalone",
   "background_color": "#0F172A",
   "theme_color": "#0F172A",
-  "description": "Private, offline-first document scanner.",
+  "description": "The most private way to scan and organize documents.",
+  "categories": [
+    "productivity",
+    "utilities"
+  ],
   "icons": [
     {
       "src": "../icons/icon-192.png",
