@@ -5,12 +5,8 @@ import '../pages/scan-page';
 import '../pages/library-page';
 import '../pages/doc-page';
 import '../pages/settings-page';
-
-// 1. Import the AuthLock component so the tag <auth-lock> works
-import '../components/auth-lock';
-
+import '../components/auth-lock'; // Key import
 import {ConfirmModal} from '../components/confirm-modal';
-
 import {getPersistenceStatus, type PersistenceStatus} from '../services/storage-persistence';
 import {garbageCollectOpfsDocs} from '../services/opfs-gc';
 import {AuthService} from '../services/auth-service';
@@ -53,14 +49,11 @@ export class AppRoot extends LitElement {
         super.connectedCallback();
         this._checkAuth();
         window.addEventListener('hashchange', this._onHash);
-
-        // Global crash catcher
         window.addEventListener('error', this._onGlobalError);
         window.addEventListener('unhandledrejection', this._onUnhandled);
 
         if (!location.hash) location.hash = '#/library';
 
-        // Storage persistence check
         void (async () => {
             try {
                 this.persist = await getPersistenceStatus();
@@ -69,7 +62,6 @@ export class AppRoot extends LitElement {
             }
         })();
 
-        // Best-effort OPFS orphan GC
         try {
             const run = async () => {
                 try {
@@ -86,19 +78,9 @@ export class AppRoot extends LitElement {
     }
 
     private async _checkAuth() {
-        // If auth is not required in settings, unlock immediately
+        // Just check the status. Do NOT trigger a prompt here.
+        // The <auth-lock> component will handle the prompt when it renders.
         this._isLocked = !(await AuthService.isAuthenticated());
-
-        // Auto-prompt on launch if locked
-        if (this._isLocked) {
-            this._attemptAutoUnlock();
-        }
-    }
-
-    private async _attemptAutoUnlock() {
-        if (await AuthService.promptAuth()) {
-            this._isLocked = false;
-        }
     }
 
     disconnectedCallback(): void {
@@ -113,10 +95,7 @@ export class AppRoot extends LitElement {
             super.performUpdate();
         } catch (e) {
             const err = e as Error;
-            this.fatal = {
-                message: err?.message ?? 'Unexpected render error',
-                detail: err?.stack ? String(err.stack) : String(e),
-            };
+            this.fatal = {message: err?.message ?? 'Render error', detail: err?.stack};
         }
     }
 
@@ -126,19 +105,16 @@ export class AppRoot extends LitElement {
 
     private _onGlobalError = (ev: Event) => {
         const e = ev as ErrorEvent;
-        // Ignore benign ResizeObserver errors
         if (e.message?.includes('ResizeObserver')) return;
-
-        const message = e.message || 'Unexpected error';
-        const detail = e.error?.stack ? String(e.error.stack) : undefined;
-        this.fatal = {message, detail};
+        this.fatal = {message: e.message || 'Error', detail: e.error?.stack};
     };
 
     private _onUnhandled = (ev: PromiseRejectionEvent) => {
         const reason = ev.reason;
-        const message = (reason as Error)?.message ?? String(reason ?? 'Unhandled rejection');
-        const detail = (reason as Error)?.stack ? String((reason as Error).stack) : undefined;
-        this.fatal = {message, detail};
+        this.fatal = {
+            message: (reason as Error)?.message ?? String(reason),
+            detail: (reason as Error)?.stack
+        };
     };
 
     private navLink(href: string, label: string, active: boolean) {
@@ -153,7 +129,7 @@ export class AppRoot extends LitElement {
     private async resetAndReload(): Promise<void> {
         const ok = await ConfirmModal.ask({
             title: 'Factory Reset?',
-            description: 'Reset storage will erase ALL local documents, pages, and settings on this device.\n\nThis cannot be undone.',
+            description: 'This will erase ALL local documents and settings.\nCannot be undone.',
             confirm: 'Reset Everything',
             destructive: true
         });
@@ -172,7 +148,6 @@ export class AppRoot extends LitElement {
 
     private renderFatal() {
         if (!this.fatal) return null;
-
         return html`
             <div class="fixed inset-0 z-[9999] bg-slate-950 flex flex-col items-center justify-center p-6 text-center space-y-6">
                 <div class="p-4 rounded-full bg-red-900/20 text-red-500">
@@ -183,67 +158,41 @@ export class AppRoot extends LitElement {
                 </div>
                 <div class="space-y-2">
                     <h1 class="text-xl font-bold text-slate-100">Something went wrong</h1>
-                    <p class="text-sm text-slate-400 max-w-xs mx-auto">
-                        The application encountered an unexpected error. Your data is likely safe.
-                    </p>
                     <div class="text-[10px] text-red-400 bg-black/50 p-4 rounded-lg overflow-x-auto max-w-sm mx-auto text-left whitespace-pre-wrap max-h-48">
                         ${this.fatal.message} ${this.fatal.detail || ''}
                     </div>
                 </div>
-
-                <div class="flex flex-col gap-3 w-full max-w-xs">
-                    <button class="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
-                            @click=${() => location.reload()}>
-                        Reload Application
-                    </button>
-
-                    <div class="relative py-2">
-                        <div class="absolute inset-0 flex items-center">
-                            <div class="w-full border-t border-slate-800"></div>
-                        </div>
-                        <div class="relative flex justify-center"><span
-                                class="bg-slate-950 px-2 text-xs text-slate-500">If reloading fails</span></div>
-                    </div>
-
-                    <button class="w-full py-3 rounded-xl bg-slate-900 border border-red-900/30 text-red-400 hover:bg-red-950/30 text-sm disabled:opacity-50"
-                            ?disabled=${this.resetting}
-                            @click=${() => this.resetAndReload()}>
-                        ${this.resetting ? 'Erasing...' : 'Factory Reset (Erase Data)'}
-                    </button>
-                </div>
+                <button class="w-full max-w-xs py-3 rounded-xl bg-emerald-600 text-white font-bold"
+                        @click=${() => location.reload()}>Reload
+                </button>
+                <button class="w-full max-w-xs py-3 rounded-xl bg-slate-900 text-red-400 text-sm"
+                        ?disabled=${this.resetting} @click=${() => this.resetAndReload()}>
+                    ${this.resetting ? 'Erasing...' : 'Factory Reset'}
+                </button>
             </div>
         `;
     }
 
     private renderPersistenceBanner() {
         const p = this.persist;
-        if (!p || !p.supported) return null;
-        if (p.persisted) return null;
-
+        if (!p || !p.supported || p.persisted) return null;
         return html`
             <div class="p-3 rounded-xl border border-amber-900 bg-amber-950/40 text-amber-100 flex items-start justify-between gap-3">
                 <div class="min-w-0">
                     <div class="text-sm font-medium">Storage is not persistent</div>
-                    <div class="text-xs text-amber-200/80">
-                        On iOS / low-storage devices, the OS may clear browser storage. Export an encrypted backup to
-                        stay safe.
-                    </div>
+                    <div class="text-xs text-amber-200/80">OS may clear storage. Export backup to be safe.</div>
                 </div>
                 <a class="shrink-0 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
-                   href="#/settings">
-                    Open Settings
-                </a>
+                   href="#/settings">Settings</a>
             </div>
         `;
     }
 
     render() {
         if (this._isLocked) {
-            // This component will now render correctly because it is imported
             return html`
                 <auth-lock @unlocked=${() => this._isLocked = false}></auth-lock>`;
         }
-
         if (this.fatal) return this.renderFatal();
 
         const r = this.route;
@@ -261,10 +210,8 @@ export class AppRoot extends LitElement {
                         </nav>
                     </div>
                 </header>
-
                 <main class="flex-1 max-w-3xl mx-auto w-full px-4 py-4 space-y-3">
                     ${this.renderPersistenceBanner()}
-
                     ${r.name === 'library' ? html`
                         <library-page></library-page>` : null}
                     ${r.name === 'scan' ? html`
