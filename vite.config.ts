@@ -59,7 +59,22 @@ export default defineConfig({
             workbox: {
                 navigateFallback: 'index.html',
                 maximumFileSizeToCacheInBytes: 6000000,
-                globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2,wasm}']
+                globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2,wasm}'],
+                globIgnores: ['**/tesseract/**'],
+                runtimeCaching: [{
+                    urlPattern: ({url}) => url.pathname.includes('/tesseract/'),
+                    handler: 'CacheFirst',
+                    options: {
+                        cacheName: 'ocr-cache-v1',
+                        expiration: {
+                            maxEntries: 10,
+                            maxAgeSeconds: 60 * 60 * 24 * 365 // 1 year
+                        },
+                        cacheableResponse: {
+                            statuses: [0, 200]
+                        }
+                    }
+                }]
             }
         }),
         progress(),

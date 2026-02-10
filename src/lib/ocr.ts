@@ -18,7 +18,11 @@ async function getWorker(): Promise<Worker> {
                 workerPath: `${tessPath}worker.min.js`,
                 corePath: `${tessPath}tesseract-core.wasm.js`,
                 langPath: `${tessPath}`, // Must end in a slash /
-                gzip: true, // Explicitly tell it to look for .gz files
+                gzip: false,
+                logger: m => {
+                    if (m.status === 'loading tesseract core') console.log('OCR: Loading Core...');
+                    if (m.status === 'loading language traineddata') console.log('OCR: Loading Language...');
+                }
             });
 
             await w.setParameters({
@@ -120,4 +124,9 @@ export function terminateOcr() {
         workerPromise.then(w => w.terminate());
         workerPromise = null;
     }
+}
+
+export async function warmupOcr() {
+    // This triggers getWorker(), which downloads the files if not cached
+    await getWorker();
 }

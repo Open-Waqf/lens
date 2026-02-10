@@ -59,6 +59,7 @@ export class AppRoot extends LitElement {
 
         if (!location.hash) location.hash = '#/library';
 
+        // 1. Check Persistence (Immediate)
         void (async () => {
             try {
                 this.persist = await getPersistenceStatus();
@@ -67,18 +68,41 @@ export class AppRoot extends LitElement {
             }
         })();
 
-        try {
-            const run = async () => {
-                try {
-                    await garbageCollectOpfsDocs();
-                } catch {
-                }
-            };
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const ric: any = (window as any).requestIdleCallback;
-            if (typeof ric === 'function') ric(() => void run(), {timeout: 2500});
-            else setTimeout(() => void run(), 800);
-        } catch {
+        // 2. Define Background Tasks
+        const runGC = async () => {
+            try {
+                await garbageCollectOpfsDocs();
+            } catch {
+            }
+        };
+
+        const runWarmup = async () => {
+            // Don't warm up if the user is already on the scan page (priority conflict)
+            if (location.hash.includes('scan')) return;
+
+            try {
+                // Dynamically import OCR to avoid loading 1.5MB immediately
+                const {warmupOcr} = await import('../lib/ocr');
+                console.log('App: Warming up OCR engine in background...');
+                await warmupOcr();
+            } catch (e) {
+                // Ignore warmup errors (offline, etc)
+            }
+        };
+
+        // 3. Schedule Tasks when Browser is Idle
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ric = (window as any).requestIdleCallback;
+
+        if (typeof ric === 'function') {
+            // GC runs first (cleanup)
+            ric(() => void runGC(), {timeout: 2500});
+            // OCR runs later (network heavy)
+            ric(() => void runWarmup(), {timeout: 10000});
+        } else {
+            // Fallback for browsers without requestIdleCallback
+            setTimeout(() => void runGC(), 800);
+            setTimeout(() => void runWarmup(), 3000);
         }
     }
 
