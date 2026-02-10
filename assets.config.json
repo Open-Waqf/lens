@@ -1,0 +1,28 @@
+{
+  "ios": {
+    "splash": {
+      "image": "assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F172A"
+    },
+    "icon": {
+      "image": "assets/logo.png"
+    }
+  },
+  "android": {
+    "splash": {
+      "image": "assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F172A"
+    },
+    "icon": {
+      "image": "assets/logo.png"
+    }
+  },
+  "pwa": {
+    "icon": {
+      "image": "assets/logo.png"
+    },
+    "manifestPath": "public/manifest.json"
+  }
+}

@@ -6,7 +6,7 @@ export default defineConfig({
     build: {
         outDir: 'dist',
         sourcemap: false,
-        chunkSizeWarningLimit: 1000, // Increase warning limit to 1MB (optional but cleaner logs)
+        chunkSizeWarningLimit: 1000,
     },
     base: './',
     plugins: [
@@ -14,16 +14,32 @@ export default defineConfig({
         VitePWA({
             strategies: 'generateSW',
             registerType: 'autoUpdate',
+            filename: 'manifest.json',
             manifest: {
                 name: 'Sahifah Lens',
-                short_name: 'Sahifah',
-                description: 'Local-first document scanner + vault. No account, no ads.',
-                theme_color: '#0b1220',
-                background_color: '#0b1220',
+                short_name: 'Lens',
+                description: 'Local-first document scanner. No account, no ads.',
+                theme_color: '#0F172A',
+                background_color: '#0F172A',
                 display: 'standalone',
+                orientation: 'portrait',
                 icons: [
-                    {src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png'},
-                    {src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png'}
+                    {
+                        src: 'icons/icon-192.png',
+                        sizes: '192x192',
+                        type: 'image/png'
+                    },
+                    {
+                        src: 'icons/icon-512.png',
+                        sizes: '512x512',
+                        type: 'image/png'
+                    },
+                    {
+                        src: 'icons/icon-512-maskable.png',
+                        sizes: '512x512',
+                        type: 'image/png',
+                        purpose: 'maskable'
+                    }
                 ]
             },
             workbox: {

@@ -2,28 +2,44 @@
 <html lang="en" class="dark">
 <head>
     <meta charset="UTF-8"/>
-    <link rel="icon" type="image/svg+xml" href="favicon.ico"/>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"/>
+
     <title>Sahifah Lens</title>
-    <meta name="description" content="Private, local-first document scanner"/>
-    <meta name="theme-color" content="#020617"/>
+    <meta name="description" content="Private, local-first document scanner. No cloud, no tracking."/>
+
+    <meta name="theme-color" content="#0F172A"/>
+
+    <link rel="icon" type="image/svg+xml" href="/icons/favicon.ico">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+
+    <link rel="manifest" href="/manifest.json"/>
+
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Sahifah Lens - Private Scanner">
+    <meta property="og:description" content="Offline-first, encrypted document scanning. No cloud, no tracking.">
+    <meta property="og:image" content="https://lens.open-waqf.org/og-image.jpg">
+    <meta property="og:url" content="https://lens.open-waqf.org/">
+
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Sahifah Lens - Private Scanner">
+    <meta name="twitter:description" content="Offline-first, encrypted document scanning. No cloud, no tracking.">
+    <meta name="twitter:image" content="https://lens.open-waqf.org/og-image.jpg">
 
     <meta http-equiv="Content-Security-Policy" content="
         default-src 'self';
-        script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval';
+        script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'unsafe-inline';
         style-src 'self' 'unsafe-inline';
-        img-src 'self' blob: data:;
+        img-src 'self' blob: data: https:;
         worker-src 'self' blob:;
         connect-src 'self' blob: data:;
         object-src 'none';
         base-uri 'self';
     ">
-
-    <link rel="manifest" href="manifest.webmanifest"/>
 </head>
 <body class="bg-slate-950 text-slate-100 antialiased selection:bg-emerald-500/30">
 <app-root></app-root>
 
-<script type="module" src="src/main.ts"></script>
+<script type="module" src="/src/main.ts"></script>
 </body>
 </html>
