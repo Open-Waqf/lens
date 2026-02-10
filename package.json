@@ -34,9 +34,12 @@
     "@capacitor/cli": "^8.0.2",
     "@playwright/test": "^1.58.2",
     "@tailwindcss/vite": "^4.1.18",
+    "rollup-plugin-visualizer": "6.0.5",
     "tailwindcss": "^4.1.18",
     "typescript": "~5.9.3",
     "vite": "^7.2.4",
+    "vite-plugin-compression": "0.5.1",
+    "vite-plugin-progress": "0.0.7",
     "vite-plugin-pwa": "^1.2.0"
   }
 }

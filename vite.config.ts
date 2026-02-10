@@ -1,12 +1,25 @@
 import {defineConfig} from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 import {VitePWA} from 'vite-plugin-pwa';
+import progress from 'vite-plugin-progress';
+import {visualizer} from 'rollup-plugin-visualizer';
+import viteCompression from 'vite-plugin-compression';
 
 export default defineConfig({
     build: {
         outDir: 'dist',
         sourcemap: false,
         chunkSizeWarningLimit: 1000,
+        minify: 'terser',
+        terserOptions: {
+            compress: {
+                drop_console: true,
+                drop_debugger: true,
+            },
+            format: {
+                comments: false,
+            },
+        },
     },
     base: './',
     plugins: [
@@ -48,6 +61,14 @@ export default defineConfig({
                 maximumFileSizeToCacheInBytes: 6000000,
                 globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2,wasm}']
             }
-        })
+        }),
+        progress(),
+        viteCompression(),
+        visualizer({
+            open: false,
+            filename: 'dist/stats.html',
+            gzipSize: true,
+            brotliSize: true
+        }),
     ]
 });
