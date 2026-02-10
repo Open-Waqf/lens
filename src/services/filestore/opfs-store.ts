@@ -15,7 +15,6 @@ function splitPath(path: string): string[] {
 }
 
 function isNotFound(err: unknown): boolean {
-    // DOMException name is typically "NotFoundError"
     return err instanceof DOMException && err.name === 'NotFoundError';
 }
 
@@ -25,13 +24,10 @@ async function getRootDir(): Promise<FileSystemDirectoryHandle> {
     if (!navigator.storage?.getDirectory) {
         throw new Error('OPFS not supported in this browser.');
     }
-
-    // cache root handle (safe for OPFS)
     rootDirPromise ??= navigator.storage.getDirectory();
     try {
         return await rootDirPromise;
     } catch (e) {
-        // if it failed once, allow retry next time
         rootDirPromise = null;
         const msg = (e as Error)?.message ?? String(e);
         throw new Error(`Failed to access OPFS: ${msg}`);
@@ -61,7 +57,6 @@ export class OPFSFileStore implements FileStore {
         const fileHandle = await dir.getFileHandle(fileName, {create: true});
         const writable = await fileHandle.createWritable();
 
-        // avoid ArrayBufferLike typing issues
         await writable.write({type: 'write', data: toArrayBuffer(bytes)});
         await writable.close();
     }
@@ -72,7 +67,6 @@ export class OPFSFileStore implements FileStore {
         const fileName = parts.pop();
         if (!fileName) throw new Error('Invalid path');
 
-        // IMPORTANT: create=false so reads don't create directories
         const dir = await ensureDir(root, parts, false);
         const fileHandle = await dir.getFileHandle(fileName, {create: false});
         const file = await fileHandle.getFile();
@@ -86,11 +80,9 @@ export class OPFSFileStore implements FileStore {
         if (!fileName) return;
 
         try {
-            // create=false so delete doesn't create directories
             const dir = await ensureDir(root, parts, false);
             await dir.removeEntry(fileName);
         } catch (e) {
-            // deleting a missing file should be a no-op
             if (isNotFound(e)) return;
             throw e;
         }
@@ -108,13 +100,48 @@ export class OPFSFileStore implements FileStore {
             return true;
         } catch (e) {
             if (isNotFound(e)) return false;
-            // other errors (permissions/secure context/etc) should surface
             throw e;
         }
     }
 }
 
-// ---- Extra OPFS helpers (used for GC + reset). ----
+// ---- Stream Writer (New) ----
+
+export class OPFSStreamWriter {
+    private fileHandle: FileSystemFileHandle | null = null;
+    private writable: FileSystemWritableFileStream | null = null;
+
+    constructor(private path: string) {
+    }
+
+    async open(): Promise<void> {
+        const root = await getRootDir();
+        const parts = splitPath(this.path);
+        const fileName = parts.pop();
+        if (!fileName) throw new Error('Invalid path');
+
+        const dir = await ensureDir(root, parts, true);
+        this.fileHandle = await dir.getFileHandle(fileName, {create: true});
+        this.writable = await this.fileHandle.createWritable();
+    }
+
+    async write(chunk: Uint8Array): Promise<void> {
+        if (!this.writable) throw new Error('Stream not open');
+        // FIX: Use toArrayBuffer to satisfy TypeScript strict types
+        await this.writable.write({type: 'write', data: toArrayBuffer(chunk)});
+    }
+
+    async close(): Promise<File> {
+        if (this.writable) {
+            await this.writable.close();
+            this.writable = null;
+        }
+        if (!this.fileHandle) throw new Error('No file handle');
+        return await this.fileHandle.getFile();
+    }
+}
+
+// ---- Helpers ----
 
 export async function opfsRemoveEntry(path: string, opts?: { recursive?: boolean }): Promise<void> {
     const root = await getRootDir();
@@ -132,11 +159,11 @@ export async function opfsRemoveEntry(path: string, opts?: { recursive?: boolean
 }
 
 export async function opfsRemoveTree(prefixDir: string): Promise<void> {
-    // prefixDir is like "docs" or "exports"
     await opfsRemoveEntry(prefixDir, {recursive: true});
 }
 
 async function listFilesRecursive(dir: FileSystemDirectoryHandle, prefix: string, out: string[]): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     for await (const [name, handle] of (dir as any).entries()) {
         if (handle.kind === 'file') {
             out.push(prefix ? `${prefix}/${name}` : name);

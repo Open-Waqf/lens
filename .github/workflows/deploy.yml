@@ -1,4 +1,4 @@
-name: Deploy Open Waqf Signer
+name: Deploy Open Waqf Lens
 
 on:
   push:
@@ -72,4 +72,4 @@ jobs:
           clean: true
           git-config-name: "Open Waqf Bot"
           git-config-email: "bot@open-waqf.org"
-          commit-message: "deploy: update signer (automated)"
+          commit-message: "deploy: update lens (automated)"

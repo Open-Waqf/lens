@@ -6,7 +6,7 @@ import {db} from '../services/db';
 import {getPlatformCaps} from '../services/platform';
 import {tryPersistStorage} from '../services/persist';
 import {getFileStore, removeFileTree} from '../services/filestore';
-import {shareOrDownload} from '../services/share';
+import {shareFile} from '../services/share';
 import {jsonFile, type ZipFileEntry, zipFilesToStream} from '../lib/zip';
 import {decryptBytesWithPassword, encryptStream, isEncryptedBackup} from '../lib/crypto/pbe';
 import {resetAllStorage} from '../services/reset-storage';
@@ -17,6 +17,7 @@ import {AuthService} from '../services/auth-service';
 
 import {strFromU8, unzipSync} from 'fflate';
 import type {DocRecord, PageRecord} from '../domain/types';
+import {OPFSStreamWriter} from '../services/filestore/opfs-store';
 
 type RestoreMode = 'merge' | 'erase';
 
@@ -147,6 +148,10 @@ export class SettingsPage extends LitElement {
         this.msg = null;
         this.err = null;
 
+        // Temporary file path in OPFS
+        const tempPath = `exports/temp_backup_${Date.now()}.slbk`;
+        const writer = new OPFSStreamWriter(tempPath);
+
         try {
             const pw = await ConfirmModal.prompt({
                 title: 'Encrypt Backup',
@@ -162,19 +167,35 @@ export class SettingsPage extends LitElement {
             this.msg = 'Packaging backup...';
             this.requestUpdate();
 
+            // 1. Open the file stream
+            await writer.open();
+
+            // 2. Setup the Zip/Encrypt Pipeline
             const zipStream = zipFilesToStream(this.fileGenerator(), () => {
+                // Tracking happens in generator
             });
+
             const finalStream = pw ? encryptStream(zipStream, pw) : zipStream;
 
-            const chunks: Uint8Array[] = [];
+            // 3. Pump chunks directly to disk
             for await (const chunk of finalStream) {
-                chunks.push(chunk);
+                await writer.write(chunk);
             }
 
-            const blob = new Blob(chunks as BlobPart[], {type: 'application/octet-stream'});
-            const ext = pw ? 'slbk' : 'zip';
+            // 4. Close and get the File handle (points to disk, not RAM)
+            const file = await writer.close();
 
-            await shareOrDownload(new Uint8Array(await blob.arrayBuffer()), `sahifah-backup-${Date.now()}.${ext}`, 'application/octet-stream');
+            // 5. Share/Download the File object
+            const ext = pw ? 'slbk' : 'zip';
+            const finalName = `sahifah-backup-${Date.now()}.${ext}`;
+
+            // We must rename the file for the share API to be happy with the extension
+            const namedFile = new File([file], finalName, {
+                type: 'application/octet-stream',
+                lastModified: Date.now()
+            });
+
+            await shareFile(namedFile, finalName);
 
             const now = Date.now();
             localStorage.setItem('sahifah.lastBackup', String(now));
@@ -183,7 +204,21 @@ export class SettingsPage extends LitElement {
 
         } catch (e) {
             this.err = (e as Error).message;
+            console.error(e);
         } finally {
+            // Clean up: try to close writer if it failed
+            try {
+                await writer.close();
+            } catch {
+            }
+            // Clean up: delete the temp file
+            try {
+                // You might need to import opfsRemoveEntry
+                const {opfsRemoveEntry} = await import('../services/filestore/opfs-store');
+                await opfsRemoveEntry(tempPath);
+            } catch {
+            }
+
             this.busy = false;
             this.backupProgress = 0;
             this.backupTotal = 0;
