@@ -4,7 +4,7 @@ import {live} from 'lit/directives/live.js';
 
 import {db} from '../services/db';
 import {getFileStore} from '../services/filestore';
-import {shareOrDownload} from '../services/share';
+import {shareFile} from '../services/share';
 import {buildPdfForDoc, type PdfQuality} from '../lib/pdf';
 import {jsonFile, makeZip} from '../lib/zip';
 import {bytesToBlob} from '../lib/bytes';
@@ -182,7 +182,9 @@ export class DocPage extends LitElement {
             });
 
             const filename = `${safeName(this.doc.title)}.pdf`;
-            await shareOrDownload(pdfBytes, filename, 'application/pdf');
+            const blob = bytesToBlob(pdfBytes, 'application/pdf');
+            const pdfFile = new File([blob], filename, {type: 'application/pdf'});
+            await shareFile(pdfFile, filename);
 
             const pdfPath = `docs/${this.doc.id}/exports/${Date.now()}.pdf`;
             await store.put(pdfPath, pdfBytes, 'application/pdf');
@@ -208,7 +210,10 @@ export class DocPage extends LitElement {
             }
             Object.assign(files, jsonFile('meta.json', {doc: this.doc, pages: this.pages}));
             const zip = makeZip(files);
-            await shareOrDownload(zip, `${safeName(this.doc.title)}-images.zip`, 'application/zip');
+            const zipBlob = bytesToBlob(zip, 'application/zip');
+            const zipFilename = `${safeName(this.doc.title)}-images.zip`;
+            const zipFile = new File([zipBlob], zipFilename, { type: 'application/zip' });
+            await shareFile(zipFile, zipFilename);
         } catch (e) {
             this.error = (e as Error).message;
         } finally {

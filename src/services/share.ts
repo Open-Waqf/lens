@@ -10,21 +10,11 @@ export async function shareFile(file: File, filename: string): Promise<void> {
     const isNative = Capacitor.isNativePlatform();
 
     if (isNative) {
-        // NATIVE PATH (iOS/Android)
         try {
-            // 1. Convert File to Base64 (required by Filesystem)
-            const reader = new FileReader();
-            const base64Promise = new Promise<string>((resolve) => {
-                reader.onload = () => {
-                    const res = reader.result as string;
-                    resolve(res.split(',')[1]); // Strip prefix
-                };
-                reader.readAsDataURL(file);
-            });
-            const base64Data = await base64Promise;
+            // 1. Convert File to Base64 (Filesystem.writeFile requirement)
+            const base64Data = await fileToBase64(file);
 
             // 2. Write to temporary Cache directory
-            // We use Cache so the OS can clean it up later automatically
             const tempPath = `share_tmp_${filename}`;
             const result = await Filesystem.writeFile({
                 path: tempPath,
@@ -32,14 +22,14 @@ export async function shareFile(file: File, filename: string): Promise<void> {
                 directory: Directory.Cache
             });
 
-            // 3. Trigger Native Share Sheet
+            // 3. Trigger Native Share Sheet using the internal URI
             await Share.share({
                 title: filename,
-                url: result.uri, // This is the 'file://' path native apps need
+                url: result.uri,
                 dialogTitle: 'Share Backup'
             });
 
-            // 4. Optional: Clean up immediately (Native share copies the file anyway)
+            // 4. Cleanup: Delete the temp file from cache
             await Filesystem.deleteFile({
                 path: tempPath,
                 directory: Directory.Cache
@@ -47,7 +37,8 @@ export async function shareFile(file: File, filename: string): Promise<void> {
 
         } catch (e) {
             console.error('Native sharing failed', e);
-            throw new Error('Could not open system share sheet.');
+            // If native fails, try a silent fallback to web behavior just in case
+            downloadFileFallback(file, filename);
         }
     } else {
         // WEB PATH (Browser)
@@ -59,15 +50,28 @@ export async function shareFile(file: File, filename: string): Promise<void> {
                 });
             } catch (e) {
                 if ((e as Error).name !== 'AbortError') {
-                    // Fallback to old-school download if share fails
                     downloadFileFallback(file, filename);
                 }
             }
         } else {
-            // No Web Share support (e.g., Desktop Chrome/Firefox)
             downloadFileFallback(file, filename);
         }
     }
+}
+
+/**
+ * Helper to convert File/Blob to Base64 string
+ */
+function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const res = reader.result as string;
+            resolve(res.split(',')[1]); // Remove the 'data:...;base64,' prefix
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
 }
 
 /**
