@@ -2,6 +2,7 @@ const MAGIC = new Uint8Array([0x53, 0x4c, 0x42, 0x4b]); // "SLBK"
 const VERSION_V1 = 1;
 const VERSION_V2 = 2; // Chunked Streaming Format
 const CHUNK_SIZE = 1024 * 1024; // 1MB chunks
+const PBKDF2_ITERATIONS = 100000;
 
 export type PbeParams = {
     iterations?: number;
@@ -271,5 +272,116 @@ export async function* encryptStream(
         frame.set(cipherChunk, p);
 
         yield frame;
+    }
+}
+
+/**
+ * A robust buffering reader for ReadableStreams.
+ * Handles partial reads, over-reads, and buffering automatically.
+ */
+class ChunkReader {
+    private reader: ReadableStreamDefaultReader<Uint8Array>;
+    private buffer: Uint8Array = new Uint8Array(0);
+    private done = false;
+
+    constructor(stream: ReadableStream<Uint8Array>) {
+        this.reader = stream.getReader();
+    }
+
+    /**
+     * Reads exactly `count` bytes.
+     * If the stream ends before `count` bytes are available, throws an error.
+     */
+    async readExactly(count: number): Promise<Uint8Array> {
+        while (this.buffer.length < count) {
+            if (this.done) {
+                throw new Error(`Unexpected EOF: Wanted ${count} bytes, but stream ended with only ${this.buffer.length}`);
+            }
+
+            const {done, value} = await this.reader.read();
+
+            if (done) {
+                this.done = true;
+                continue; // Loop once more to trigger the EOF error above
+            }
+
+            // Append new data to internal buffer
+            const newBuf = new Uint8Array(this.buffer.length + value.length);
+            newBuf.set(this.buffer);
+            newBuf.set(value, this.buffer.length);
+            this.buffer = newBuf;
+        }
+
+        const result = this.buffer.slice(0, count);
+        this.buffer = this.buffer.slice(count); // Shift buffer
+        return result;
+    }
+
+    async readUint32(): Promise<number> {
+        const bytes = await this.readExactly(4);
+        const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        return view.getUint32(0, true); // Little Endian
+    }
+
+    release() {
+        this.reader.releaseLock();
+    }
+}
+
+/**
+ * Streaming Decryption.
+ * Reads the file chunk-by-chunk to avoid loading 100MB+ into RAM.
+ */
+export async function* decryptStream(
+    stream: ReadableStream<Uint8Array>,
+    password: string
+): AsyncGenerator<Uint8Array> {
+    const reader = new ChunkReader(stream);
+
+    try {
+        // 1. Read Header: Salt (16) + IV (12)
+        const SALT_SIZE = 16;
+        const IV_SIZE = 12;
+
+        const salt = await reader.readExactly(SALT_SIZE);
+        const iv = await reader.readExactly(IV_SIZE);
+
+        // 2. Derive Key (Uses your existing helper)
+        const key = await deriveAesKey(password, salt, PBKDF2_ITERATIONS);
+
+        // 3. Process Chunks Loop
+        while (true) {
+            let chunkLen: number;
+
+            try {
+                // Try to read the next chunk length header
+                chunkLen = await reader.readUint32();
+            } catch (e) {
+                // EOF on length read is a clean exit (end of file)
+                break;
+            }
+
+            // SECURITY: DoS Protection
+            if (chunkLen > 100 * 1024 * 1024) {
+                throw new Error("Corrupt backup: Chunk size > 100MB");
+            }
+            if (chunkLen === 0) continue;
+
+            // Read Encrypted Payload
+            const encryptedChunk = await reader.readExactly(chunkLen);
+
+            // Decrypt using Web Crypto
+            // Note: In AES-GCM, the auth tag is appended to the ciphertext.
+            const plain = await crypto.subtle.decrypt(
+                {name: 'AES-GCM', iv: toArrayBuffer(iv)},
+                key,
+                toArrayBuffer(encryptedChunk)
+            );
+
+            yield new Uint8Array(plain);
+        }
+
+    } finally {
+        reader.release();
     }
 }

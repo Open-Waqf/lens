@@ -1,27 +1,24 @@
 import {html, LitElement} from 'lit';
 import {customElement, state} from 'lit/decorators.js';
-import {nanoid} from 'nanoid';
 
+import JSZip from 'jszip';
 import {db} from '../services/db';
 import {getPlatformCaps} from '../services/platform';
 import {tryPersistStorage} from '../services/persist';
-import {getFileStore, removeFileTree} from '../services/filestore';
+import {getFileStore} from '../services/filestore';
 import {shareFile} from '../services/share';
 import {jsonFile, type ZipFileEntry, zipFilesToStream} from '../lib/zip';
-import {decryptBytesWithPassword, encryptStream, isEncryptedBackup} from '../lib/crypto/pbe';
+import {decryptStream, encryptStream} from '../lib/crypto/pbe';
 import {resetAllStorage} from '../services/reset-storage';
 import {ConfirmModal} from '../components/confirm-modal';
 import pkg from '../../package.json'
 import {settings} from '../services/settings';
 import {AuthService} from '../services/auth-service';
-
-import {strFromU8, unzipSync} from 'fflate';
-import type {DocRecord, PageRecord} from '../domain/types';
 import {OPFSStreamWriter} from '../services/filestore/opfs-store';
 
 import {repairLibrary} from '../services/repair';
 
-type RestoreMode = 'merge' | 'erase';
+type RestoreMode = 'merge' | 'replace';
 
 @customElement('settings-page')
 export class SettingsPage extends LitElement {
@@ -258,115 +255,145 @@ export class SettingsPage extends LitElement {
         }
     }
 
+    /**
+     * Helper to clear existing data if "Replace" mode is chosen
+     */
+    private async resetLibraryForRestore(): Promise<void> {
+        // Clear DB
+        await db.transaction('rw', db.docs, db.pages, async () => {
+            await db.docs.clear();
+            await db.pages.clear();
+        });
+    }
+
+    /**
+     * Extracts the zip file and restores data to DB and OPFS.
+     * This moves the logic out of the main importBackup function.
+     */
+    private async restoreFromZip(file: File): Promise<void> {
+        const zip = new JSZip();
+        // Load the zip content (this is fast for modern JSZip as it reads central directory)
+        const loadedZip = await zip.loadAsync(file);
+
+        // 1. Read Metadata
+        const metaFile = loadedZip.file('sahifah_backup.json');
+        if (!metaFile) throw new Error('Invalid backup: missing metadata');
+
+        const metaStr = await metaFile.async('string');
+        const backupData = JSON.parse(metaStr); // Type this as BackupData if you have the interface
+
+        // 2. Ask User for Mode (Merge vs Replace)
+        // This fixes the "unused 'askRestoreMode'" error
+        const mode = await this.askRestoreMode(backupData.pages.length);
+        if (!mode) return; // User cancelled
+
+        if (mode === 'replace') {
+            await this.resetLibraryForRestore();
+        }
+
+        const store = getFileStore();
+        let restoredCount = 0;
+
+        // 3. Restore Files
+        // We iterate specifically over the files inside the 'files/' folder in the zip
+        const filePromises: Promise<void>[] = [];
+
+        loadedZip.folder('files')?.forEach((relativePath, zipEntry) => {
+            if (zipEntry.dir) return;
+
+            filePromises.push((async () => {
+                const data = await zipEntry.async('uint8array');
+                // Restore to: docs/{docId}/pages/{pageId}.jpg
+                // The zip structure should correspond to the relative path needed
+                await store.put(relativePath, data, 'image/jpeg');
+            })());
+        });
+
+        await Promise.all(filePromises);
+
+        // 4. Restore Database Records
+        await db.transaction('rw', db.docs, db.pages, async () => {
+            // Restore Docs
+            for (const doc of backupData.docs) {
+                // If merging, we might want to check existence or use put() to overwrite
+                await db.docs.put(doc);
+            }
+            // Restore Pages
+            for (const page of backupData.pages) {
+                await db.pages.put(page);
+                restoredCount++;
+            }
+        });
+
+        console.log(`Restored ${restoredCount} pages.`);
+    }
+
     private async importBackup(file: File): Promise<void> {
         this.busy = true;
         this.msg = null;
         this.err = null;
 
+        // Use a temporary file path in OPFS
+        const tempPath = `imports/temp_restore_${Date.now()}.zip`;
+        const writer = new OPFSStreamWriter(tempPath);
+
         try {
-            const buf = new Uint8Array(await file.arrayBuffer());
+            const pw = await ConfirmModal.prompt({
+                title: 'Decrypt Backup',
+                description: 'Enter password (leave empty if not encrypted)',
+                placeholder: 'Password',
+                confirm: 'Restore'
+            });
 
-            let zipBytes: Uint8Array = buf;
-            if (isEncryptedBackup(buf)) {
-                const pw = await ConfirmModal.prompt({
-                    title: 'Unlock Backup',
-                    description: 'This backup is encrypted. Enter password:',
-                    placeholder: 'Password',
-                    confirm: 'Unlock'
-                });
-                if (!pw) throw new Error('Restore cancelled.');
-                zipBytes = (await decryptBytesWithPassword(buf, pw)) as Uint8Array;
+            if (pw === null) {
+                this.busy = false;
+                return;
             }
 
-            const unz = unzipSync(zipBytes);
-            if (!unz['metadata.json']) throw new Error('metadata.json missing in backup');
+            this.msg = 'Decrypting stream...';
+            this.requestUpdate();
 
-            const meta = JSON.parse(strFromU8(unz['metadata.json']));
-            const {docs, pages} = meta as { docs: DocRecord[]; pages: PageRecord[] };
+            await writer.open();
+            const fileStream = file.stream();
 
-            const mode = await this.askRestoreMode(docs.length);
-            if (!mode) return;
-
-            const store = getFileStore();
-
-            if (mode === 'erase') {
-                try {
-                    await removeFileTree('docs');
-                } catch {
+            if (pw) {
+                // SECURE PATH: Stream decryption
+                for await (const chunk of decryptStream(fileStream, pw)) {
+                    await writer.write(chunk);
                 }
-
-                await db.transaction('rw', db.docs, db.pages, async () => {
-                    await db.docs.clear();
-                    await db.pages.clear();
-                });
-
-                for (const p of pages) {
-                    if (unz[p.imagePath]) await store.put(p.imagePath, unz[p.imagePath], 'image/jpeg');
-                    if (unz[p.thumbPath]) await store.put(p.thumbPath, unz[p.thumbPath], 'image/jpeg');
-                }
-                for (const d of docs) {
-                    if (d.pdfPath && unz[d.pdfPath]) await store.put(d.pdfPath, unz[d.pdfPath], 'application/pdf');
-                }
-
-                await db.transaction('rw', db.docs, db.pages, async () => {
-                    await db.docs.bulkAdd(docs);
-                    await db.pages.bulkAdd(pages);
-                });
-                this.msg = 'Library replaced from backup.';
-
             } else {
-                const docIdMap = new Map<string, string>();
-                for (const d of docs) docIdMap.set(d.id, nanoid());
-
-                const pageIdMap = new Map<string, string>();
-                for (const p of pages) pageIdMap.set(p.id, nanoid());
-
-                const newDocs: DocRecord[] = [];
-                const newPages: PageRecord[] = [];
-
-                for (const d of docs) {
-                    const newId = docIdMap.get(d.id)!;
-                    const newPageIds = (d.pageIds ?? []).map(pid => pageIdMap.get(pid)).filter(Boolean) as string[];
-                    newDocs.push({
-                        ...d,
-                        id: newId,
-                        pageIds: newPageIds,
-                        updatedAt: Date.now(),
-                        pdfPath: undefined
-                    });
+                // PLAIN PATH: Copy file directly
+                const reader = fileStream.getReader();
+                while (true) {
+                    const {done, value} = await reader.read();
+                    if (done) break;
+                    await writer.write(value);
                 }
-
-                for (const p of pages) {
-                    const newId = pageIdMap.get(p.id)!;
-                    const newDocId = docIdMap.get(p.docId)!;
-                    if (!newDocId) continue;
-
-                    const newImagePath = `docs/${newDocId}/pages/${newId}.jpg`;
-                    const newThumbPath = `docs/${newDocId}/thumbs/${newId}.jpg`;
-
-                    if (unz[p.imagePath]) await store.put(newImagePath, unz[p.imagePath], 'image/jpeg');
-                    if (unz[p.thumbPath]) await store.put(newThumbPath, unz[p.thumbPath], 'image/jpeg');
-
-                    newPages.push({
-                        ...p,
-                        id: newId,
-                        docId: newDocId,
-                        imagePath: newImagePath,
-                        thumbPath: newThumbPath
-                    });
-                }
-
-                await db.transaction('rw', db.docs, db.pages, async () => {
-                    await db.docs.bulkAdd(newDocs);
-                    await db.pages.bulkAdd(newPages);
-                });
-                this.msg = `Merged ${newDocs.length} documents from backup.`;
+                reader.releaseLock();
             }
+
+            // Close to flush to disk
+            const decryptedFile = await writer.close();
+
+            this.msg = 'Unpacking library...';
+            this.requestUpdate();
+
+            // Pass the disk-backed file to your existing zip handler
+            await this.restoreFromZip(decryptedFile);
+
+            this.msg = 'Restore complete!';
+            // Refresh to show new data
+            setTimeout(() => location.reload(), 1000);
+
         } catch (e) {
-            this.err = (e as Error).message;
+            console.error(e);
+            this.err = 'Restore failed: ' + (e as Error).message;
         } finally {
+            try {
+                await writer.close();
+            } catch {
+            }
             this.busy = false;
-            void this.loadStorageStats();
         }
     }
 
@@ -374,14 +401,14 @@ export class SettingsPage extends LitElement {
         const res = await ConfirmModal.prompt({
             title: 'Restore Backup',
             description: `Backup contains ${count} documents.\nType MERGE to add them.\nType ERASE to replace your library.`,
-            placeholder: 'MERGE or ERASE',
+            placeholder: 'MERGE or REPLACE',
             confirm: 'Continue'
         });
 
         if (!res) return null;
         const v = res.trim().toUpperCase();
         if (v === 'MERGE') return 'merge';
-        if (v === 'ERASE') return 'erase';
+        if (v === 'REPLACE') return 'replace';
         return null;
     }
 
