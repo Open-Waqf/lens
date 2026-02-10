@@ -5,13 +5,12 @@ import {nanoid} from 'nanoid';
 import {db} from '../services/db';
 import {getPlatformCaps} from '../services/platform';
 import {tryPersistStorage} from '../services/persist';
-import {getFileStore} from '../services/filestore';
+import {getFileStore, removeFileTree} from '../services/filestore';
 import {shareOrDownload} from '../services/share';
 // FIX: Imported ZipFileEntry
 import {jsonFile, type ZipFileEntry, zipFilesToStream} from '../lib/zip';
 // FIX: Added missing imports
 import {decryptBytesWithPassword, encryptStream, isEncryptedBackup} from '../lib/crypto/pbe';
-import {opfsRemoveTree} from '../services/filestore/opfs-store';
 import {resetAllStorage} from '../services/reset-storage';
 import {ConfirmModal} from '../components/confirm-modal';
 import pkg from '../../package.json'
@@ -211,7 +210,7 @@ export class SettingsPage extends LitElement {
 
             if (mode === 'erase') {
                 try {
-                    await opfsRemoveTree('docs');
+                    await removeFileTree('docs');
                 } catch {
                 }
 

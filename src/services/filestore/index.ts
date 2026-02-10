@@ -1,16 +1,42 @@
 import {getPlatformCaps} from '../platform';
-import {type FileStore, OPFSFileStore} from './opfs-store';
+import {type FileStore, OPFSFileStore, opfsRemoveTree} from './opfs-store';
+import {CapacitorFileStore} from './capacitor-store';
 
-// v0.1: OPFS on web. (Capacitor can still use OPFS inside WebView,
-// but you can swap to Filesystem later.)
 let store: FileStore | null = null;
 
 export function getFileStore(): FileStore {
     if (store) return store;
+
     const caps = getPlatformCaps();
-    if (!caps.hasOPFS) {
-        throw new Error('OPFS not available in this browser. For v0.1, use Chromium-based browsers or ship via APK.');
+
+    // 1. Native Mobile (Priority)
+    if (caps.isCapacitor) {
+        store = new CapacitorFileStore();
+        return store;
     }
-    store = new OPFSFileStore();
-    return store;
+
+    // 2. Web with OPFS (Fallback)
+    if (caps.hasOPFS) {
+        store = new OPFSFileStore();
+        return store;
+    }
+
+    throw new Error('Storage not available. Requires Capacitor or OPFS browser.');
+}
+
+/**
+ * Platform-agnostic helper to recursively delete a folder.
+ * Used by SettingsPage for "Erase Everything" or "Restore Backup".
+ */
+export async function removeFileTree(path: string): Promise<void> {
+    const caps = getPlatformCaps();
+
+    if (caps.isCapacitor) {
+        // We create a temporary instance to access the helper
+        // (In a real app, you might cast the singleton 'store')
+        const native = new CapacitorFileStore();
+        await native.clearFolder(path);
+    } else {
+        await opfsRemoveTree(path);
+    }
 }
