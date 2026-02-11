@@ -279,52 +279,52 @@ export class SettingsPage extends LitElement {
         if (!metaFile) throw new Error('Invalid backup: missing metadata');
 
         const metaStr = await metaFile.async('string');
-        const backupData = JSON.parse(metaStr); // Type this as BackupData if you have the interface
+        const backupData = JSON.parse(metaStr);
 
-        // 2. Ask User for Mode (Merge vs Replace)
-        // This fixes the "unused 'askRestoreMode'" error
+        // 2. Ask User for Mode
         const mode = await this.askRestoreMode(backupData.pages.length);
-        if (!mode) return; // User cancelled
+        if (!mode) return;
 
         if (mode === 'replace') {
             await this.resetLibraryForRestore();
         }
 
         const store = getFileStore();
-        let restoredCount = 0;
 
-        // 3. Restore Files
-        // We iterate specifically over the files inside the 'files/' folder in the zip
-        const filePromises: Promise<void>[] = [];
-
+        // 3. Get all file entries first
+        const fileEntries: Array<{ path: string, entry: JSZip.JSZipObject }> = [];
         loadedZip.forEach((relativePath, zipEntry) => {
-            if (zipEntry.dir || relativePath === 'metadata.json') return;
-
-            filePromises.push((async () => {
-                const data = await zipEntry.async('uint8array');
-                // The relativePath is already 'docs/uuid/pages/uuid.jpg'
-                // This matches exactly what OPFS expects
-                await store.put(relativePath, data, 'image/jpeg');
-            })());
+            if (!zipEntry.dir && relativePath !== 'metadata.json') {
+                fileEntries.push({path: relativePath, entry: zipEntry});
+            }
         });
 
-        await Promise.all(filePromises);
+        // 4. SEQUENTIAL WRITE (Fixes OOM Crash)
+        this.backupTotal = fileEntries.length;
+        this.backupProgress = 0;
 
-        // 4. Restore Database Records
+        for (const {path, entry} of fileEntries) {
+            try {
+                // SECURITY FIX: Sanitize path before writing
+                const safePath = sanitizePath(path);
+
+                const data = await entry.async('uint8array');
+                await store.put(safePath, data, 'image/jpeg');
+
+                this.backupProgress++;
+                this.requestUpdate(); // Update UI progress bar
+            } catch (e) {
+                console.warn((e as Error).message);
+            }
+        }
+
+        // 5. Restore Database Records
         await db.transaction('rw', db.docs, db.pages, async () => {
-            // Restore Docs
-            for (const doc of backupData.docs) {
-                // If merging, we might want to check existence or use put() to overwrite
-                await db.docs.put(doc);
-            }
-            // Restore Pages
-            for (const page of backupData.pages) {
-                await db.pages.put(page);
-                restoredCount++;
-            }
+            for (const doc of backupData.docs) await db.docs.put(doc);
+            for (const page of backupData.pages) await db.pages.put(page);
         });
 
-        console.log(`Restored ${restoredCount} pages.`);
+        this.msg = `Restore complete. Processed ${this.backupProgress} files.`;
     }
 
     private async importBackup(file: File): Promise<void> {
@@ -709,4 +709,18 @@ export class SettingsPage extends LitElement {
             </div>
         `;
     }
+}
+
+function sanitizePath(unsafePath: string): string {
+    // 1. Remove directory traversal attempts
+    const clean = unsafePath.replace(/(\.\.(\/|\\))+/g, '');
+
+    // 2. Remove leading slashes
+    const relative = clean.replace(/^[\/\\]+/, '');
+
+    // 3. Whitelist allowed folders
+    if (!relative.startsWith('docs/') && !relative.startsWith('pages/')) {
+        throw new Error(`Security Warning: Skipping unauthorized file path: ${unsafePath}`);
+    }
+    return relative;
 }
