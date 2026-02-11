@@ -1,5 +1,6 @@
 import {html, LitElement} from 'lit';
 import {customElement, state} from 'lit/decorators.js';
+import {App} from '@capacitor/app';
 import {settings} from "../services/settings";
 
 import '../pages/scan-page';
@@ -50,7 +51,20 @@ export class AppRoot extends LitElement {
 
     connectedCallback(): void {
         super.connectedCallback();
+
+        // 1. Initial Check
         this._checkAuth();
+
+        // 2. NEW: Listen for App Resume (Multitasking)
+        App.addListener('appStateChange', async (state) => {
+            if (state.isActive) {
+                // App came to foreground -> Check if we need to lock
+                const prefs = await settings.get();
+                if (prefs.requireAuth) {
+                    this._isLocked = true;
+                }
+            }
+        });
 
         window.addEventListener('hashchange', this._onHash);
         window.addEventListener('error', this._onGlobalError);
@@ -104,11 +118,13 @@ export class AppRoot extends LitElement {
 
     private async _checkAuth() {
         try {
+            // Initial load check
             const isAuth = await AuthService.isAuthenticated();
             this._isLocked = !isAuth;
         } catch (e) {
             console.error("Auth check failed", e);
-            this._isLocked = false;
+            // Default to locked if check fails for safety
+            this._isLocked = true;
         } finally {
             this._isLoading = false;
         }
@@ -118,6 +134,7 @@ export class AppRoot extends LitElement {
         window.removeEventListener('hashchange', this._onHash);
         window.removeEventListener('error', this._onGlobalError);
         window.removeEventListener('unhandledrejection', this._onUnhandled);
+        App.removeAllListeners(); // Clean up listeners
         super.disconnectedCallback();
     }
 
@@ -212,7 +229,6 @@ export class AppRoot extends LitElement {
 
     render() {
         if (this._isLoading) {
-            // FIXED: Replaced black screen with Splash Screen
             return html`
                 <div class="fixed inset-0 z-[9999] bg-slate-950 flex flex-col items-center justify-center space-y-8">
                     <div class="w-24 h-24 bg-slate-900 rounded-3xl flex items-center justify-center shadow-2xl shadow-emerald-900/20 animate-pulse">
@@ -227,7 +243,7 @@ export class AppRoot extends LitElement {
                         <div class="text-2xl font-bold text-slate-100 tracking-tight">Sahifah Lens</div>
                         <div class="text-sm text-slate-500 font-medium flex items-center gap-2">
                             <div class="w-2 h-2 bg-emerald-500 rounded-full animate-ping"></div>
-                            Loading your Library...
+                            Loading...
                         </div>
                     </div>
                 </div>
