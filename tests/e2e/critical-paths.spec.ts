@@ -17,7 +17,7 @@ test.beforeEach(async ({page}) => {
 test('Disaster Recovery Flow: Import -> Encrypt -> Wipe -> Restore', async ({page}) => {
     // 1. NAVIGATE TO SCAN
     // Ensure we are in the main UI, then navigate
-    await page.getByRole('link', {name: 'Scan'}).click();
+    await page.locator('#MainScanBtn').click();
     await page.waitForURL('**/#/scan**');
 
     // 2. TRIGGER FILE UPLOAD

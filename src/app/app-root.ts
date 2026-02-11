@@ -274,7 +274,7 @@ export class AppRoot extends LitElement {
                                 <span class="text-[10px] font-medium">Library</span>
                             </a>
 
-                            <a href="#/scan?new=1"
+                            <a id="MainScanBtn" href="#/scan?new=1"
                                class="flex flex-col items-center justify-center -mt-6 p-1 rounded-full bg-slate-950 border-4 border-slate-950 relative group">
                                 <div class="w-14 h-14 rounded-full bg-emerald-500 text-slate-950 flex items-center justify-center shadow-lg shadow-emerald-500/20 group-active:scale-95 transition-transform">
                                     <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8" fill="none"
