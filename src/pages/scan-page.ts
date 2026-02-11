@@ -49,7 +49,6 @@ export class ScanPage extends LitElement {
     @state() private error: string | null = null;
     @state() private showWelcome = false;
     @state() private flashActive = false; // For visual feedback
-    @state() private showPermissionError = false;
 
     @state() private docTitle: string | null = null;
     @state() private targetDocTitle: string | null = null;
@@ -153,7 +152,6 @@ export class ScanPage extends LitElement {
 
         this.error = null;
         this.busy = false;
-        this.showPermissionError = false;
 
         this.clearEditor();
         this.newPageIds.clear();
@@ -324,7 +322,7 @@ export class ScanPage extends LitElement {
         }
 
         this.clearEditor();
-        this.beginCameraFromGesture(); // Return to camera
+        this.session.setStage(this.camera.isRunning ? 'camera' : 'idle');
     };
 
     private onEditorSave = async (ev: CustomEvent<PageEditorSaveDetail>) => {
@@ -372,7 +370,7 @@ export class ScanPage extends LitElement {
             }
 
             this.clearEditor();
-            this.beginCameraFromGesture(); // Return to camera
+            this.session.setStage(this.camera.isRunning ? 'camera' : 'idle');
         } catch (e) {
             this.error = (e as Error).message ?? String(e);
         } finally {
@@ -423,19 +421,17 @@ export class ScanPage extends LitElement {
             return;
         }
         this.session.setStage('camera');
-        this.showPermissionError = false;
+        if (this.camera.isRunning) return;
 
-        // FIX: Add delay to allow video element to exist in DOM (Fixes Black Screen)
         setTimeout(async () => {
             try {
-                if (!this.videoEl) return;
+                await this.updateComplete;
                 const res = await this.camera.start(this.videoEl);
                 this.videoW = res.width;
                 this.videoH = res.height;
                 this.startDetector();
             } catch (e) {
                 this.error = (e as Error).message ?? String(e);
-                this.showPermissionError = true;
                 this.session.setStage('idle');
             }
         }, 50);
@@ -471,7 +467,7 @@ export class ScanPage extends LitElement {
         this.error = null;
         if (this.captureInFlight) return;
 
-        this.flashActive = true; // Trigger flash UI
+        this.flashActive = true;
         void this.triggerHaptic();
         setTimeout(() => this.flashActive = false, 150);
 
@@ -500,6 +496,14 @@ export class ScanPage extends LitElement {
                     {x: q[1].x * sx, y: q[1].y * sy},
                     {x: q[2].x * sx, y: q[2].y * sy},
                     {x: q[3].x * sx, y: q[3].y * sy},
+                ];
+            }
+
+            // 2. FIX: If no quad found (e.g. face), force FULL IMAGE crop so it's visible immediately
+            if (!detectedQuadForEditor) {
+                detectedQuadForEditor = [
+                    {x: 0, y: 0}, {x: w, y: 0},
+                    {x: w, y: h}, {x: 0, y: h}
                 ];
             }
 
@@ -597,7 +601,19 @@ export class ScanPage extends LitElement {
             if (det.quad && det.confidence >= 0.35) {
                 const q = det.quad as Quad;
                 this.smoothedQuad = this.smoothedQuad ? lerpQuad(this.smoothedQuad, q, 0.35) : q;
-                this.guidance = det.confidence < 0.65 ? 'Hold steady' : null;
+
+                if (det.confidence < 0.65) {
+                    this.guidance = 'Hold steady';
+                } else {
+                    const area = quadArea(q) / (det.width * det.height);
+                    if (area < 0.15) {
+                        this.guidance = 'Move closer';
+                    } else if (this.autoCapture && !this.captureInFlight) {
+                        this.guidance = 'Hold steady';
+                    } else {
+                        this.guidance = null;
+                    }
+                }
             } else {
                 this.smoothedQuad = null;
                 this.stableSince = 0;
@@ -669,10 +685,10 @@ export class ScanPage extends LitElement {
     }
 
     private maybeAutoCapture(): void {
-        if (!this.autoCapture) return;
-        if (this.captureInFlight) return;
-        if (Date.now() < this.cooldownUntil) return;
-        if (this.session.stage !== 'camera') return;
+        if (!this.autoCapture
+            || this.captureInFlight
+            || Date.now() < this.cooldownUntil
+            || this.session.stage !== 'camera') return;
         if (this.detGov.isTooSlowForAutoCapture) {
             this.stableSince = 0;
             return;
@@ -823,30 +839,8 @@ export class ScanPage extends LitElement {
         `;
     }
 
-    private renderPermissionUI() {
-        return html`
-            <div class="flex flex-col items-center justify-center py-20 text-center space-y-6">
-                <div class="w-20 h-20 bg-red-900/20 text-red-500 rounded-full flex items-center justify-center">
-                    <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                    </svg>
-                </div>
-                <div class="space-y-2">
-                    <h2 class="text-xl font-bold">Camera Access Required</h2>
-                    <p class="text-slate-400 max-w-xs mx-auto text-sm">Please enable camera permissions in your browser
-                        or system settings to scan documents.</p>
-                </div>
-                <button class="px-8 py-3 bg-emerald-600 rounded-xl font-bold"
-                        @click=${() => this.beginCameraFromGesture()}>Try Again
-                </button>
-            </div>
-        `;
-    }
-
     render() {
         if (this.showWelcome) return this.renderWelcome();
-        if (this.showPermissionError) return this.renderPermissionUI();
 
         const stage = this.session.stage;
         return html`
