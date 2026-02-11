@@ -388,9 +388,7 @@ export class SettingsPage extends LitElement {
             // Pass the disk-backed file to your existing zip handler
             await this.restoreFromZip(decryptedFile);
 
-            this.msg = 'Restore complete!';
-            // Refresh to show new data
-            setTimeout(() => location.reload(), 1000);
+            this.msg = 'Restore complete! You can return to the Library.';
 
         } catch (e) {
             console.error(e);
