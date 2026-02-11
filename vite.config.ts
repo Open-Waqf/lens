@@ -66,6 +66,7 @@ export default defineConfig({
                 maximumFileSizeToCacheInBytes: 6000000,
                 globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2,wasm}'],
                 globIgnores: ['**/tesseract/**'],
+                navigateFallbackDenylist: [/^\/sitemap\.xml$/, /^\/robots\.txt$/],
                 runtimeCaching: [{
                     urlPattern: ({url}) => url.pathname.includes('/tesseract/'),
                     handler: 'CacheFirst',
