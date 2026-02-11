@@ -36,7 +36,3 @@ export interface PageRecord {
     words?: OcrWord[];
     ocrStatus?: 'pending' | 'done' | 'error';
 }
-
-export interface AppSettings {
-    requireAuth: boolean; // Biometric/Passcode lock
-}

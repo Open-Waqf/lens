@@ -51,6 +51,8 @@ export class SettingsPage extends LitElement {
     @state() private showRepairTool = false;
     @state() private repairProgress = '';
 
+    @state() private enableOcr = true;
+
     async connectedCallback() {
         super.connectedCallback();
         await this._refreshSettings();
@@ -91,6 +93,7 @@ export class SettingsPage extends LitElement {
         const s = await settings.get();
         this.requireAuth = s.requireAuth;
         this.defaultVault = s.defaultVault;
+        this.enableOcr = s.enableOcr;
     }
 
     private async loadStorageStats() {
@@ -103,6 +106,11 @@ export class SettingsPage extends LitElement {
                 console.warn('Storage estimate failed', e);
             }
         }
+    }
+
+    private toggleOcr() {
+        this.enableOcr = !this.enableOcr;
+        settings.setOcr(this.enableOcr);
     }
 
     private async toggleAuth() {
@@ -466,6 +474,7 @@ export class SettingsPage extends LitElement {
                 ${this.renderHeader()}
                 ${this.renderAlerts()}
                 ${this.renderPrivacySection()}
+                ${this.renderProcessingSection()}
 
                 ${this.renderSecuritySection()}
 
@@ -639,6 +648,31 @@ export class SettingsPage extends LitElement {
                         </button>
                     ` : null}
 
+                </div>
+            </section>
+        `;
+    }
+
+    private renderProcessingSection() {
+        return html`
+            <section class="p-4 rounded-xl border border-slate-700 bg-slate-800/50 space-y-4">
+                <div class="flex items-center gap-2 text-emerald-400 font-semibold text-sm">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                    </svg>
+                    Processing
+                </div>
+
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="text-sm text-slate-200">Text Recognition (OCR)</div>
+                        <div class="text-[10px] text-slate-500">Extract text for search.</div>
+                    </div>
+                    <button class="relative h-6 w-11 rounded-full transition-colors ${this.enableOcr ? 'bg-emerald-600' : 'bg-slate-700'}"
+                            @click=${() => this.toggleOcr()}>
+                        <span class="absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${this.enableOcr ? 'translate-x-5' : ''}"></span>
+                    </button>
                 </div>
             </section>
         `;

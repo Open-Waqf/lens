@@ -1,5 +1,6 @@
 import {html, LitElement} from 'lit';
 import {customElement, state} from 'lit/decorators.js';
+import {settings} from "../services/settings";
 
 import '../pages/scan-page';
 import '../pages/library-page';
@@ -79,6 +80,12 @@ export class AppRoot extends LitElement {
         const runWarmup = async () => {
             // Don't warm up if the user is already on the scan page (priority conflict)
             if (location.hash.includes('scan')) return;
+
+            const prefs = await settings.get();
+            if (!prefs.enableOcr) {
+                console.log('App: OCR disabled by user settings. Skipping warmup.');
+                return;
+            }
 
             try {
                 // Dynamically import OCR to avoid loading 1.5MB immediately
