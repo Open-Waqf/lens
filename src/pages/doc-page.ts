@@ -44,6 +44,11 @@ export class DocPage extends LitElement {
     @state() private viewerIndex = 0;
     @state() private showOcrOverlay = false;
 
+    // Zoom & Pan State
+    @state() private zoomLevel = 1;
+    private touchStartX = 0;
+    private touchStartY = 0;
+
     // Editor States
     @state() private editingPage: PageRecord | null = null;
     @state() private editingBlob: Blob | null = null;
@@ -132,7 +137,7 @@ export class DocPage extends LitElement {
         if (index < 0 || index >= this.pages.length) return;
         this.viewerIndex = index;
         this.viewerOpen = true;
-        // Auto-show OCR if searching
+        this.zoomLevel = 1; // Reset zoom on page change
         if (this.searchQuery) this.showOcrOverlay = true;
         await this.loadViewerImage();
     }
@@ -154,6 +159,39 @@ export class DocPage extends LitElement {
         } finally {
             this.viewerBusy = false;
         }
+    }
+
+    private onTouchStart(e: TouchEvent) {
+        if (e.touches.length === 1) {
+            this.touchStartX = e.touches[0].clientX;
+            this.touchStartY = e.touches[0].clientY;
+        }
+    }
+
+    private onTouchEnd(e: TouchEvent) {
+        if (this.zoomLevel > 1) return; // Disable swipe if zoomed in
+
+        const touchEndX = e.changedTouches[0].clientX;
+        const touchEndY = e.changedTouches[0].clientY;
+
+        const diffX = this.touchStartX - touchEndX;
+        const diffY = this.touchStartY - touchEndY;
+
+        // Check if horizontal swipe is dominant and long enough (> 50px)
+        if (Math.abs(diffX) > 50 && Math.abs(diffX) > Math.abs(diffY)) {
+            if (diffX > 0) {
+                // Swipe Left -> Next Page
+                this.openViewerAt(this.viewerIndex + 1);
+            } else {
+                // Swipe Right -> Prev Page
+                this.openViewerAt(this.viewerIndex - 1);
+            }
+        }
+    }
+
+    private onDoubleTap(_e: MouseEvent) {
+        // Toggle Zoom
+        this.zoomLevel = this.zoomLevel === 1 ? 2.5 : 1;
     }
 
     private async saveMeta(patch: Partial<DocRecord>): Promise<void> {
@@ -212,7 +250,7 @@ export class DocPage extends LitElement {
             const zip = makeZip(files);
             const zipBlob = bytesToBlob(zip, 'application/zip');
             const zipFilename = `${safeName(this.doc.title)}-images.zip`;
-            const zipFile = new File([zipBlob], zipFilename, { type: 'application/zip' });
+            const zipFile = new File([zipBlob], zipFilename, {type: 'application/zip'});
             await shareFile(zipFile, zipFilename);
         } catch (e) {
             this.error = (e as Error).message;
@@ -230,10 +268,8 @@ export class DocPage extends LitElement {
         });
         if (!ok) return;
         this.busy = true;
-        try {// FIX: Delegate to ScanRepo to ensure files are deleted AND search index is rebuilt
+        try {
             await this.repo.deletePage(pageId);
-
-            // We need to reload to update the UI list
             await this.load();
         } catch (e) {
             this.error = (e as Error).message;
@@ -483,7 +519,6 @@ export class DocPage extends LitElement {
                     </div>
                     <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
                         ${visiblePages.map((p) => {
-                            // find index in full list for viewer
                             const realIdx = this.pages.indexOf(p);
                             return html`
                                 <div class="group relative rounded-xl border border-slate-800 bg-slate-950 overflow-hidden shadow-sm hover:border-slate-600 transition-colors">
@@ -550,7 +585,7 @@ export class DocPage extends LitElement {
                 </div>
 
                 ${this.viewerOpen ? html`
-                    <div class="fixed inset-0 z-50 bg-black/95 backdrop-blur flex flex-col"
+                    <div class="fixed inset-0 z-50 bg-black/95 backdrop-blur flex flex-col touch-none"
                          @click=${(e: Event) => e.target === e.currentTarget && (this.viewerOpen = false)}>
 
                         <div class="px-4 py-3 flex items-center justify-between bg-black/50 border-b border-white/10 z-50 shrink-0">
@@ -578,27 +613,29 @@ export class DocPage extends LitElement {
                             </div>
                         ` : null}
 
-                        <div class="flex-1 overflow-auto relative flex items-start justify-center p-4"
-                             @click=${(e: Event) => e.target === e.currentTarget && (this.viewerOpen = false)}>
+                        <div class="flex-1 overflow-hidden relative flex items-center justify-center w-full"
+                             @touchstart=${this.onTouchStart}
+                             @touchend=${this.onTouchEnd}>
 
                             ${this.viewerBusy ? html`
-                                <div class="text-slate-500 mt-20">Loading...</div>` : this.viewerUrl ? html`
-                                <div class="relative shadow-2xl shrink-0">
+                                <div class="text-slate-500">Loading...</div>` : this.viewerUrl ? html`
+                                <div class="relative transition-transform duration-200 ease-out"
+                                     style="transform: scale(${this.zoomLevel})"
+                                     @dblclick=${this.onDoubleTap}>
                                     <img src=${this.viewerUrl}
-                                         class="block w-full max-w-4xl h-auto shadow-2xl border border-white/10">
+                                         class="block max-w-full max-h-[85vh] object-contain shadow-2xl border border-white/10">
 
                                     ${this.showOcrOverlay && currentPage?.words ? currentPage.words.map(w => {
                                         const isMatch = q && w.text.toLowerCase().includes(q);
                                         return html`
-                                            <div class="absolute ${isMatch ? 'bg-yellow-500/30 border-yellow-400' : 'bg-red-500/10 border-red-500/50 hover:bg-red-500/30'} border transition-colors"
-                                                 style="left: ${w.box[0] * 100}%; top: ${w.box[1] * 100}%; width: ${w.box[2] * 100}%; height: ${w.box[3] * 100}%;"
-                                                 title="${w.text}">
+                                            <div class="absolute ${isMatch ? 'bg-yellow-500/30 border-yellow-400' : 'bg-red-500/10 border-red-500/50'} border"
+                                                 style="left: ${w.box[0] * 100}%; top: ${w.box[1] * 100}%; width: ${w.box[2] * 100}%; height: ${w.box[3] * 100}%;">
                                             </div>`;
                                     }) : null}
                                 </div>
                             ` : null}
 
-                            <button class="fixed left-4 top-1/2 -translate-y-1/2 p-4 rounded-full bg-black/50 hover:bg-black/80 text-white z-50 transition-colors"
+                            <button class="fixed left-4 top-1/2 -translate-y-1/2 p-4 rounded-full bg-black/50 hover:bg-black/80 text-white z-50 transition-colors hidden sm:block"
                                     ?disabled=${this.viewerIndex === 0}
                                     @click=${(e: Event) => {
                                         e.stopPropagation();
@@ -609,7 +646,7 @@ export class DocPage extends LitElement {
                                           d="M15 19l-7-7 7-7"></path>
                                 </svg>
                             </button>
-                            <button class="fixed right-4 top-1/2 -translate-y-1/2 p-4 rounded-full bg-black/50 hover:bg-black/80 text-white z-50 transition-colors"
+                            <button class="fixed right-4 top-1/2 -translate-y-1/2 p-4 rounded-full bg-black/50 hover:bg-black/80 text-white z-50 transition-colors hidden sm:block"
                                     ?disabled=${this.viewerIndex === this.pages.length - 1}
                                     @click=${(e: Event) => {
                                         e.stopPropagation();
@@ -620,6 +657,10 @@ export class DocPage extends LitElement {
                                           d="M9 5l7 7-7 7"></path>
                                 </svg>
                             </button>
+                        </div>
+
+                        <div class="px-4 py-3 bg-black/50 text-center text-xs text-slate-500 shrink-0">
+                            Swipe to flip • Double tap to zoom
                         </div>
                     </div>
                 ` : null}
