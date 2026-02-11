@@ -2,7 +2,7 @@ import {NativeBiometric} from '@capgo/capacitor-native-biometric';
 import {Capacitor} from '@capacitor/core';
 import {settings} from './settings';
 
-const WEBAUTHN_ID_KEY = 'sahifah_webauthn_id';
+const WEBAUTHN_ID_KEY = 'sahifah.webauthn_id';
 
 export class AuthService {
     private static _isUnlocked = false;

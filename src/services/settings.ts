@@ -10,7 +10,7 @@ const ENABLED_PHRASE = 'sahifah-auth-is-enabled-strictly';
 // Keys
 const KEYS = {
     // We rename the key so it doesn't look like a boolean
-    LOCK_INTEGRITY: 'sahifah_integrity_check',
+    LOCK_INTEGRITY: 'sahifah.integrity_check',
     DEFAULT_VAULT: 'sahifah.defaultVault',
 };
 
