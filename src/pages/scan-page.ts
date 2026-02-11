@@ -836,7 +836,7 @@ export class ScanPage extends LitElement {
 
         const stage: ScanStage = this.session.stage;
         return html`
-            <div class="space-y-4">
+            <div class="space-y-4 pt-4">
                 <div class="flex items-center justify-between">
                     <div class="text-lg font-semibold">
                         ${this.replacePageId ? 'Retake Page' : (this.session.isAppend ? 'Add pages' : 'Scan')}
