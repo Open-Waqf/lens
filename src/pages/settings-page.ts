@@ -488,15 +488,11 @@ export class SettingsPage extends LitElement {
 
     private renderHeader() {
         return html`
-            <div class="flex items-center gap-3">
-                <button class="p-2 rounded-full hover:bg-slate-800" @click=${() => location.hash = '#/library'}>
-                    <svg class="w-6 h-6 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                              d="M15 19l-7-7 7-7"></path>
-                    </svg>
-                </button>
-                <h1 class="text-xl font-bold text-slate-100">Settings</h1>
-                <div class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">v${pkg.version}</div>
+            <div class="flex items-center gap-3 pb-2">
+                <h1 class="text-2xl font-bold text-slate-100">Settings</h1>
+                <div class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono mt-1">
+                        v${pkg.version}
+                </div>
             </div>
         `;
     }

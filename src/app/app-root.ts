@@ -36,7 +36,6 @@ type Fatal = { message: string; detail?: string };
 
 @customElement('app-root')
 export class AppRoot extends LitElement {
-    // 1. Add Loading State (True by default)
     @state() private _isLoading = true;
     @state() private _isLocked = true;
 
@@ -51,7 +50,6 @@ export class AppRoot extends LitElement {
 
     connectedCallback(): void {
         super.connectedCallback();
-        // Start the check immediately
         this._checkAuth();
 
         window.addEventListener('hashchange', this._onHash);
@@ -60,7 +58,6 @@ export class AppRoot extends LitElement {
 
         if (!location.hash) location.hash = '#/library';
 
-        // 1. Check Persistence (Immediate)
         void (async () => {
             try {
                 this.persist = await getPersistenceStatus();
@@ -69,7 +66,6 @@ export class AppRoot extends LitElement {
             }
         })();
 
-        // 2. Define Background Tasks
         const runGC = async () => {
             try {
                 await garbageCollectOpfsDocs();
@@ -78,36 +74,22 @@ export class AppRoot extends LitElement {
         };
 
         const runWarmup = async () => {
-            // Don't warm up if the user is already on the scan page (priority conflict)
             if (location.hash.includes('scan')) return;
-
             const prefs = await settings.get();
-            if (!prefs.enableOcr) {
-                console.log('App: OCR disabled by user settings. Skipping warmup.');
-                return;
-            }
-
+            if (!prefs.enableOcr) return;
             try {
-                // Dynamically import OCR to avoid loading 1.5MB immediately
                 const {warmupOcr} = await import('../lib/ocr');
-                console.log('App: Warming up OCR engine in background...');
                 await warmupOcr();
             } catch (e) {
-                // Ignore warmup errors (offline, etc)
             }
         };
 
-        // 3. Schedule Tasks when Browser is Idle
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const ric = (window as any).requestIdleCallback;
-
         if (typeof ric === 'function') {
-            // GC runs first (cleanup)
             ric(() => void runGC(), {timeout: 2500});
-            // OCR runs later (network heavy)
             ric(() => void runWarmup(), {timeout: 10000});
         } else {
-            // Fallback for browsers without requestIdleCallback
             setTimeout(() => void runGC(), 800);
             setTimeout(() => void runWarmup(), 3000);
         }
@@ -115,14 +97,12 @@ export class AppRoot extends LitElement {
 
     private async _checkAuth() {
         try {
-            // 2. Wait for the check to complete
             const isAuth = await AuthService.isAuthenticated();
             this._isLocked = !isAuth;
         } catch (e) {
             console.error("Auth check failed", e);
-            this._isLocked = false; // Fail open or closed depending on preference (Open is safer for UX bugs)
+            this._isLocked = false;
         } finally {
-            // 3. Stop loading only after we know the status
             this._isLoading = false;
         }
     }
@@ -160,15 +140,6 @@ export class AppRoot extends LitElement {
             detail: (reason as Error)?.stack
         };
     };
-
-    private navLink(href: string, label: string, active: boolean) {
-        return html`
-            <a class=${['px-3 py-2 rounded-lg text-sm', active ? 'bg-slate-800 text-slate-50' : 'text-slate-300 hover:bg-slate-900'].join(' ')}
-               href=${href}>
-                ${label}
-            </a>
-        `;
-    }
 
     private async resetAndReload(): Promise<void> {
         const ok = await ConfirmModal.ask({
@@ -221,7 +192,7 @@ export class AppRoot extends LitElement {
         const p = this.persist;
         if (!p || !p.supported || p.persisted) return null;
         return html`
-            <div class="p-3 rounded-xl border border-amber-900 bg-amber-950/40 text-amber-100 flex items-start justify-between gap-3">
+            <div class="mb-4 p-3 rounded-xl border border-amber-900 bg-amber-950/40 text-amber-100 flex items-start justify-between gap-3">
                 <div class="min-w-0">
                     <div class="text-sm font-medium">Storage is not persistent</div>
                     <div class="text-xs text-amber-200/80">OS may clear storage. Export backup to be safe.</div>
@@ -233,8 +204,6 @@ export class AppRoot extends LitElement {
     }
 
     render() {
-        // 4. Render NOTHING (or a spinner) while loading.
-        // This prevents <auth-lock> from ever being created if disabled.
         if (this._isLoading) {
             return html`
                 <div class="fixed inset-0 bg-slate-950 z-[9999]"></div>`;
@@ -248,26 +217,14 @@ export class AppRoot extends LitElement {
         if (this.fatal) return this.renderFatal();
 
         const r = this.route;
-        const active = (name: Route['name']) => r.name === name;
+        const showNav = r.name !== 'doc';
 
         return html`
-            <div class="min-h-dvh flex flex-col">
-                <header class="sticky top-0 z-10 bg-slate-950/80 backdrop-blur border-b border-slate-800">
-                    <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
-                        <div class="flex items-center gap-2">
-                            <img src="/icons/icon-192.png" class="w-8 h-8 rounded-lg shadow-sm" alt="Lens">
-                            <div class="font-semibold tracking-tight text-slate-100">Sahifah Lens</div>
-                        </div>
+            <div class="min-h-dvh flex flex-col bg-slate-950">
 
-                        <nav class="flex gap-1">
-                            ${this.navLink('#/library', 'Library', active('library'))}
-                            ${this.navLink('#/scan?new=1', 'Scan', active('scan'))}
-                            ${this.navLink('#/settings', 'Settings', active('settings'))}
-                        </nav>
-                    </div>
-                </header>
-                <main class="flex-1 max-w-3xl mx-auto w-full px-4 py-4 space-y-3">
+                <main class="flex-1 w-full max-w-7xl mx-auto px-4 pt-[env(safe-area-inset-top)] pb-28 relative">
                     ${this.renderPersistenceBanner()}
+
                     ${r.name === 'library' ? html`
                         <library-page></library-page>` : null}
                     ${r.name === 'scan' ? html`
@@ -277,6 +234,46 @@ export class AppRoot extends LitElement {
                     ${r.name === 'settings' ? html`
                         <settings-page></settings-page>` : null}
                 </main>
+
+                ${showNav ? html`
+                    <nav class="fixed bottom-0 left-0 right-0 z-50 bg-slate-950/90 backdrop-blur-md border-t border-slate-800 pb-[env(safe-area-inset-bottom)]">
+                        <div class="max-w-7xl mx-auto flex items-center justify-around h-16 px-2">
+
+                            <a href="#/library"
+                               class="flex flex-col items-center gap-1 w-16 py-1 ${r.name === 'library' ? 'text-emerald-400' : 'text-slate-500 hover:text-slate-300'} transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none"
+                                     stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round"
+                                     stroke-linejoin="round">
+                                    <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
+                                </svg>
+                                <span class="text-[10px] font-medium">Library</span>
+                            </a>
+
+                            <a href="#/scan?new=1"
+                               class="flex flex-col items-center justify-center -mt-6 p-1 rounded-full bg-slate-950 border-4 border-slate-950 relative group">
+                                <div class="w-14 h-14 rounded-full bg-emerald-500 text-slate-950 flex items-center justify-center shadow-lg shadow-emerald-500/20 group-active:scale-95 transition-transform">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8" fill="none"
+                                         stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"
+                                         stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M12 4v16m8-8H4"></path>
+                                    </svg>
+                                </div>
+                            </a>
+
+                            <a href="#/settings"
+                               class="flex flex-col items-center gap-1 w-16 py-1 ${r.name === 'settings' ? 'text-emerald-400' : 'text-slate-500 hover:text-slate-300'} transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none"
+                                     stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round"
+                                     stroke-linejoin="round">
+                                    <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                                    <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                </svg>
+                                <span class="text-[10px] font-medium">Settings</span>
+                            </a>
+
+                        </div>
+                    </nav>
+                ` : null}
             </div>
         `;
     }

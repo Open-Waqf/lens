@@ -796,7 +796,7 @@ export class ScanPage extends LitElement {
 
     private renderWelcome() {
         return html`
-            <div class="min-h-[80vh] flex flex-col items-center justify-center p-6 text-center space-y-8">
+            <div class="min-h-full flex flex-col items-center justify-center py-10 text-center space-y-8">
                 <div class="space-y-4">
                     <div class="w-20 h-20 bg-slate-800 rounded-2xl flex items-center justify-center mx-auto mb-6">
                         <svg class="w-10 h-10 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -8,7 +8,7 @@ import type {DocRecord} from '../domain/types';
 import {ScanRepo} from './scan/scan-repo';
 import {bytesToBlob} from '../lib/bytes';
 import {ConfirmModal} from '../components/confirm-modal';
-import { ocrQueue } from '../services/ocr-queue';
+import {ocrQueue} from '../services/ocr-queue';
 
 type ViewMode = 'list' | 'gallery';
 
@@ -37,12 +37,12 @@ export class LibraryPage extends LitElement {
     @state() private highlightDocId: string | null = null;
 
     private _onOcrChange = () => {
-        this.ocrActiveCount = ocrQueue.activeCount; //
+        this.ocrActiveCount = ocrQueue.activeCount;
     };
 
     async connectedCallback() {
         super.connectedCallback();
-        ocrQueue.addEventListener('change', this._onOcrChange); //
+        ocrQueue.addEventListener('change', this._onOcrChange);
         this.ocrActiveCount = ocrQueue.activeCount;
         const savedView = localStorage.getItem('sahifah.libraryView');
         if (savedView === 'gallery') this.viewMode = 'gallery';
@@ -64,7 +64,7 @@ export class LibraryPage extends LitElement {
     disconnectedCallback() {
         super.disconnectedCallback();
         for (const url of this.thumbnails.values()) URL.revokeObjectURL(url);
-        ocrQueue.removeEventListener('change', this._onOcrChange); //
+        ocrQueue.removeEventListener('change', this._onOcrChange);
     }
 
     private async loadDocs() {
@@ -129,19 +129,17 @@ export class LibraryPage extends LitElement {
     private get filteredDocs() {
         let list = this.docs;
 
-        // 1. Apply Tag Filter first
         if (this.selectedTag) {
             list = list.filter(d => d.tags.includes(this.selectedTag!));
         }
 
-        // 2. Apply Search Query
         const q = this.query.trim().toLowerCase();
         if (q) {
             list = list.filter(d => {
                 if (d.title.toLowerCase().includes(q)) return true;
                 if (d.tags.some(t => t.toLowerCase().includes(q))) return true;
                 if (d.searchIndex && d.searchIndex.toLowerCase().includes(q)) return true;
-                if (d.folder && d.folder.toLowerCase().includes(q)) return true; // Include folder in search
+                if (d.folder && d.folder.toLowerCase().includes(q)) return true;
                 return false;
             });
         }
@@ -206,17 +204,13 @@ export class LibraryPage extends LitElement {
         `;
     }
 
-    /**
-     * Main render entry point
-     */
     render() {
         const groups = this.groupedDocs;
         const isGallery = this.viewMode === 'gallery';
         const hasDocs = Object.values(groups).some(g => g.length > 0);
 
         return html`
-            <div class="space-y-4 pb-20">
-                ${this.renderHeader(isGallery)}
+            <div class="space-y-4 pb-4"> ${this.renderHeader(isGallery)}
 
                 ${this.renderSafetyPrompt()}
 
@@ -230,21 +224,16 @@ export class LibraryPage extends LitElement {
                             </div>
                         `
                 }
-
-                ${this.renderFab()}
             </div>
         `;
     }
 
-    /**
-     * Renders the sticky header with title, controls, search, and tags
-     */
     private renderHeader(isGallery: boolean) {
         const activeTitles = ocrQueue.activeTitles;
         const currentTask = activeTitles.length > 0 ? activeTitles[0] : null;
 
         return html`
-            <div class="sticky top-0 bg-black/80 backdrop-blur-md pt-4 pb-2 z-10 space-y-3">
+            <div class="sticky top-0 bg-slate-950/90 backdrop-blur-md pt-4 pb-2 z-10 space-y-3">
                 <div class="flex items-center justify-between gap-3">
                     <div class="flex items-center gap-3">
                         <h1 class="text-2xl font-bold text-slate-100">Library</h1>
@@ -285,9 +274,6 @@ export class LibraryPage extends LitElement {
         `;
     }
 
-    /**
-     * Renders header action buttons (Selection, Grouping, View Mode, Settings)
-     */
     private renderActionButtons(isGallery: boolean) {
         return html`
             ${this.selectionMode ? html`
@@ -331,24 +317,17 @@ export class LibraryPage extends LitElement {
                                       d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path>
                             </svg>`}
             </button>
-
-            <button class="p-2 rounded-full hover:bg-slate-800 text-slate-400"
-                    @click=${() => location.hash = '#/settings'}>
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                          d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                </svg>
-            </button>
         `;
     }
 
-    /**
-     * Renders a single folder section with its documents
-     */
     private renderFolderGroup(folderName: string, docs: DocRecord[], isGallery: boolean) {
         if (docs.length === 0) return null;
+
+        // RESPONSIVE GRID LOGIC:
+        const listGrid = "grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3";
+        const galleryGrid = "grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3";
+        const gridClass = isGallery ? galleryGrid : listGrid;
+
         return html`
             <div class="space-y-3">
                 ${this.groupByFolder ? html`
@@ -361,32 +340,13 @@ export class LibraryPage extends LitElement {
                     </h2>
                 ` : null}
 
-                <div class="grid ${isGallery ? 'grid-cols-2 gap-3' : 'grid-cols-1 gap-3'}">
+                <div class="grid ${gridClass}">
                     ${repeat(docs, (d) => d.id, (d) => this.renderDocItem(d, isGallery))}
                 </div>
             </div>
         `;
     }
 
-    /**
-     * Renders the Floating Action Button
-     */
-    private renderFab() {
-        return html`
-            <button
-                    class="fixed bottom-6 right-6 w-14 h-14 bg-emerald-500 hover:bg-emerald-400 rounded-full shadow-lg shadow-emerald-900/40 flex items-center justify-center text-slate-900 transition-transform active:scale-95 z-20"
-                    @click=${() => location.hash = '#/scan?new=1'}
-            >
-                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-                </svg>
-            </button>
-        `;
-    }
-
-    /**
-     * Renders the empty state when no documents match
-     */
     private renderEmptyState() {
         return html`
             <div class="flex flex-col items-center justify-center py-20 text-slate-500 text-center space-y-4">
@@ -415,7 +375,6 @@ export class LibraryPage extends LitElement {
         const date = new Date(doc.updatedAt).toLocaleDateString();
         const selected = this.selectedIds.has(doc.id);
 
-        // Highlight logic
         const isHighlight = this.highlightDocId === doc.id;
         const highlightClass = isHighlight ? 'ring-2 ring-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.3)] z-10' : '';
 
@@ -423,6 +382,8 @@ export class LibraryPage extends LitElement {
         const stateClasses = selected
             ? "border-emerald-500 ring-1 ring-emerald-500/50 bg-emerald-900/10"
             : "border-slate-800 hover:border-slate-700 active:bg-slate-800";
+
+        // Flex vs Block depends on view mode
         const layoutClasses = isGallery ? "flex-col" : "flex";
 
         return html`
