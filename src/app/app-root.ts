@@ -75,10 +75,16 @@ export class AppRoot extends LitElement {
 
         const runWarmup = async () => {
             if (location.hash.includes('scan')) return;
+
             const prefs = await settings.get();
-            if (!prefs.enableOcr) return;
+            if (!prefs.enableOcr) {
+                console.log('App: OCR disabled by user settings. Skipping warmup.');
+                return;
+            }
+
             try {
                 const {warmupOcr} = await import('../lib/ocr');
+                console.log('App: Warming up OCR engine in background...');
                 await warmupOcr();
             } catch (e) {
             }
@@ -86,6 +92,7 @@ export class AppRoot extends LitElement {
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const ric = (window as any).requestIdleCallback;
+
         if (typeof ric === 'function') {
             ric(() => void runGC(), {timeout: 2500});
             ric(() => void runWarmup(), {timeout: 10000});
@@ -205,8 +212,26 @@ export class AppRoot extends LitElement {
 
     render() {
         if (this._isLoading) {
+            // FIXED: Replaced black screen with Splash Screen
             return html`
-                <div class="fixed inset-0 bg-slate-950 z-[9999]"></div>`;
+                <div class="fixed inset-0 z-[9999] bg-slate-950 flex flex-col items-center justify-center space-y-8">
+                    <div class="w-24 h-24 bg-slate-900 rounded-3xl flex items-center justify-center shadow-2xl shadow-emerald-900/20 animate-pulse">
+                        <svg class="w-12 h-12 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                        </svg>
+                    </div>
+                    <div class="flex flex-col items-center gap-2">
+                        <div class="text-2xl font-bold text-slate-100 tracking-tight">Sahifah Lens</div>
+                        <div class="text-sm text-slate-500 font-medium flex items-center gap-2">
+                            <div class="w-2 h-2 bg-emerald-500 rounded-full animate-ping"></div>
+                            Loading your Library...
+                        </div>
+                    </div>
+                </div>
+            `;
         }
 
         if (this._isLocked) {
