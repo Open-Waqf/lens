@@ -50,6 +50,8 @@ export class ScanPage extends LitElement {
     @state() private showWelcome = false;
     @state() private flashActive = false; // For visual feedback
 
+    @state() private showPermissionError = false; // To control the error screen
+
     @state() private docTitle: string | null = null;
     @state() private targetDocTitle: string | null = null;
 
@@ -142,7 +144,8 @@ export class ScanPage extends LitElement {
         localStorage.setItem(WELCOME_KEY, '1');
         this.showWelcome = false;
         await this.loadMode();
-        this.beginCameraFromGesture();
+        // User clicked "Start", so this is explicit
+        this.beginCameraFromGesture(true);
     }
 
     private async loadMode(): Promise<void> {
@@ -152,6 +155,7 @@ export class ScanPage extends LitElement {
 
         this.error = null;
         this.busy = false;
+        this.showPermissionError = false;
 
         this.clearEditor();
         this.newPageIds.clear();
@@ -272,7 +276,6 @@ export class ScanPage extends LitElement {
         this.importReviewIndex = 0;
     }
 
-    // FIX: Ensure camera is stopped to kill LED and free resources
     private async openNewBlobInEditor(blob: Blob, initialQuad: Quad | null = null): Promise<void> {
         await this.stopCamera();
         this.captured = blob;
@@ -284,7 +287,7 @@ export class ScanPage extends LitElement {
 
     private async openExistingPageInEditor(pageId: string): Promise<void> {
         this.error = null;
-        await this.stopCamera(); // FIX: Stop LED
+        await this.stopCamera();
         try {
             const bytes = await this.repo.getPageImageBytes(pageId);
             if (!bytes) return;
@@ -322,7 +325,8 @@ export class ScanPage extends LitElement {
         }
 
         this.clearEditor();
-        this.session.setStage(this.camera.isRunning ? 'camera' : 'idle');
+        // Implicit restart - gracefully fail if no camera
+        this.beginCameraFromGesture(false);
     };
 
     private onEditorSave = async (ev: CustomEvent<PageEditorSaveDetail>) => {
@@ -370,7 +374,8 @@ export class ScanPage extends LitElement {
             }
 
             this.clearEditor();
-            this.session.setStage(this.camera.isRunning ? 'camera' : 'idle');
+            // Implicit restart - gracefully fail to dashboard if no camera
+            this.beginCameraFromGesture(false);
         } catch (e) {
             this.error = (e as Error).message ?? String(e);
         } finally {
@@ -414,27 +419,38 @@ export class ScanPage extends LitElement {
         this.strip = items;
     }
 
-    private beginCameraFromGesture(): void {
+    // UPDATED: Added explicit flag to handle the regression
+    private beginCameraFromGesture(explicit: boolean = false): void {
         this.error = null;
         if (this.caps.isCapacitor) {
             void this.invokeNativeScanner();
             return;
         }
         this.session.setStage('camera');
-        if (this.camera.isRunning) return;
+        // Reset this initially so we don't show error while loading
+        this.showPermissionError = false;
 
         setTimeout(async () => {
             try {
-                await this.updateComplete;
+                if (!this.videoEl) return;
                 const res = await this.camera.start(this.videoEl);
                 this.videoW = res.width;
                 this.videoH = res.height;
                 this.startDetector();
             } catch (e) {
-                this.error = (e as Error).message ?? String(e);
-                this.session.setStage('idle');
+                // FIXED LOGIC:
+                // If user clicked the button (explicit), show the blocking error.
+                // If app tried to auto-start (implicit), just go to dashboard.
+                if (explicit) {
+                    this.error = (e as Error).message ?? String(e);
+                    this.showPermissionError = true;
+                    this.session.setStage('idle');
+                } else {
+                    console.warn("Camera auto-start failed (likely permission), fallback to idle.");
+                    this.session.setStage('idle');
+                }
             }
-        }, 50);
+        }, 60);
     }
 
     private async invokeNativeScanner(): Promise<void> {
@@ -463,7 +479,7 @@ export class ScanPage extends LitElement {
         await this.camera.stop();
     }
 
-    private async capturePhoto(fromAuto = false): Promise<void> {
+    private async capturePhoto(): Promise<void> {
         this.error = null;
         if (this.captureInFlight) return;
 
@@ -499,7 +515,7 @@ export class ScanPage extends LitElement {
                 ];
             }
 
-            // 2. FIX: If no quad found (e.g. face), force FULL IMAGE crop so it's visible immediately
+            // CRITICAL FIX: If no document found (e.g. face), force FULL IMAGE crop
             if (!detectedQuadForEditor) {
                 detectedQuadForEditor = [
                     {x: 0, y: 0}, {x: w, y: 0},
@@ -514,7 +530,6 @@ export class ScanPage extends LitElement {
             await this.openNewBlobInEditor(blob, detectedQuadForEditor);
         } catch (e) {
             this.error = (e as Error).message ?? String(e);
-            if (fromAuto) this.cooldownUntil = Date.now() + 1500;
         } finally {
             this.captureInFlight = false;
         }
@@ -601,19 +616,7 @@ export class ScanPage extends LitElement {
             if (det.quad && det.confidence >= 0.35) {
                 const q = det.quad as Quad;
                 this.smoothedQuad = this.smoothedQuad ? lerpQuad(this.smoothedQuad, q, 0.35) : q;
-
-                if (det.confidence < 0.65) {
-                    this.guidance = 'Hold steady';
-                } else {
-                    const area = quadArea(q) / (det.width * det.height);
-                    if (area < 0.15) {
-                        this.guidance = 'Move closer';
-                    } else if (this.autoCapture && !this.captureInFlight) {
-                        this.guidance = 'Hold steady';
-                    } else {
-                        this.guidance = null;
-                    }
-                }
+                this.guidance = det.confidence < 0.65 ? 'Hold steady' : null;
             } else {
                 this.smoothedQuad = null;
                 this.stableSince = 0;
@@ -671,7 +674,7 @@ export class ScanPage extends LitElement {
         this.offCtx.drawImage(v, 0, 0, w, h);
         const img = this.offCtx.getImageData(0, 0, w, h);
         this.detecting = true;
-        this.worker.postMessage({type: 'detect', width: w, height: h, rgba: img.data});
+        this.worker.postMessage({type: 'detect', width: img.width, height: img.height, rgba: img.data});
     }
 
     private quadStabilityScore(q: Quad, det: DetectedQuad): number {
@@ -715,7 +718,7 @@ export class ScanPage extends LitElement {
         }
         if (this.stableSince === 0) this.stableSince = Date.now();
         if (Date.now() - this.stableSince > 650) {
-            void this.capturePhoto(true);
+            void this.capturePhoto();
             this.cooldownUntil = Date.now() + 1200;
             this.stableSince = 0;
         }
@@ -839,8 +842,46 @@ export class ScanPage extends LitElement {
         `;
     }
 
+    private renderPermissionUI() {
+        return html`
+            <div class="flex flex-col items-center justify-center py-10 px-6 text-center space-y-8 min-h-full">
+                <div class="w-20 h-20 bg-red-900/20 text-red-500 rounded-full flex items-center justify-center shadow-inner">
+                    <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                    </svg>
+                </div>
+
+                <div class="space-y-2">
+                    <h2 class="text-2xl font-bold text-slate-100">Camera Access Blocked</h2>
+                    <p class="text-slate-400 text-sm leading-relaxed">
+                        To scan documents, enable camera access in Settings. You can still import files.
+                    </p>
+                </div>
+
+                <div class="flex flex-col gap-3 w-full max-w-xs">
+                    <button class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold transition-all"
+                            @click=${() => this.beginCameraFromGesture(true)}>
+                        Try Again
+                    </button>
+
+                    <button class="w-full py-3 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded-xl font-bold transition-all"
+                            @click=${() => this.pickFiles({multiple: !this.replacePageId})}>
+                        Import from Files
+                    </button>
+
+                    <button class="w-full py-3 text-slate-500 hover:text-slate-300 font-medium transition-all"
+                            @click=${() => this.exitScan()}>
+                        Go Back
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+
     render() {
         if (this.showWelcome) return this.renderWelcome();
+        if (this.showPermissionError) return this.renderPermissionUI();
 
         const stage = this.session.stage;
         return html`
@@ -850,7 +891,7 @@ export class ScanPage extends LitElement {
                         ${this.replacePageId ? 'Retake' : (this.session.isAppend ? 'Add pages' : 'Scan')}
                     </div>
                     ${!this.caps.isCapacitor ? html`
-                        <div class="flex items-center gap-2 bg-slate-900/80 px-4 py-1.5 rounded-full border border-slate-800">
+                        <div class="flex items-center gap-3 bg-slate-900/80 px-4 py-1.5 rounded-full border border-slate-800">
                             <span class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Auto Capture</span>
                             <button class="relative h-5 w-10 rounded-full transition-colors ${this.autoCapture ? 'bg-emerald-600' : 'bg-slate-700'}"
                                     @click=${() => {
@@ -883,7 +924,7 @@ export class ScanPage extends LitElement {
                         </div>
                         <div class="w-full space-y-3">
                             <button class="w-full py-5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 rounded-[1.5rem] font-bold text-xl shadow-lg shadow-emerald-900/20 transition-all active:scale-95"
-                                    @click=${() => this.beginCameraFromGesture()}>
+                                    @click=${() => this.beginCameraFromGesture(true)}>
                                 ${this.caps.isCapacitor ? 'Start Scanner' : 'Open Camera'}
                             </button>
                             <button class="w-full py-4 text-slate-400 font-semibold hover:text-white transition-colors"
@@ -939,7 +980,7 @@ export class ScanPage extends LitElement {
                             </button>
 
                             <button class="w-24 h-24 rounded-full border-4 border-white/20 p-2 active:scale-90 transition-transform bg-slate-900/50"
-                                    @click=${() => void this.capturePhoto(false)}>
+                                    @click=${() => void this.capturePhoto()}>
                                 <div class="w-full h-full rounded-full bg-white shadow-xl"></div>
                             </button>
 
