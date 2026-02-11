@@ -982,7 +982,8 @@ export class ScanPage extends LitElement {
                                 </svg>
                             </button>
 
-                            <button class="w-24 h-24 rounded-full border-4 border-white/20 p-2 active:scale-90 transition-transform bg-slate-900/50"
+                            <button aria-label="Capture"
+                                    class="w-24 h-24 rounded-full border-4 border-white/20 p-2 active:scale-90 transition-transform bg-slate-900/50"
                                     @click=${() => void this.capturePhoto()}>
                                 <div class="w-full h-full rounded-full bg-white shadow-xl"></div>
                             </button>

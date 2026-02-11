@@ -1,7 +1,8 @@
 import {html, LitElement} from 'lit';
-import {customElement, state} from 'lit/decorators.js';
+import {customElement, query, state} from 'lit/decorators.js';
 import {repeat} from 'lit/directives/repeat.js';
 import {live} from 'lit/directives/live.js';
+import {unsafeHTML} from 'lit/directives/unsafe-html.js';
 
 import {db} from '../services/db';
 import type {DocRecord} from '../domain/types';
@@ -21,7 +22,11 @@ export class LibraryPage extends LitElement {
     @state() private ocrActiveCount = 0;
     private repo = new ScanRepo();
 
-    @state() private docs: DocRecord[] = [];
+    // Data State
+    private allDocsSource: DocRecord[] = []; // Full database dump
+    @state() private visibleDocs: DocRecord[] = []; // Currently rendered subset
+    @state() private visibleLimit = 20; // Pagination limit
+
     @state() private query = '';
     @state() private thumbnails = new Map<string, string>();
 
@@ -36,6 +41,10 @@ export class LibraryPage extends LitElement {
     // Highlight logic
     @state() private highlightDocId: string | null = null;
 
+    // Infinite Scroll
+    private loadMoreObserver: IntersectionObserver | null = null;
+    @query('#load-more-sentinel') private sentinel!: HTMLElement;
+
     private _onOcrChange = () => {
         this.ocrActiveCount = ocrQueue.activeCount;
     };
@@ -44,6 +53,7 @@ export class LibraryPage extends LitElement {
         super.connectedCallback();
         ocrQueue.addEventListener('change', this._onOcrChange);
         this.ocrActiveCount = ocrQueue.activeCount;
+
         const savedView = localStorage.getItem('sahifah.libraryView');
         if (savedView === 'gallery') this.viewMode = 'gallery';
 
@@ -52,40 +62,109 @@ export class LibraryPage extends LitElement {
         if (justSaved) {
             this.highlightDocId = justSaved;
             sessionStorage.removeItem('sahifah.justSavedDocId');
-            // Remove highlight after 3s
             setTimeout(() => {
                 this.highlightDocId = null;
             }, 3000);
         }
 
         await this.loadDocs();
+        this.setupIntersectionObserver();
     }
 
     disconnectedCallback() {
         super.disconnectedCallback();
         for (const url of this.thumbnails.values()) URL.revokeObjectURL(url);
         ocrQueue.removeEventListener('change', this._onOcrChange);
+        this.loadMoreObserver?.disconnect();
+    }
+
+    private setupIntersectionObserver() {
+        this.loadMoreObserver = new IntersectionObserver((entries) => {
+            if (entries[0].isIntersecting) {
+                this.loadMore();
+            }
+        }, {rootMargin: '200px'});
+    }
+
+    protected updated(_changedProperties: Map<string, any>) {
+        if (this.sentinel && this.loadMoreObserver) {
+            this.loadMoreObserver.observe(this.sentinel);
+        }
     }
 
     private async loadDocs() {
-        const all = await db.docs.orderBy('updatedAt').reverse().toArray();
-        this.docs = all;
-        this.loadThumbnails(all);
+        this.allDocsSource = await db.docs.orderBy('updatedAt').reverse().toArray();
         this.allTags = await this.repo.getAllTags();
+        this.applyFilters();
+    }
+
+    private applyFilters() {
+        let list = this.allDocsSource;
+
+        // 1. Tag Filter
+        if (this.selectedTag) {
+            list = list.filter(d => d.tags.includes(this.selectedTag!));
+        }
+
+        // 2. Search Query
+        const q = this.query.trim().toLowerCase();
+        if (q) {
+            list = list.filter(d => {
+                if (d.title.toLowerCase().includes(q)) return true;
+                if (d.tags.some(t => t.toLowerCase().includes(q))) return true;
+                if (d.searchIndex && d.searchIndex.toLowerCase().includes(q)) return true;
+                if (d.folder && d.folder.toLowerCase().includes(q)) return true;
+                return false;
+            });
+        }
+
+        // 3. Paginate
+        this.visibleDocs = list.slice(0, this.visibleLimit);
+
+        // 4. Load Thumbnails for visible only
+        this.loadThumbnails(this.visibleDocs);
+    }
+
+    private loadMore() {
+        const currentLen = this.visibleDocs.length;
+        // Re-run filter logic to get full filtered list length
+        // (Optimisation: In a real app we'd cache the filtered list, but for <1000 docs this is fine)
+        let filteredTotal = this.allDocsSource;
+        if (this.selectedTag) filteredTotal = filteredTotal.filter(d => d.tags.includes(this.selectedTag!));
+        if (this.query.trim()) {
+            const q = this.query.trim().toLowerCase();
+            filteredTotal = filteredTotal.filter(d =>
+                d.title.toLowerCase().includes(q) ||
+                d.searchIndex?.toLowerCase().includes(q) ||
+                d.tags.some(t => t.toLowerCase().includes(q))
+            );
+        }
+
+        if (currentLen >= filteredTotal.length) return;
+
+        this.visibleLimit += 20;
+        this.applyFilters();
     }
 
     private async loadThumbnails(docs: DocRecord[]) {
-        for (const doc of docs.slice(0, 15)) {
+        for (const doc of docs) {
             if (this.thumbnails.has(doc.id)) continue;
 
+            // Only load if not already loaded
             const strip = await this.repo.getDocStrip(doc.id, 1);
             if (strip?.items[0]) {
                 const blob = bytesToBlob(strip.items[0].thumbBytes, 'image/jpeg');
                 const url = URL.createObjectURL(blob);
                 this.thumbnails.set(doc.id, url);
+                this.requestUpdate(); // Update UI as thumbs arrive
             }
         }
-        this.requestUpdate();
+    }
+
+    private onSearchInput(e: InputEvent) {
+        this.query = (e.target as HTMLInputElement).value;
+        this.visibleLimit = 20; // Reset pagination on search
+        this.applyFilters();
     }
 
     private toggleView() {
@@ -126,29 +205,8 @@ export class LibraryPage extends LitElement {
         await this.loadDocs();
     }
 
-    private get filteredDocs() {
-        let list = this.docs;
-
-        if (this.selectedTag) {
-            list = list.filter(d => d.tags.includes(this.selectedTag!));
-        }
-
-        const q = this.query.trim().toLowerCase();
-        if (q) {
-            list = list.filter(d => {
-                if (d.title.toLowerCase().includes(q)) return true;
-                if (d.tags.some(t => t.toLowerCase().includes(q))) return true;
-                if (d.searchIndex && d.searchIndex.toLowerCase().includes(q)) return true;
-                if (d.folder && d.folder.toLowerCase().includes(q)) return true;
-                return false;
-            });
-        }
-
-        return list;
-    }
-
     private get groupedDocs() {
-        const flatList = this.filteredDocs;
+        const flatList = this.visibleDocs;
         if (!this.groupByFolder) return {'All Documents': flatList};
 
         const groups: Record<string, DocRecord[]> = {};
@@ -160,9 +218,32 @@ export class LibraryPage extends LitElement {
         return groups;
     }
 
+    // --- RENDER HELPERS ---
+
+    private getSearchSnippet(fullText: string | undefined, query: string): string | null {
+        if (!fullText || !query) return null;
+
+        const lowerText = fullText.toLowerCase();
+        const lowerQuery = query.toLowerCase();
+        const idx = lowerText.indexOf(lowerQuery);
+
+        if (idx === -1) return null;
+
+        const start = Math.max(0, idx - 20);
+        const end = Math.min(fullText.length, idx + query.length + 20);
+
+        let snippet = fullText.substring(start, end);
+        if (start > 0) snippet = '...' + snippet;
+        if (end < fullText.length) snippet = snippet + '...';
+
+        // Highlight match case-insensitively
+        const regex = new RegExp(`(${query})`, 'gi');
+        return snippet.replace(regex, '<b class="text-emerald-400 bg-emerald-950/50 px-0.5 rounded">$1</b>');
+    }
+
     private renderSafetyPrompt() {
         const lastBackup = localStorage.getItem('sahifah.lastBackup');
-        if (lastBackup || this.docs.length < 5) return null;
+        if (lastBackup || this.allDocsSource.length < 5) return null;
 
         return html`
             <div class="mx-1 p-4 rounded-xl bg-gradient-to-br from-amber-900/40 to-slate-900 border border-amber-900/50 space-y-2 mb-4">
@@ -174,7 +255,8 @@ export class LibraryPage extends LitElement {
                     Protect Your Data
                 </div>
                 <p class="text-xs text-slate-300">
-                    You have ${this.docs.length} documents stored locally. If you lose your device or clear browser
+                    You have ${this.allDocsSource.length} documents stored locally. If you lose your device or clear
+                    browser
                     data, these will be lost forever.
                 </p>
                 <button @click=${() => location.hash = '#/settings'}
@@ -190,13 +272,21 @@ export class LibraryPage extends LitElement {
             <div class="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
                 <button
                         class="px-3 py-1 rounded-full text-xs font-medium transition-colors ${!this.selectedTag ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'}"
-                        @click=${() => this.selectedTag = null}>
+                        @click=${() => {
+                            this.selectedTag = null;
+                            this.visibleLimit = 20;
+                            this.applyFilters();
+                        }}>
                     All
                 </button>
                 ${this.allTags.map(tag => html`
                     <button
                             class="px-3 py-1 rounded-full text-xs font-medium transition-colors ${this.selectedTag === tag ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'}"
-                            @click=${() => this.selectedTag = tag}>
+                            @click=${() => {
+                                this.selectedTag = tag;
+                                this.visibleLimit = 20;
+                                this.applyFilters();
+                            }}>
                         ${tag}
                     </button>
                 `)}
@@ -207,20 +297,21 @@ export class LibraryPage extends LitElement {
     render() {
         const groups = this.groupedDocs;
         const isGallery = this.viewMode === 'gallery';
-        const hasDocs = Object.values(groups).some(g => g.length > 0);
+        const hasDocs = this.visibleDocs.length > 0;
 
         return html`
-            <div class="space-y-4 pb-4"> ${this.renderHeader(isGallery)}
-
+            <div class="space-y-4 pb-4">
+                ${this.renderHeader(isGallery)}
                 ${this.renderSafetyPrompt()}
 
-                ${!hasDocs
+                ${!hasDocs && !this.query && this.allDocsSource.length === 0
                         ? this.renderEmptyState()
                         : html`
-                            <div class="space-y-8">
+                            <div class="space-y-8 min-h-[50vh]">
                                 ${Object.entries(groups).map(([folderName, docs]) =>
                                         this.renderFolderGroup(folderName, docs, isGallery)
                                 )}
+                                <div id="load-more-sentinel" class="h-10 w-full"></div>
                             </div>
                         `
                 }
@@ -260,7 +351,7 @@ export class LibraryPage extends LitElement {
                             class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-600 transition-colors"
                             placeholder="Search docs & content..."
                             .value=${live(this.query)}
-                            @input=${(e: InputEvent) => this.query = (e.target as HTMLInputElement).value}
+                            @input=${this.onSearchInput}
                     >
                     <svg class="w-5 h-5 text-slate-500 absolute left-3 top-3.5" fill="none" stroke="currentColor"
                          viewBox="0 0 24 24">
@@ -323,7 +414,6 @@ export class LibraryPage extends LitElement {
     private renderFolderGroup(folderName: string, docs: DocRecord[], isGallery: boolean) {
         if (docs.length === 0) return null;
 
-        // RESPONSIVE GRID LOGIC:
         const listGrid = "grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3";
         const galleryGrid = "grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3";
         const gridClass = isGallery ? galleryGrid : listGrid;
@@ -357,13 +447,9 @@ export class LibraryPage extends LitElement {
                     </svg>
                 </div>
                 <div>
-                    <h3 class="text-lg font-medium text-slate-300">
-                        ${this.query || this.selectedTag ? 'No matching documents' : 'No scans yet'}
-                    </h3>
+                    <h3 class="text-lg font-medium text-slate-300">No matching documents</h3>
                     <p class="text-sm text-slate-500 max-w-xs mx-auto mt-1">
-                        ${this.query || this.selectedTag
-                                ? 'Try a different keyword or tag.'
-                                : 'Tap the + button to capture your first document.'}
+                        Try a different keyword or tag.
                     </p>
                 </div>
             </div>
@@ -383,8 +469,10 @@ export class LibraryPage extends LitElement {
             ? "border-emerald-500 ring-1 ring-emerald-500/50 bg-emerald-900/10"
             : "border-slate-800 hover:border-slate-700 active:bg-slate-800";
 
-        // Flex vs Block depends on view mode
         const layoutClasses = isGallery ? "flex-col" : "flex";
+
+        // Use the snippet if query exists, else fallback to null
+        const snippet = this.getSearchSnippet(doc.searchIndex, this.query.trim());
 
         return html`
             <div class="${baseClasses} ${stateClasses} ${layoutClasses} ${highlightClass}"
@@ -403,7 +491,7 @@ export class LibraryPage extends LitElement {
                     </div>
                 ` : null}
 
-                <div class="${isGallery ? 'aspect-[3/4] w-full' : 'w-20 h-24 shrink-0'} bg-slate-950 relative">
+                <div class="${isGallery ? 'aspect-[3/4] w-full' : 'w-24 h-32 shrink-0'} bg-slate-950 relative border-r border-slate-800/50">
                     ${thumb
                             ? html`<img src=${thumb}
                                         class="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity">`
@@ -416,26 +504,31 @@ export class LibraryPage extends LitElement {
                                     </svg>
                                 </div>`
                     }
-                    ${isGallery && doc.searchIndex && this.query ? html`
+                    ${isGallery && snippet ? html`
                         <div class="absolute bottom-2 right-2 bg-emerald-600 text-white text-[10px] px-1.5 py-0.5 rounded shadow">
                             Match
                         </div>
                     ` : null}
                 </div>
 
-                <div class="p-3 flex-1 min-w-0 flex flex-col justify-center">
-                    <h3 class="text-slate-200 font-medium truncate leading-tight mb-1">${doc.title}</h3>
-                    <div class="flex items-center gap-2 text-xs text-slate-500">
+                <div class="p-4 flex-1 min-w-0 flex flex-col justify-center gap-1">
+                    <h3 class="text-slate-200 font-medium truncate leading-tight text-sm">${doc.title}</h3>
+
+                    <div class="flex items-center gap-2 text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
                         <span>${doc.pageIds.length} page${doc.pageIds.length === 1 ? '' : 's'}</span>
                         ${!isGallery ? html`<span>•</span><span>${date}</span>` : null}
                     </div>
-                    ${!isGallery && doc.searchIndex && this.query ? html`
-                        <div class="mt-2 text-[10px] text-emerald-400 bg-emerald-950/30 px-2 py-1 rounded w-fit flex items-center gap-1">
-                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                      d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                            </svg>
-                            Text match found
+
+                    ${!isGallery && snippet ? html`
+                        <div class="mt-2 text-xs text-slate-400 bg-slate-950/50 p-2 rounded border border-slate-800/50 line-clamp-2 leading-relaxed">
+                            ${unsafeHTML(snippet)}
+                        </div>
+                    ` : null}
+
+                    ${!isGallery && doc.tags.length > 0 && !snippet ? html`
+                        <div class="flex gap-1 mt-1 overflow-hidden">
+                            ${doc.tags.slice(0, 3).map(t => html`<span
+                                    class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 text-[10px]">${t}</span>`)}
                         </div>
                     ` : null}
                 </div>
