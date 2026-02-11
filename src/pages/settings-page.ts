@@ -1,5 +1,6 @@
 import {html, LitElement} from 'lit';
 import {customElement, state} from 'lit/decorators.js';
+import { haptics } from '../services/haptics';
 
 import JSZip from 'jszip';
 import {db} from '../services/db';
@@ -109,11 +110,13 @@ export class SettingsPage extends LitElement {
     }
 
     private toggleOcr() {
+        void haptics.selection();
         this.enableOcr = !this.enableOcr;
         settings.setOcr(this.enableOcr);
     }
 
     private async toggleAuth() {
+        void haptics.selection();
         const nextState = !this.requireAuth;
 
         if (nextState === true) {

@@ -5,6 +5,8 @@ import type {Point, Quad} from '../lib/scan/quad';
 import {quadArea} from '../lib/scan/quad';
 import {computeOutputSize} from '../lib/image/warp';
 import type {WorkerRequest, WorkerResponse} from '../lib/image/worker';
+import {haptics} from '../services/haptics';
+import {ImpactStyle} from "@capacitor/haptics";
 
 export type PageEditorSaveDetail = {
     master: { bytes: Uint8Array; width: number; height: number };
@@ -609,6 +611,7 @@ export class PageEditor extends LitElement {
                                         this.pushHistory();
                                         this.filter = f.mode;
                                         this.queuePreview();
+                                        void haptics.impact(ImpactStyle.Light);
                                     }}>
                                 <div class="w-16 h-16 rounded-xl border-2 overflow-hidden relative transition-all ${this.filter === f.mode ? 'border-emerald-500 ring-2 ring-emerald-500/30' : 'border-slate-800 group-hover:border-slate-600'}">
                                     ${this.thumbUrl ? html`

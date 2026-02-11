@@ -15,6 +15,8 @@ import {ConfirmModal} from '../components/confirm-modal';
 import '../components/page-editor';
 import type {PageEditorSaveDetail} from '../components/page-editor';
 import type {DocRecord, PageRecord} from '../domain/types';
+import { haptics } from '../services/haptics';
+import { ImpactStyle } from '@capacitor/haptics';
 
 @customElement('doc-page')
 export class DocPage extends LitElement {
@@ -57,6 +59,9 @@ export class DocPage extends LitElement {
     @state() private searchQuery = '';
     @state() private showExtractedText = false;
 
+    @state() private draggingId: string | null = null;
+    @state() private dropTargetId: string | null = null;
+
     async connectedCallback(): Promise<void> {
         super.connectedCallback();
         await this.load();
@@ -72,6 +77,52 @@ export class DocPage extends LitElement {
         if (this.viewerUrl) URL.revokeObjectURL(this.viewerUrl);
         this.thumbs = {};
         this.viewerUrl = null;
+    }
+
+    private onDragStart(id: string) {
+        this.draggingId = id;
+        // Trigger a tiny haptic tick when pickup starts
+        this.triggerHapticTick();
+    }
+
+    private onDragOver(e: DragEvent, id: string) {
+        e.preventDefault();
+        if (this.draggingId === id) return;
+        this.dropTargetId = id;
+    }
+
+    private async onDrop(e: DragEvent, targetId: string) {
+        e.preventDefault();
+        if (!this.draggingId || this.draggingId === targetId || !this.doc) {
+            this.draggingId = null;
+            this.dropTargetId = null;
+            return;
+        }
+
+        const ids = [...this.doc.pageIds];
+        const fromIdx = ids.indexOf(this.draggingId);
+        const toIdx = ids.indexOf(targetId);
+
+        if (fromIdx !== -1 && toIdx !== -1) {
+            // Remove from old pos, insert at new pos
+            const [movedId] = ids.splice(fromIdx, 1);
+            ids.splice(toIdx, 0, movedId);
+
+            await this.saveMeta({pageIds: ids});
+            await this.load();
+            this.triggerHapticTick();
+        }
+
+        this.draggingId = null;
+        this.dropTargetId = null;
+    }
+
+    private async triggerHapticTick() {
+        try {
+            // No need for dynamic import anymore since it's at the top
+            void haptics.impact(ImpactStyle.Light);
+        } catch {
+        }
     }
 
     private async load(): Promise<void> {
@@ -297,25 +348,6 @@ export class DocPage extends LitElement {
         }
     }
 
-    private async movePage(id: string, dir: -1 | 1): Promise<void> {
-        if (!this.doc) return;
-        const ids = [...this.doc.pageIds];
-        const idx = ids.indexOf(id);
-        if (idx < 0) return;
-        const j = idx + dir;
-        if (j < 0 || j >= ids.length) return;
-        [ids[idx], ids[j]] = [ids[j], ids[idx]];
-        await this.saveMeta({pageIds: ids});
-        await this.load();
-    }
-
-    private retakePage(pageId: string) {
-        if (!this.doc) return;
-        localStorage.setItem('sahifah.appendToDocId', this.doc.id);
-        localStorage.setItem('sahifah.replacePageId', pageId);
-        location.hash = '#/scan';
-    }
-
     private get filteredPages() {
         const q = this.searchQuery.trim().toLowerCase();
         if (!q) return this.pages;
@@ -520,9 +552,23 @@ export class DocPage extends LitElement {
                     <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
                         ${visiblePages.map((p) => {
                             const realIdx = this.pages.indexOf(p);
+                            const isDragging = this.draggingId === p.id;
+                            const isDropTarget = this.dropTargetId === p.id;
+
                             return html`
-                                <div class="group relative rounded-xl border border-slate-800 bg-slate-950 overflow-hidden shadow-sm hover:border-slate-600 transition-colors">
-                                    <div class="aspect-[3/4] bg-slate-900 cursor-pointer relative"
+                                <div class="group relative rounded-xl border transition-all duration-200 
+                        ${isDragging ? 'opacity-30 scale-95 border-emerald-500' : 'bg-slate-950'} 
+                        ${isDropTarget ? 'border-emerald-400 translate-y-1' : 'border-slate-800'}"
+                                     draggable="true"
+                                     @dragstart=${() => this.onDragStart(p.id)}
+                                     @dragover=${(e: DragEvent) => this.onDragOver(e, p.id)}
+                                     @drop=${(e: DragEvent) => this.onDrop(e, p.id)}
+                                     @dragend=${() => {
+                                         this.draggingId = null;
+                                         this.dropTargetId = null;
+                                     }}>
+
+                                    <div class="aspect-[3/4] bg-slate-900 cursor-grab active:cursor-grabbing relative rounded-t-xl overflow-hidden"
                                          @click=${() => this.openViewerAt(realIdx)}>
                                         ${this.thumbs[p.id]
                                                 ? html`<img src=${this.thumbs[p.id]}
@@ -532,54 +578,33 @@ export class DocPage extends LitElement {
                                                         ?
                                                     </div>`
                                         }
-                                        ${p.words?.length ? html`
-                                            <div class="absolute top-2 right-2 px-1.5 py-0.5 bg-black/60 backdrop-blur text-emerald-400 text-[10px] font-bold rounded">
-                                                TXT
-                                            </div>` : null}
+                                        <div class="absolute top-2 left-2 px-1.5 py-0.5 bg-black/60 backdrop-blur text-white text-[10px] font-bold rounded">
+                                                #${realIdx + 1}
+                                        </div>
                                     </div>
 
-                                    <div class="p-2 flex items-center justify-between gap-1 bg-slate-950 border-t border-slate-900">
-                                        <span class="text-xs text-slate-500 font-mono w-5">#${realIdx + 1}</span>
-                                        <div class="flex items-center gap-1">
-                                            <button class="p-2 rounded hover:bg-slate-800 text-slate-400 hover:text-emerald-400 min-h-[36px] min-w-[36px]"
-                                                    title="Edit" @click=${() => this.editPage(p)}>
-                                                <svg class="w-4 h-4" fill="none" stroke="currentColor"
-                                                     viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round"
-                                                          stroke-width="2"
-                                                          d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
-                                                </svg>
-                                            </button>
-                                            <button class="p-2 rounded hover:bg-slate-800 text-slate-400 hover:text-amber-400 min-h-[36px] min-w-[36px]"
-                                                    title="Retake" @click=${() => this.retakePage(p.id)}>
-                                                <svg class="w-4 h-4" fill="none" stroke="currentColor"
-                                                     viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round"
-                                                          stroke-width="2"
-                                                          d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path>
-                                                    <path stroke-linecap="round" stroke-linejoin="round"
-                                                          stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                                                </svg>
-                                            </button>
-                                            <button class="p-2 rounded hover:bg-slate-800 text-slate-400 min-h-[36px] min-w-[36px]"
-                                                    @click=${() => this.movePage(p.id, -1)} ?disabled=${realIdx === 0}>↑
-                                            </button>
-                                            <button class="p-2 rounded hover:bg-slate-800 text-slate-400 min-h-[36px] min-w-[36px]"
-                                                    @click=${() => this.movePage(p.id, 1)}
-                                                    ?disabled=${realIdx === this.pages.length - 1}>↓
-                                            </button>
-                                            <button class="p-2 rounded hover:bg-red-900/30 text-slate-400 hover:text-red-400 min-h-[36px] min-w-[36px]"
-                                                    @click=${() => this.deletePage(p.id)}>
-                                                <svg class="w-4 h-4" fill="none" stroke="currentColor"
-                                                     viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round"
-                                                          stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                                </svg>
-                                            </button>
+                                    <div class="p-2 flex items-center justify-center gap-2 bg-slate-950 border-t border-slate-900 rounded-b-xl">
+                                        <button class="p-2 rounded hover:bg-slate-800 text-slate-400 hover:text-emerald-400"
+                                                title="Edit" @click=${() => this.editPage(p)}>
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                                                      stroke-width="2"></path>
+                                            </svg>
+                                        </button>
+                                        <button class="p-2 rounded hover:bg-red-900/30 text-slate-400 hover:text-red-400"
+                                                @click=${() => this.deletePage(p.id)}>
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path d="M6 18L18 6M6 6l12 12" stroke-width="2"></path>
+                                            </svg>
+                                        </button>
+                                        <div class="p-2 text-slate-700 cursor-grab">
+                                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                                <path d="M7 7h2v2H7V7zm0 4h2v2H7v-2zm4-4h2v2h-2V7zm0 4h2v2h-2v-2z"></path>
+                                            </svg>
                                         </div>
                                     </div>
                                 </div>
-                            `
+                            `;
                         })}
                     </div>
                 </div>
