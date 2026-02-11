@@ -254,8 +254,12 @@ export class AppRoot extends LitElement {
             <div class="min-h-dvh flex flex-col">
                 <header class="sticky top-0 z-10 bg-slate-950/80 backdrop-blur border-b border-slate-800">
                     <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
-                        <div class="font-semibold tracking-tight">Sahifah Lens</div>
-                        <nav class="flex gap-2">
+                        <div class="flex items-center gap-2">
+                            <img src="/icons/icon-192.png" class="w-8 h-8 rounded-lg shadow-sm" alt="Lens">
+                            <div class="font-semibold tracking-tight text-slate-100">Sahifah Lens</div>
+                        </div>
+
+                        <nav class="flex gap-1">
                             ${this.navLink('#/library', 'Library', active('library'))}
                             ${this.navLink('#/scan?new=1', 'Scan', active('scan'))}
                             ${this.navLink('#/settings', 'Settings', active('settings'))}
