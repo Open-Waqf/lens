@@ -1,13 +1,11 @@
-import {toArrayBuffer} from '../bytes';
-
 const PBKDF2_ITERATIONS = 100000;
 const SALT_SIZE = 16;
 const IV_SIZE = 12;
-const TAG_LENGTH_BITS = 128; // Standard AES-GCM
-const HEADER_MAGIC = new Uint8Array([83, 76, 66, 75]); // "SLBK" in ASCII
+const TAG_LENGTH_BITS = 128;
+const HEADER_MAGIC = new Uint8Array([83, 76, 66, 75]); // "SLBK"
 
 // ----------------------------------------------------------------------
-// 1. Key Derivation (Shared)
+// 1. Key Derivation
 // ----------------------------------------------------------------------
 
 async function deriveAesKey(password: string, salt: Uint8Array): Promise<CryptoKey> {
@@ -23,7 +21,8 @@ async function deriveAesKey(password: string, salt: Uint8Array): Promise<CryptoK
     return crypto.subtle.deriveKey(
         {
             name: 'PBKDF2',
-            salt: toArrayBuffer(salt),
+            // FORCE CAST: Tell TS this is a safe buffer
+            salt: salt as unknown as BufferSource,
             iterations: PBKDF2_ITERATIONS,
             hash: 'SHA-256'
         },
@@ -35,25 +34,21 @@ async function deriveAesKey(password: string, salt: Uint8Array): Promise<CryptoK
 }
 
 // ----------------------------------------------------------------------
-// 2. Stream Encryption (Export)
+// 2. Stream Encryption
 // ----------------------------------------------------------------------
 
 export async function* encryptStream(
     stream: AsyncGenerator<Uint8Array> | ReadableStream<Uint8Array>,
     password: string
 ): AsyncGenerator<Uint8Array> {
-    // 1. Generate & Write Header (Magic + Salt)
     const salt = crypto.getRandomValues(new Uint8Array(SALT_SIZE));
 
-    // Write Magic "SLBK"
+    // Write Header
     yield HEADER_MAGIC;
-    // Write Salt
     yield salt;
 
     const key = await deriveAesKey(password, salt);
 
-    // Normalize input to an async iterator
-    // (Handles both ReadableStream and the Generator from zipFilesToStream)
     const iterator = (stream instanceof ReadableStream)
         ? stream.getReader()
         : (stream as AsyncGenerator<Uint8Array>);
@@ -71,20 +66,24 @@ export async function* encryptStream(
             chunk = res.value;
         }
 
-        // 2. Encrypt Chunk with FRESH IV
-        // We generate a new IV for every chunk. This is the gold standard for large stream encryption.
         const iv = crypto.getRandomValues(new Uint8Array(IV_SIZE));
 
         const ciphertextBuffer = await crypto.subtle.encrypt(
-            {name: 'AES-GCM', iv, tagLength: TAG_LENGTH_BITS},
+            {
+                name: 'AES-GCM',
+                // FORCE CAST: Explicitly treat as BufferSource
+                iv: iv as unknown as BufferSource,
+                tagLength: TAG_LENGTH_BITS
+            },
             key,
-            toArrayBuffer(chunk)
+            // FORCE CAST: Explicitly treat as BufferSource
+            chunk as unknown as BufferSource
         );
         const ciphertext = new Uint8Array(ciphertextBuffer);
 
-        // 3. Write Frame: [Length (4)] + [IV (12)] + [Ciphertext (N)]
+        // Write Frame: [Length (4)] + [IV (12)] + [Ciphertext (N)]
         const lenBytes = new Uint8Array(4);
-        new DataView(lenBytes.buffer).setUint32(0, ciphertext.byteLength, true); // Little Endian
+        new DataView(lenBytes.buffer).setUint32(0, ciphertext.byteLength, true);
 
         yield lenBytes;
         yield iv;
@@ -95,13 +94,9 @@ export async function* encryptStream(
 }
 
 // ----------------------------------------------------------------------
-// 3. Stream Decryption (Restore)
+// 3. Stream Decryption
 // ----------------------------------------------------------------------
 
-/**
- * Robust buffering reader for streams.
- * Allows reading exact byte counts across chunk boundaries.
- */
 class ChunkReader {
     private reader: ReadableStreamDefaultReader<Uint8Array>;
     private buffer: Uint8Array = new Uint8Array(0);
@@ -118,10 +113,9 @@ class ChunkReader {
             const {done, value} = await this.reader.read();
             if (done) {
                 this.done = true;
-                continue; // Loop once more to trigger EOF check above
+                continue;
             }
 
-            // Append new data
             const newBuf = new Uint8Array(this.buffer.length + value.length);
             newBuf.set(this.buffer);
             newBuf.set(value, this.buffer.length);
@@ -129,7 +123,7 @@ class ChunkReader {
         }
 
         const res = this.buffer.slice(0, count);
-        this.buffer = this.buffer.slice(count); // Shift buffer
+        this.buffer = this.buffer.slice(count);
         return res;
     }
 
@@ -150,7 +144,6 @@ export async function* decryptStream(
     const reader = new ChunkReader(stream);
 
     try {
-        // 1. Read & Verify Magic "SLBK"
         try {
             const magic = await reader.readExactly(4);
             const magicStr = new TextDecoder().decode(magic);
@@ -158,43 +151,40 @@ export async function* decryptStream(
                 throw new Error('Invalid file format: Not a SLBK backup');
             }
         } catch (e) {
-            // If we can't even read 4 bytes, file is empty or corrupt
             throw new Error('Invalid backup file or wrong password');
         }
 
-        // 2. Read Salt
         const salt = await reader.readExactly(SALT_SIZE);
         const key = await deriveAesKey(password, salt);
 
-        // 3. Chunk Loop
         while (true) {
             let chunkLen: number;
             try {
-                // Try to read the length of the next chunk.
-                // If we hit EOF here (and buffer is empty), it's a clean exit.
                 chunkLen = await reader.readUint32();
             } catch (e) {
                 break; // Clean EOF
             }
 
-            // Safety Cap (100MB chunk limit for sanity/DoS protection)
             if (chunkLen > 100 * 1024 * 1024) throw new Error("Corrupt backup: Chunk size too large");
 
-            // Read IV (12) + Ciphertext (N)
             const iv = await reader.readExactly(IV_SIZE);
             const ciphertext = await reader.readExactly(chunkLen);
 
-            // Decrypt
             const plainBuffer = await crypto.subtle.decrypt(
-                {name: 'AES-GCM', iv: toArrayBuffer(iv), tagLength: TAG_LENGTH_BITS},
+                {
+                    name: 'AES-GCM',
+                    // FORCE CAST: Explicitly treat as BufferSource
+                    iv: iv as unknown as BufferSource,
+                    tagLength: TAG_LENGTH_BITS
+                },
                 key,
-                toArrayBuffer(ciphertext)
+                // FORCE CAST: Explicitly treat as BufferSource
+                ciphertext as unknown as BufferSource
             );
 
             yield new Uint8Array(plainBuffer);
         }
     } catch (e) {
-        // Provide a clearer error if it's likely a password issue (MAC error)
         if ((e as Error).name === 'OperationError') {
             throw new Error('Incorrect password');
         }

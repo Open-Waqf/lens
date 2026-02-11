@@ -7,8 +7,8 @@ on:
     paths-ignore:
       - '*.md'
       - 'LICENSE'
-      - '.gitignore'
       - 'docs/**'
+      - '**/test-images/**'
 
 permissions:
   contents: write
@@ -22,7 +22,7 @@ jobs:
       - name: Checkout Source
         uses: actions/checkout@v4
 
-      # 1. Setup Node with Caching (Automatic)
+      # 1. Setup Node
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -32,37 +32,33 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      # 2. Cache Playwright Browsers to speed up tests
-      - name: Get installed Playwright version
-        id: playwright-version
-        run: echo "PLAYWRIGHT_VERSION=$(npm ls @playwright/test | grep @playwright/test | sed 's/.*@//')" >> $GITHUB_ENV
-
-      - name: Cache Playwright Binaries
-        uses: actions/cache@v4
-        id: playwright-cache
-        with:
-          path: |
-            ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ env.PLAYWRIGHT_VERSION }}
-
-      - name: Install Playwright Browsers
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: npx playwright install --with-deps
-
-      - name: Run Safety Tests
-        run: npx playwright test
-
+      # 2. Build First (Required for E2E Tests)
       - name: Build Project
         run: npm run build
 
+      # 3. Unit Tests (Fast Fail)
+      - name: Run Unit Tests (Crypto/Logic)
+        run: npm run test:unit
+
+      # 4. E2E Tests (Needs the Build artifact)
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps
+
+      - name: Run Safety Tests (E2E)
+        run: npx playwright test
+
+      # 5. Deployment Prep
       - name: Copy CNAME
         run: echo "lens.open-waqf.org" > dist/CNAME
 
-      - name: Upload Bundle Stats
+      # (Optional) Upload Report if tests fail
+      - name: Upload Playwright Report
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: bundle-stats
-          path: dist/stats.html
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30
 
       - name: Deploy to Deploy Branch
         uses: JamesIves/github-pages-deploy-action@v4

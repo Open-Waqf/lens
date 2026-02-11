@@ -5,13 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest",
     "test:e2e": "playwright test",
-    "cap:sync": "npx cap sync",
-    "cap:open:android": "npx cap open android",
-    "cap:run:android": "npx cap run android"
+    "test:e2e:ui": "playwright test --ui",
+    "cap:sync": "cap sync",
+    "cap:open:android": "cap open android",
+    "cap:run:android": "cap run android"
   },
   "dependencies": {
     "@capacitor-mlkit/document-scanner": "^8.0.0",
@@ -33,15 +36,19 @@
   "devDependencies": {
     "@capacitor/assets": "3.0.5",
     "@capacitor/cli": "^8.0.2",
-    "@playwright/test": "^1.58.2",
+    "@playwright/test": "1.58.2",
     "@tailwindcss/vite": "^4.1.18",
     "@types/jszip": "3.4.0",
+    "@types/node": "25.2.3",
+    "@vitest/ui": "4.0.18",
+    "jsdom": "28.0.0",
     "rollup-plugin-visualizer": "6.0.5",
     "tailwindcss": "^4.1.18",
     "typescript": "~5.9.3",
     "vite": "^7.2.4",
     "vite-plugin-compression": "0.5.1",
     "vite-plugin-progress": "0.0.7",
-    "vite-plugin-pwa": "^1.2.0"
+    "vite-plugin-pwa": "^1.2.0",
+    "vitest": "4.0.18"
   }
 }

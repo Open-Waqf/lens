@@ -272,11 +272,10 @@ export class SettingsPage extends LitElement {
      */
     private async restoreFromZip(file: File): Promise<void> {
         const zip = new JSZip();
-        // Load the zip content (this is fast for modern JSZip as it reads central directory)
         const loadedZip = await zip.loadAsync(file);
 
         // 1. Read Metadata
-        const metaFile = loadedZip.file('sahifah_backup.json');
+        const metaFile = loadedZip.file('metadata.json');
         if (!metaFile) throw new Error('Invalid backup: missing metadata');
 
         const metaStr = await metaFile.async('string');
@@ -298,13 +297,13 @@ export class SettingsPage extends LitElement {
         // We iterate specifically over the files inside the 'files/' folder in the zip
         const filePromises: Promise<void>[] = [];
 
-        loadedZip.folder('files')?.forEach((relativePath, zipEntry) => {
-            if (zipEntry.dir) return;
+        loadedZip.forEach((relativePath, zipEntry) => {
+            if (zipEntry.dir || relativePath === 'metadata.json') return;
 
             filePromises.push((async () => {
                 const data = await zipEntry.async('uint8array');
-                // Restore to: docs/{docId}/pages/{pageId}.jpg
-                // The zip structure should correspond to the relative path needed
+                // The relativePath is already 'docs/uuid/pages/uuid.jpg'
+                // This matches exactly what OPFS expects
                 await store.put(relativePath, data, 'image/jpeg');
             })());
         });

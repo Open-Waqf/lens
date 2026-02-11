@@ -1,4 +1,4 @@
-import {defineConfig} from 'vite';
+import {defineConfig} from 'vitest/config';
 import tailwindcss from '@tailwindcss/vite';
 import {VitePWA} from 'vite-plugin-pwa';
 import progress from 'vite-plugin-progress';
@@ -11,6 +11,11 @@ export default defineConfig({
         sourcemap: false,
         chunkSizeWarningLimit: 1000,
         minify: 'terser',
+        rollupOptions: {
+            external: [
+                '**/test-images/**'
+            ]
+        },
         terserOptions: {
             compress: {
                 drop_console: true,
@@ -85,5 +90,30 @@ export default defineConfig({
             gzipSize: true,
             brotliSize: true
         }),
-    ]
+    ],
+    server: {
+        headers: {
+            'Cross-Origin-Opener-Policy': 'same-origin',
+            'Cross-Origin-Embedder-Policy': 'require-corp',
+            'Cross-Origin-Resource-Policy': 'cross-origin'
+        }
+    },
+    preview: {
+        port: 4173,
+        headers: {
+            'Cross-Origin-Opener-Policy': 'same-origin',
+            'Cross-Origin-Embedder-Policy': 'require-corp',
+            'Cross-Origin-Resource-Policy': 'cross-origin'
+        }
+    },
+    test: {
+        globals: true,
+        environment: 'jsdom',
+
+        // 1. Tell Vitest ONLY to look in tests/unit
+        include: ['tests/unit/**/*.{test,spec}.ts'],
+
+        // 2. Explicitly EXCLUDE the e2e folder just to be safe
+        exclude: ['tests/e2e/**/*', 'node_modules/**/*'],
+    },
 });
