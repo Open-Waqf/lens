@@ -325,7 +325,7 @@ export class ScanPage extends LitElement {
         }
 
         this.clearEditor();
-        // Implicit restart - gracefully fail if no camera
+        // Fallback to idle if camera fails to start implicitly
         this.beginCameraFromGesture(false);
     };
 
@@ -871,7 +871,10 @@ export class ScanPage extends LitElement {
                     </button>
 
                     <button class="w-full py-3 text-slate-500 hover:text-slate-300 font-medium transition-all"
-                            @click=${() => this.exitScan()}>
+                            @click=${() => {
+                                this.showPermissionError = false;
+                                this.session.setStage('idle');
+                            }}>
                         Go Back
                     </button>
                 </div>
@@ -1014,7 +1017,7 @@ export class ScanPage extends LitElement {
                             <page-editor
                                     .blob=${this.captured!}
                                     .initialQuad=${this.editorInitialQuad}
-                                    ?disableAutoDetect=${!!this.editingPageId}
+                                    ?disableAutoDetect=${!!this.editingPageId || !!this.editorInitialQuad}
                                     @page-editor-save=${this.onEditorSave}
                                     @page-editor-cancel=${this.onEditorCancel}
                             ></page-editor>
