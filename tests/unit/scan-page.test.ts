@@ -1,50 +1,52 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import '../../src/pages/scan-page';
-import { ScanPage } from '../../src/pages/scan-page';
+import {ScanPage} from '../../src/pages/scan-page';
 
 // --- 1. GLOBAL JSDOM MOCKS ---
 
 HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
     drawImage: vi.fn(),
-    getImageData: vi.fn(() => ({ data: new Uint8ClampedArray(4) })),
-    toBlob: vi.fn((cb: any) => cb(new Blob(['mock'], { type: 'image/jpeg' }))),
-    measureText: vi.fn(() => ({ width: 0 })),
+    getImageData: vi.fn(() => ({data: new Uint8ClampedArray(4)})),
+    toBlob: vi.fn((cb: any) => cb(new Blob(['mock'], {type: 'image/jpeg'}))),
+    measureText: vi.fn(() => ({width: 0})),
     fillText: vi.fn(),
     fillRect: vi.fn(),
     clearRect: vi.fn(),
 })) as any;
 
-HTMLCanvasElement.prototype.toBlob = vi.fn((cb: any) => cb(new Blob(['mock'], { type: 'image/jpeg' })));
+HTMLCanvasElement.prototype.toBlob = vi.fn((cb: any) => cb(new Blob(['mock'], {type: 'image/jpeg'})));
 
 class MockOffscreenCanvas {
     width = 100;
     height = 100;
+
     getContext() {
         return {
             drawImage: vi.fn(),
-            getImageData: vi.fn(() => ({ data: new Uint8ClampedArray(4) }))
+            getImageData: vi.fn(() => ({data: new Uint8ClampedArray(4)}))
         };
     }
 }
+
 // @ts-ignore
 global.OffscreenCanvas = MockOffscreenCanvas;
 
 // --- 2. DEPENDENCY MOCKS ---
 
 vi.mock('@capacitor/core', () => ({
-    Capacitor: { isNativePlatform: () => false, convertFileSrc: (s: any) => s }
+    Capacitor: {isNativePlatform: () => false, convertFileSrc: (s: any) => s}
 }));
 
 vi.mock('@capacitor/haptics', () => ({
-    Haptics: { impact: vi.fn() },
-    ImpactStyle: { Medium: 'MEDIUM' }
+    Haptics: {impact: vi.fn()},
+    ImpactStyle: {Medium: 'MEDIUM'}
 }));
 
 vi.mock('@capacitor-mlkit/document-scanner', () => ({
-    DocumentScanner: { scanDocument: vi.fn() }
+    DocumentScanner: {scanDocument: vi.fn()}
 }));
 
-const mockCameraStart = vi.fn().mockResolvedValue({ width: 1920, height: 1080 });
+const mockCameraStart = vi.fn().mockResolvedValue({width: 1920, height: 1080});
 const mockCameraStop = vi.fn();
 
 vi.mock('../../src/lib/camera/camera-manager', () => {
@@ -54,12 +56,14 @@ vi.mock('../../src/lib/camera/camera-manager', () => {
             stop = mockCameraStop;
             isRunning = false;
             torchSupported = true;
-            async toggleTorch() {}
+
+            async toggleTorch() {
+            }
         }
     };
 });
 
-const mockCreateDoc = vi.fn().mockResolvedValue({ id: 'doc_123', title: 'Test Scan' });
+const mockCreateDoc = vi.fn().mockResolvedValue({id: 'doc_123', title: 'Test Scan'});
 const mockAddNewPage = vi.fn().mockResolvedValue('page_123');
 
 vi.mock('../../src/pages/scan/scan-repo', () => {
@@ -68,7 +72,7 @@ vi.mock('../../src/pages/scan/scan-repo', () => {
             createDoc = mockCreateDoc;
             addNewPage = mockAddNewPage;
             getDoc = vi.fn().mockResolvedValue(null);
-            getDocStrip = vi.fn().mockResolvedValue({ items: [], pageCount: 0 });
+            getDocStrip = vi.fn().mockResolvedValue({items: [], pageCount: 0});
             getPageImageBytes = vi.fn().mockResolvedValue(new Uint8Array(0));
             updateExistingPage = vi.fn();
         }
@@ -78,15 +82,19 @@ vi.mock('../../src/pages/scan/scan-repo', () => {
 // Mock Worker
 class MockWorker {
     onmessage: ((ev: any) => void) | null = null;
+
     postMessage(data: any) {
         if (data.type === 'detect' && this.onmessage) {
             setTimeout(() => {
-                this.onmessage!({ data: { type: 'result', confidence: 0.9, quad: null } } as MessageEvent);
+                this.onmessage!({data: {type: 'result', confidence: 0.9, quad: null}} as MessageEvent);
             }, 0);
         }
     }
-    terminate() {}
+
+    terminate() {
+    }
 }
+
 global.Worker = MockWorker as any;
 
 global.URL.createObjectURL = vi.fn(() => 'blob:mock-url');
@@ -172,11 +180,9 @@ describe('ScanPage Component', () => {
         // Ensure button exists before searching
         await waitForElement(element, 'button');
 
-        const allBtns = Array.from(element.querySelectorAll('button'));
-        const realCaptureBtn = allBtns.find(b => b.textContent?.trim() === 'Capture');
-
-        expect(realCaptureBtn).toBeTruthy();
-        realCaptureBtn?.click();
+        const captureBtn = element.querySelector('button[aria-label="capture"]') as HTMLButtonElement | null;
+        expect(captureBtn).toBeTruthy();
+        captureBtn!.click();
 
         // Wait for editor to appear
         await waitForElement(element, 'page-editor');

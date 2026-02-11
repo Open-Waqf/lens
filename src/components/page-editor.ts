@@ -12,6 +12,15 @@ export type PageEditorSaveDetail = {
     extractText: boolean;
 };
 
+// CSS approximations for the UI previews (Real processing happens in Worker)
+const FILTER_PREVIEWS: { mode: FilterMode; label: string; style: string }[] = [
+    {mode: 'original', label: 'Original', style: ''},
+    {mode: 'magic', label: 'Magic', style: 'filter: contrast(1.1) saturate(1.3) brightness(1.05);'},
+    {mode: 'whiteboard', label: 'Whiteboard', style: 'filter: grayscale(0.1) contrast(1.2) brightness(1.1);'},
+    {mode: 'grayscale', label: 'Grayscale', style: 'filter: grayscale(1);'},
+    {mode: 'bw', label: 'B&W', style: 'filter: grayscale(1) contrast(1.6);'},
+];
+
 @customElement('page-editor')
 export class PageEditor extends LitElement {
     createRenderRoot() {
@@ -21,32 +30,36 @@ export class PageEditor extends LitElement {
     @property({type: Boolean}) extractText = true;
     @property({attribute: false}) blob!: Blob;
     @property({attribute: false}) filter: FilterMode = 'original';
-
-    // NEW PROPERTY
     @property({type: Boolean}) disableAutoDetect = false;
 
-    // ... (keep state properties: rotation, busy, err, sourceBitmap, baseCanvas, etc.) ...
     @state() private rotation: 0 | 90 | 180 | 270 = 0;
     @state() private busy = false;
     @state() private err: string | null = null;
+
     private sourceBitmap: ImageBitmap | null = null;
     private baseCanvas: HTMLCanvasElement | null = null;
+
+    // Small thumbnail for the filter picker UI
+    @state() private thumbUrl: string | null = null;
+
     private baseW = 0;
     private baseH = 0;
     @state() private quad: Quad | null = null;
+
     private _previewTimer: number | null = null;
     private _previewToken = 0;
     private worker: Worker | null = null;
+
     @query('canvas[data-edges]') private edgesEl!: HTMLCanvasElement;
     private dragIdx: number | null = null;
     @query('canvas[data-preview]') private previewEl!: HTMLCanvasElement;
     @query('canvas[data-magnify]') private magnifyEl!: HTMLCanvasElement;
+
     private history: Array<{ quad: Quad; filter: FilterMode; rotation: 0 | 90 | 180 | 270 }> = [];
     @state() private showMagnify = false;
     @state() private magnifyX = 0;
     @state() private magnifyY = 0;
 
-    // ... (keep pushHistory, undo, disconnectedCallback) ...
     private pushHistory(): void {
         if (!this.quad) return;
         if (this.history.length > 80) this.history.shift();
@@ -99,13 +112,12 @@ export class PageEditor extends LitElement {
         this.rotation = ((this.rotation + 90) % 360) as 0 | 90 | 180 | 270;
         this.updateBaseCanvasFromSource();
 
-        // FIXED: Shift the array indices so [0] is always the Visual Top-Left
         const q = this.quad;
         this.quad = [
-            rot90(q[3], oldH), // Old Bottom-Left -> New Top-Left (Index 0)
-            rot90(q[0], oldH), // Old Top-Left    -> New Top-Right
-            rot90(q[1], oldH), // Old Top-Right   -> New Bottom-Right
-            rot90(q[2], oldH), // Old Bottom-Right-> New Bottom-Left
+            rot90(q[3], oldH),
+            rot90(q[0], oldH),
+            rot90(q[1], oldH),
+            rot90(q[2], oldH),
         ];
 
         this.drawEdges();
@@ -122,12 +134,10 @@ export class PageEditor extends LitElement {
             this.sourceBitmap = await createImageBitmap(this.blob);
             this.updateBaseCanvasFromSource();
 
-            // Start with full quad
             this.quad = fullQuad(this.baseW, this.baseH);
             await this.updateComplete;
             this.drawEdges();
 
-            // LOGIC CHANGE: Only auto-detect if NOT disabled
             if (!this.disableAutoDetect) {
                 void this.autoDetectEdges();
             } else {
@@ -138,7 +148,6 @@ export class PageEditor extends LitElement {
         }
     }
 
-    // ... (Rest of file remains unchanged: updateBaseCanvasFromSource, drawEdges, pickHandle, events, etc.)
     private updateBaseCanvasFromSource(): void {
         if (!this.sourceBitmap) return;
         const img = this.sourceBitmap;
@@ -158,6 +167,18 @@ export class PageEditor extends LitElement {
         this.baseCanvas = c;
         this.baseW = w;
         this.baseH = h;
+
+        this.updateThumbUrl(c);
+    }
+
+    private updateThumbUrl(source: HTMLCanvasElement) {
+        const t = document.createElement('canvas');
+        // Create slightly larger thumbnail for clearer preview
+        const scale = 160 / Math.max(source.width, source.height);
+        t.width = source.width * scale;
+        t.height = source.height * scale;
+        t.getContext('2d')?.drawImage(source, 0, 0, t.width, t.height);
+        this.thumbUrl = t.toDataURL('image/jpeg', 0.8);
     }
 
     private drawEdges(): void {
@@ -201,16 +222,12 @@ export class PageEditor extends LitElement {
         const x = ev.clientX - rect.left;
         const y = ev.clientY - rect.top;
 
-        // Visual scaling factors (Screen Pixels vs Internal Canvas Pixels)
-        // We need these to convert the mouse click into the Internal Canvas space
-        // because that is where we drew the circles.
         const canvasScaleX = this.edgesEl.width / rect.width;
         const canvasScaleY = this.edgesEl.height / rect.height;
 
         const clickX = x * canvasScaleX;
         const clickY = y * canvasScaleY;
 
-        // Source scaling factors (Source Image vs Internal Canvas Pixels)
         const sx = this.edgesEl.width / this.baseW;
         const sy = this.edgesEl.height / this.baseH;
 
@@ -218,15 +235,9 @@ export class PageEditor extends LitElement {
 
         for (let i = 0; i < 4; i++) {
             const p = this.quad[i];
-
-            // Where the point is drawn on the internal canvas
             const px = p.x * sx;
             const py = p.y * sy;
-
-            // Distance in Canvas Pixels
             const d = Math.hypot(px - clickX, py - clickY);
-
-            // Check distance (40 is the hit radius)
             if (d < 40 && (!best || d < best.d)) best = {i, d};
         }
         return best ? best.i : null;
@@ -249,8 +260,6 @@ export class PageEditor extends LitElement {
         const x = ev.clientX - rect.left;
         const y = ev.clientY - rect.top;
 
-        // FIX: Divide by the VISIBLE size (rect), not the internal canvas size.
-        // Then multiply by the source image size (baseW) to get the correct coordinate.
         const ix = clamp((x / rect.width) * this.baseW, 0, this.baseW - 1);
         const iy = clamp((y / rect.height) * this.baseH, 0, this.baseH - 1);
 
@@ -331,7 +340,7 @@ export class PageEditor extends LitElement {
             const img = tctx.getImageData(0, 0, w, h);
             const quad = await this.detectQuad(img.data, w, h);
 
-            if (!quad) return; // If no quad found, we stop here
+            if (!quad) return;
 
             const sx = this.baseW / w;
             const sy = this.baseH / h;
@@ -349,7 +358,6 @@ export class PageEditor extends LitElement {
             this.queuePreview();
 
         } finally {
-            // FIX: Always turn off busy flag, otherwise the UI stays frozen
             this.busy = false;
         }
     }
@@ -438,7 +446,6 @@ export class PageEditor extends LitElement {
         this.err = null;
         this.busy = true;
 
-        // 1. UI Animation: Wait for button to show "pressed" state
         this.requestUpdate();
         await new Promise(r => setTimeout(r, 50));
 
@@ -446,36 +453,26 @@ export class PageEditor extends LitElement {
             const mappedQuad = this.mapQuadToSource(this.quad);
             const rawSize = computeOutputSize(mappedQuad);
 
-            // --- RESOLUTION FIX START ---
-            // Tesseract needs ~1600px+ height for good accuracy.
-            // If the cropped area is smaller, we UPSCALE it.
             const MIN_OCR_DIM = 1600;
-            const MAX_DIM = 2500; // Cap at 2500 to prevent huge file sizes
+            const MAX_DIM = 2500;
 
             const largestDim = Math.max(rawSize.w, rawSize.h);
             let mScale = 1;
 
             if (largestDim < MIN_OCR_DIM) {
-                // Image is too small for OCR -> Upscale
                 mScale = MIN_OCR_DIM / largestDim;
             } else if (largestDim > MAX_DIM) {
-                // Image is too huge -> Downscale
                 mScale = MAX_DIM / largestDim;
             }
 
             const mW = Math.round(rawSize.w * mScale);
             const mH = Math.round(rawSize.h * mScale);
 
-            console.log(`OCR Output Size: ${mW}x${mH} (Source Crop was: ${rawSize.w}x${rawSize.h})`);
-            // --- RESOLUTION FIX END ---
-
-            // Calculate Thumbnail Size (Keep small, ~360px)
             const THUMB_MAX = 360;
             const tScale = Math.min(1, THUMB_MAX / largestDim);
             const tW = Math.round(rawSize.w * tScale);
             const tH = Math.round(rawSize.h * tScale);
 
-            // 2. Run Worker Tasks
             const masterTask = this.runWorkerTask({
                 id: `save-m-${Date.now()}`,
                 blob: this.blob,
@@ -485,7 +482,7 @@ export class PageEditor extends LitElement {
                 outW: mW,
                 outH: mH,
                 encode: true,
-                quality: 0.92 // High quality JPEG for OCR
+                quality: 0.92
             });
 
             const thumbTask = this.runWorkerTask({
@@ -564,79 +561,93 @@ export class PageEditor extends LitElement {
             ${this.err ? html`
                 <div class="p-3 rounded-lg bg-red-950/40 border border-red-900 text-red-200">${this.err}
                 </div>` : null}
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 space-y-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 h-full">
+
+                <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 space-y-3 flex flex-col">
                     <div class="flex items-center justify-between">
-                        <div class="text-sm font-medium text-slate-200">Edges</div>
+                        <div class="text-sm font-medium text-slate-200">Crop & Rotate</div>
                         <div class="flex gap-2">
-                            <button class="px-3 py-2 rounded-xl bg-slate-800 text-sm active:scale-95 transition-transform"
+                            <button class="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-400 active:scale-95 transition-transform"
                                     ?disabled=${this.busy}
-                                    @click=${() => void this.autoDetectEdges()}>Auto
+                                    @click=${() => void this.autoDetectEdges()}>
+                                AUTO
                             </button>
-                            <button class="px-3 py-2 rounded-xl bg-slate-800 text-sm active:scale-95 transition-transform"
+                            <button class="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-400 active:scale-95 transition-transform"
+                                    @click=${() => this.rotate90()}>
+                                ⟳ 90°
+                            </button>
+
+                            <button class="p-1.5 rounded-lg bg-slate-800 text-slate-400 active:scale-95 transition-transform"
+                                    title="Undo"
                                     ?disabled=${this.busy || this.history.length === 0}
                                     @click=${() => this.undo()}>
-                                Undo
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path>
+                                </svg>
                             </button>
                         </div>
                     </div>
-                    <div class="rounded-xl overflow-hidden border border-slate-800 bg-black relative">
-                        <canvas data-edges class="w-full h-auto touch-none select-none"
+
+                    <div class="flex-1 rounded-xl overflow-hidden border border-slate-800 bg-black relative shadow-inner min-h-[300px]">
+                        <canvas data-edges class="w-full h-full object-contain touch-none select-none"
                                 @pointerdown=${this.onPointerDown} @pointermove=${this.onPointerMove}
                                 @pointerup=${this.onPointerUp} @pointercancel=${this.onPointerUp}></canvas>
-                        <div class=${['absolute top-2 right-2 rounded-xl overflow-hidden border border-slate-800 bg-black shadow-lg', this.showMagnify ? '' : 'hidden'].join(' ')}>
+                        <div class=${['absolute top-2 right-2 rounded-xl overflow-hidden border-2 border-slate-700 bg-black shadow-2xl z-20', this.showMagnify ? '' : 'hidden'].join(' ')}>
                             <canvas data-magnify class="block"></canvas>
                         </div>
                     </div>
                 </div>
 
-                <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 space-y-3">
-                    <div class="flex flex-wrap gap-2 items-center justify-between">
-                        <div class="text-sm font-medium text-slate-200">Result</div>
-                        <div class="flex gap-2">
-                            <button class="px-3 py-2 rounded-xl bg-slate-800 text-sm"
-                                    @click=${() => this.rotate90()}>Rot 90°
-                            </button>
-                            <select class="bg-slate-900 border border-slate-700 rounded-lg px-2 py-2 text-sm text-white"
-                                    .value=${this.filter}
-                                    @change=${(e: Event) => {
+                <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 space-y-3 flex flex-col">
+                    <div class="text-sm font-medium text-slate-200">Filter & Finalize</div>
+
+                    <div class="flex overflow-x-auto gap-3 pb-2 -mx-1 px-1 no-scrollbar">
+                        ${FILTER_PREVIEWS.map(f => html`
+                            <button class="flex flex-col items-center gap-1 group min-w-[64px] active:scale-95 transition-transform"
+                                    @click=${() => {
                                         this.pushHistory();
-                                        this.filter = (e.target as HTMLSelectElement).value as FilterMode;
+                                        this.filter = f.mode;
                                         this.queuePreview();
                                     }}>
-                                <option value="original">Original</option>
-                                <option value="magic">✨ Magic Color</option>
-                                <option value="whiteboard">Whiteboard</option>
-                                <option value="grayscale">Grayscale</option>
-                                <option value="bw">B&W</option>
-                            </select>
-                        </div>
+                                <div class="w-16 h-16 rounded-xl border-2 overflow-hidden relative transition-all ${this.filter === f.mode ? 'border-emerald-500 ring-2 ring-emerald-500/30' : 'border-slate-800 group-hover:border-slate-600'}">
+                                    ${this.thumbUrl ? html`
+                                        <img src=${this.thumbUrl} class="w-full h-full object-cover" style="${f.style}">
+                                    ` : html`
+                                        <div class="w-full h-full bg-slate-900 animate-pulse"></div>`}
+                                </div>
+                                <span class="text-[10px] font-medium ${this.filter === f.mode ? 'text-emerald-400' : 'text-slate-500'}">${f.label}</span>
+                            </button>
+                        `)}
                     </div>
 
-                    <div class="rounded-xl overflow-hidden border border-slate-800 bg-black aspect-[3/4] relative">
-                        <canvas data-preview class="w-full h-full block"></canvas>
+                    <div class="flex-1 rounded-xl overflow-hidden border border-slate-800 bg-black relative shadow-inner min-h-[300px]">
+                        <canvas data-preview class="w-full h-full object-contain block"></canvas>
                         ${!this.sourceBitmap ? html`
-                            <div class="absolute inset-0 flex items-center justify-center text-xs text-slate-500">
-                                Loading...
+                            <div class="absolute inset-0 flex items-center justify-center text-xs text-slate-500 animate-pulse">
+                                Loading Preview...
                             </div>` : null}
                     </div>
 
-                    <div class="flex gap-2">
-                        <div class="flex items-center gap-2 mb-2 px-1">
+                    <div class="flex gap-2 pt-2 border-t border-slate-800/50">
+                        <div class="flex items-center gap-2 px-2">
                             <input type="checkbox" id="ocr-check"
                                    class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-emerald-600 focus:ring-emerald-500"
                                    .checked=${this.extractText}
                                    @change=${(e: Event) => this.extractText = (e.target as HTMLInputElement).checked}>
-                            <label for="ocr-check" class="text-xs text-slate-300 select-none cursor-pointer">
-                                Extract Text (OCR)
+                            <label for="ocr-check"
+                                   class="text-xs text-slate-300 select-none cursor-pointer font-medium">
+                                OCR
                             </label>
                         </div>
-                        <button class="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 active:scale-95 transition-all text-slate-950 font-semibold"
-                                ?disabled=${this.busy} @click=${() => void this.onSave()}>
-                            ${this.busy ? 'Saving…' : 'Save'}
+                        <div class="flex-1"></div>
+                        <button class="px-6 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-300 font-medium transition-colors"
+                                ?disabled=${this.busy} @click=${this.onCancel}>
+                            Back
                         </button>
-                        <button class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700"
-                                ?disabled=${this.busy} @click=${this.onCancel}>Back
+                        <button class="px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 active:scale-95 transition-all text-white font-bold shadow-lg shadow-emerald-900/20"
+                                ?disabled=${this.busy} @click=${() => void this.onSave()}>
+                            ${this.busy ? 'Saving...' : 'Save'}
                         </button>
                     </div>
                 </div>
