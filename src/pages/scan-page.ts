@@ -275,6 +275,7 @@ export class ScanPage extends LitElement {
     }
 
     private async openNewBlobInEditor(blob: Blob, initialQuad: Quad | null = null): Promise<void> {
+        await this.stopCamera();
         this.captured = blob;
         this.editingPageId = null;
         this.editorInitialQuad = initialQuad;
@@ -283,6 +284,7 @@ export class ScanPage extends LitElement {
     }
 
     private async openExistingPageInEditor(pageId: string): Promise<void> {
+        await this.stopCamera();
         this.error = null;
         try {
             const bytes = await this.repo.getPageImageBytes(pageId);
@@ -421,7 +423,8 @@ export class ScanPage extends LitElement {
         }
         this.session.setStage('camera');
         if (this.camera.isRunning) return;
-        void (async () => {
+
+        setTimeout(async () => {
             try {
                 await this.updateComplete;
                 const res = await this.camera.start(this.videoEl);
@@ -432,7 +435,7 @@ export class ScanPage extends LitElement {
                 this.error = (e as Error).message ?? String(e);
                 this.session.setStage('idle');
             }
-        })();
+        }, 60);
     }
 
     private async invokeNativeScanner(): Promise<void> {
