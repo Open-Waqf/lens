@@ -187,29 +187,6 @@ export class LibraryPage extends LitElement {
         this.selectedIds = next;
     }
 
-    private async mergeSelected() {
-        const ids = Array.from(this.selectedIds);
-        const ok = await ConfirmModal.ask({
-            title: `Merge ${ids.length} Documents?`,
-            description: 'All pages will be combined into the oldest document. This cannot be undone.',
-            confirm: 'Merge'
-        });
-
-        if (!ok) return;
-
-        try {
-            const masterId = await this.repo.mergeDocuments(ids);
-            this.selectedIds = new Set();
-            this.selectionMode = false;
-            this.highlightDocId = masterId; // Highlight the result
-            await this.loadDocs();
-            void haptics.impact(ImpactStyle.Medium);
-        } catch (e) {
-            alert("Merge failed: " + e);
-        } finally {
-        }
-    }
-
     private async deleteSelected() {
         const count = this.selectedIds.size;
         if (count === 0) return;
@@ -265,6 +242,55 @@ export class LibraryPage extends LitElement {
         // Highlight match case-insensitively
         const regex = new RegExp(`(${query})`, 'gi');
         return snippet.replace(regex, '<b class="text-emerald-400 bg-emerald-950/50 px-0.5 rounded">$1</b>');
+    }
+
+    private async mergeSelected() {
+        const ids = Array.from(this.selectedIds);
+        const ok = await ConfirmModal.ask({
+            title: `Merge ${ids.length} Documents?`,
+            description: 'All pages will be combined into the oldest document. This cannot be undone.',
+            confirm: 'Merge'
+        });
+
+        if (!ok) return;
+
+        try {
+            const masterId = await this.repo.mergeDocuments(ids);
+            this.selectedIds = new Set();
+            this.selectionMode = false;
+            this.highlightDocId = masterId;
+            await this.loadDocs();
+            void haptics.impact(ImpactStyle.Medium);
+        } catch (e) {
+            alert("Merge failed: " + e);
+        } finally {
+        }
+    }
+
+    private async moveSelectedToFolder() {
+        // FIX: Instead of 'suggestions', we list folders in the description
+        const folders = Array.from(new Set(this.allDocsSource.map(d => d.folder).filter(Boolean))) as string[];
+        const folderList = folders.length > 0 ? `\n\nExisting: ${folders.join(', ')}` : '';
+
+        const folderName = await ConfirmModal.prompt({
+            title: 'Move to Folder',
+            description: 'Enter a folder name or leave blank to unsort.' + folderList,
+            placeholder: 'e.g. Taxes, Work...',
+            confirm: 'Move'
+        });
+
+        if (folderName === null) return;
+
+        const finalFolder = folderName.trim() || null;
+
+        for (const id of this.selectedIds) {
+            await db.docs.update(id, {folder: finalFolder, updatedAt: Date.now()});
+        }
+
+        this.selectionMode = false;
+        this.selectedIds = new Set();
+        await this.loadDocs();
+        void haptics.impact(ImpactStyle.Light);
     }
 
     private renderSafetyPrompt() {
@@ -394,6 +420,14 @@ export class LibraryPage extends LitElement {
     private renderActionButtons(isGallery: boolean) {
         return html`
             ${this.selectionMode ? html`
+                <button class="p-2 rounded-full hover:bg-slate-800 text-slate-400"
+                        @click=${this.moveSelectedToFolder}
+                        ?disabled=${this.selectedIds.size === 0}>
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
+                    </svg>
+                </button>
                 <button class="px-3 py-1.5 text-xs font-bold text-emerald-400 bg-emerald-950/30 rounded-lg border border-emerald-900/50"
                         @click=${this.mergeSelected}
                         ?disabled=${this.selectedIds.size < 2}>
@@ -553,6 +587,18 @@ export class LibraryPage extends LitElement {
                         <span>${doc.pageIds.length} page${doc.pageIds.length === 1 ? '' : 's'}</span>
                         ${!isGallery ? html`<span>•</span><span>${date}</span>` : null}
                     </div>
+
+                    ${doc.folder ? html`
+                        <button @click=${(e: Event) => {
+                            e.stopPropagation();
+                            this.selectedTag = null;
+                            this.query = doc.folder!;
+                            this.applyFilters();
+                        }}
+                                class="mt-1 text-[10px] text-emerald-500 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded w-fit hover:bg-emerald-500/20">
+                            ${doc.folder}
+                        </button>
+                    ` : null}
 
                     ${!isGallery && snippet ? html`
                         <div class="mt-2 text-xs text-slate-400 bg-slate-950/50 p-2 rounded border border-slate-800/50 line-clamp-2 leading-relaxed">
