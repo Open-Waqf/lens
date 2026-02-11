@@ -113,6 +113,7 @@ export class LibraryPage extends LitElement {
                 if (d.title.toLowerCase().includes(q)) return true;
                 if (d.tags.some(t => t.toLowerCase().includes(q))) return true;
                 if (d.searchIndex && d.searchIndex.toLowerCase().includes(q)) return true;
+                if (d.notes && d.notes.toLowerCase().includes(q)) return true;
                 if (d.folder && d.folder.toLowerCase().includes(q)) return true;
                 return false;
             });
@@ -471,8 +472,12 @@ export class LibraryPage extends LitElement {
 
         const layoutClasses = isGallery ? "flex-col" : "flex";
 
-        // Use the snippet if query exists, else fallback to null
-        const snippet = this.getSearchSnippet(doc.searchIndex, this.query.trim());
+        const qTrim = this.query.trim();
+        // Check OCR text first, then check user notes for the snippet
+        let snippet = this.getSearchSnippet(doc.searchIndex, qTrim);
+        if (!snippet && doc.notes) {
+            snippet = this.getSearchSnippet(doc.notes, qTrim);
+        }
 
         return html`
             <div class="${baseClasses} ${stateClasses} ${layoutClasses} ${highlightClass}"

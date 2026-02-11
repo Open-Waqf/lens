@@ -444,6 +444,16 @@ export class DocPage extends LitElement {
                         </div>
                     </div>
 
+                    <div class="space-y-1 pt-2">
+                        <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Notes & Context</div>
+                        <textarea
+                                class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors min-h-[80px] resize-none"
+                                placeholder="Add details like 'Warranty ends Jan 2027' or 'Sent to Tax Office'..."
+                                .value=${live(this.doc.notes ?? '')}
+                                @change=${(e: Event) => this.saveMeta({notes: (e.target as HTMLTextAreaElement).value})}
+                        ></textarea>
+                    </div>
+
                     <div class="space-y-1">
                         <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Find in document
                         </div>

@@ -12,13 +12,11 @@ export interface DocRecord {
     title: string;
     folder: string | null;
     tags: string[];
+    notes?: string;
     createdAt: number;
     updatedAt: number;
     pageIds: string[];
     pdfPath?: string;
-
-    // NEW: The "Brain" memory
-    // Contains aggregated text from all pages for instant search
     searchIndex?: string;
     vaultEnabled?: boolean;
 }
