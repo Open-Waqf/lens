@@ -10,6 +10,8 @@ import {ScanRepo} from './scan/scan-repo';
 import {bytesToBlob} from '../lib/bytes';
 import {ConfirmModal} from '../components/confirm-modal';
 import {ocrQueue} from '../services/ocr-queue';
+import {haptics} from "../services/haptics";
+import {ImpactStyle} from "@capacitor/haptics";
 
 type ViewMode = 'list' | 'gallery';
 
@@ -183,6 +185,29 @@ export class LibraryPage extends LitElement {
         if (next.has(id)) next.delete(id);
         else next.add(id);
         this.selectedIds = next;
+    }
+
+    private async mergeSelected() {
+        const ids = Array.from(this.selectedIds);
+        const ok = await ConfirmModal.ask({
+            title: `Merge ${ids.length} Documents?`,
+            description: 'All pages will be combined into the oldest document. This cannot be undone.',
+            confirm: 'Merge'
+        });
+
+        if (!ok) return;
+
+        try {
+            const masterId = await this.repo.mergeDocuments(ids);
+            this.selectedIds = new Set();
+            this.selectionMode = false;
+            this.highlightDocId = masterId; // Highlight the result
+            await this.loadDocs();
+            void haptics.impact(ImpactStyle.Medium);
+        } catch (e) {
+            alert("Merge failed: " + e);
+        } finally {
+        }
     }
 
     private async deleteSelected() {
@@ -369,6 +394,11 @@ export class LibraryPage extends LitElement {
     private renderActionButtons(isGallery: boolean) {
         return html`
             ${this.selectionMode ? html`
+                <button class="px-3 py-1.5 text-xs font-bold text-emerald-400 bg-emerald-950/30 rounded-lg border border-emerald-900/50"
+                        @click=${this.mergeSelected}
+                        ?disabled=${this.selectedIds.size < 2}>
+                    Merge
+                </button>
                 <button class="px-3 py-1.5 text-xs font-bold text-red-400 bg-red-950/30 rounded-lg border border-red-900/50"
                         @click=${this.deleteSelected}
                         ?disabled=${this.selectedIds.size === 0}>

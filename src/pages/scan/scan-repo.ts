@@ -326,6 +326,43 @@ export class ScanRepo {
         await db.docs.update(docId, {searchIndex: fullText});
     }
 
+    async mergeDocuments(docIds: string[]): Promise<string> {
+        if (docIds.length < 2) return docIds[0];
+
+        const [targetId, ...others] = docIds;
+        const targetDoc = await db.docs.get(targetId);
+        if (!targetDoc) throw new Error("Target document not found");
+
+        await db.transaction('rw', [db.docs, db.pages], async () => {
+            let combinedSearchIndex = targetDoc.searchIndex || '';
+            const combinedPageIds = [...targetDoc.pageIds];
+
+            for (const otherId of others) {
+                const otherDoc = await db.docs.get(otherId);
+                if (!otherDoc) continue;
+
+                // 1. Move the pages in the DB
+                await db.pages.where('docId').equals(otherId).modify({docId: targetId});
+
+                // 2. Aggregate search index and page IDs
+                if (otherDoc.searchIndex) combinedSearchIndex += ' ' + otherDoc.searchIndex;
+                combinedPageIds.push(...otherDoc.pageIds);
+
+                // 3. Delete the old document record (files are now owned by targetId)
+                await db.docs.delete(otherId);
+            }
+
+            // 4. Update the master document
+            await db.docs.update(targetId, {
+                pageIds: combinedPageIds,
+                searchIndex: combinedSearchIndex.trim(),
+                updatedAt: Date.now()
+            });
+        });
+
+        return targetId;
+    }
+
     private async runBackgroundOcr(pageId: string, bytes: Uint8Array, w: number, h: number) {
         try {
             const blob = bytesToBlob(bytes, 'image/jpeg');
