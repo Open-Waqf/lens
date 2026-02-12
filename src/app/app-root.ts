@@ -43,7 +43,6 @@ type Fatal = { message: string; detail?: string };
 export class AppRoot extends LitElement {
     @state() private _isLoading = true;
     @state() private _isLocked = true;
-    private _isPrompting = false;
 
     createRenderRoot() {
         return this;
@@ -62,21 +61,19 @@ export class AppRoot extends LitElement {
 
         // 2. Listen for App Resume
         App.addListener('appStateChange', async (state) => {
-            const prefs = await settings.get();
-            if (!prefs.requireAuth) return;
-
             if (state.isActive) {
-                if (this._isPrompting) return;
-                // APP RESUMED: Check if we are currently unlocked in the service
-                const isAuth = await AuthService.isAuthenticated();
-                if (!isAuth) {
-                    this._isLocked = true;
-                    this.requestUpdate();
-                    void this._triggerNativeUnlock();
+                if (AuthService.isPrompting) return;
+
+                const prefs = await settings.get();
+                if (prefs.requireAuth) {
+                    const isAuth = await AuthService.isAuthenticated();
+                    if (!isAuth) {
+                        this._isLocked = true;
+                        this.requestUpdate();
+                        void this._triggerNativeUnlock();
+                    }
                 }
             } else {
-                // APP BACKGROUNDED: Immediately reset the service lock
-                // so it requires a new scan when the user returns.
                 AuthService.lock();
             }
         });
@@ -147,29 +144,23 @@ export class AppRoot extends LitElement {
     private async _triggerNativeUnlock() {
         if (!Capacitor.isNativePlatform()) return;
 
-        if (this._isPrompting) return;
+        // Use the GLOBAL guard from the service
+        if (AuthService.isPrompting) return;
 
         try {
             const result = await NativeBiometric.isAvailable();
             if (!result.isAvailable) return;
 
-            this._isPrompting = true;
-
-            // This calls the system prompt and sets _isUnlocked = true inside the service
+            // AuthService.promptAuth() now manages its own 'isPrompting' promise
             const success = await AuthService.promptAuth();
 
             if (success) {
                 this._isLocked = false;
                 this.requestUpdate();
+                console.log("AppRoot: Unlocked successfully via Native Biometrics");
             }
         } catch (e) {
             console.log('Native unlock failed', e);
-        } finally {
-            // Wait a tiny bit before unlocking the guard to let
-            // the Android "resume" events finish firing.
-            setTimeout(() => {
-                this._isPrompting = false;
-            }, 500);
         }
     }
 

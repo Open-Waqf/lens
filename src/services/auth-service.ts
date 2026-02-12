@@ -7,41 +7,56 @@ const WEBAUTHN_ID_KEY = 'sahifah.webauthn_id';
 export class AuthService {
     private static _isUnlocked = false;
 
-    static async isAuthenticated(): Promise<boolean> {
-        // If the variable is already true, don't even bother reading settings
-        if (this._isUnlocked) return true;
+    private static _promptInFlight: Promise<boolean> | null = null;
 
+    static get isPrompting() {
+        return this._promptInFlight !== null;
+    }
+
+    static async isAuthenticated(): Promise<boolean> {
+        if (this._isUnlocked) return true;
         const currentSettings = await settings.get();
         if (!currentSettings.requireAuth) return true;
         return this._isUnlocked;
     }
 
     static lock(): void {
+        if (this.isPrompting) return;
         this._isUnlocked = false;
     }
 
-    /**
-     * Tries to authenticate the user using the best available method.
-     */
     static async promptAuth(): Promise<boolean> {
-        if (Capacitor.isNativePlatform()) {
-            try {
-                await NativeBiometric.verifyIdentity({
-                    reason: "Access your private Sahifah vault",
-                    title: "Unlock Sahifah",
-                    subtitle: "Authenticate to continue",
-                    description: " "
-                });
+        if (this._isUnlocked) return true;
 
-                // SUCCESS: Mark as unlocked
-                this._isUnlocked = true;
-                return true;
-            } catch (e) {
-                this._isUnlocked = false;
-                return false;
+        // If a prompt is already running, return the existing promise
+        if (this._promptInFlight) return this._promptInFlight;
+
+        this._promptInFlight = (async () => {
+            if (Capacitor.isNativePlatform()) {
+                try {
+                    await NativeBiometric.verifyIdentity({
+                        reason: "Access your private Sahifah vault",
+                        title: "Unlock Sahifah",
+                        subtitle: "Authenticate to continue",
+                        description: " "
+                    });
+                    this._isUnlocked = true;
+                    return true;
+                } catch {
+                    this._isUnlocked = false;
+                    return false;
+                }
             }
+            const ok = await this._webAuthnVerify();
+            this._isUnlocked = ok;
+            return ok;
+        })();
+
+        try {
+            return await this._promptInFlight;
+        } finally {
+            this._promptInFlight = null; // Clear the guard when done
         }
-        return await this._webAuthnVerify();
     }
 
     static async setupAuth(): Promise<boolean> {
@@ -50,16 +65,9 @@ export class AuthService {
                 const result = await NativeBiometric.isAvailable();
                 if (!result.isAvailable) return false;
 
-                await NativeBiometric.verifyIdentity({
-                    reason: "Enable App Lock",
-                    title: "Enable App Lock",
-                    subtitle: "Verify your identity",
-                    description: " "
-                });
-
-                // SUCCESS: Mark as unlocked so we don't loop
-                this._isUnlocked = true;
-                return true;
+                // Reuse the shared, guarded prompt logic
+                // This ensures _isUnlocked is set and _promptInFlight is handled
+                return await this.promptAuth();
             } catch (e) {
                 return false;
             }
