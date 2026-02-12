@@ -41,6 +41,8 @@ export class LibraryPage extends LitElement {
     @state() private groupByFolder = false;
     @state() private allTags: string[] = [];
 
+    @state() private loading = true;
+
     // Highlight logic
     @state() private highlightDocId: string | null = null;
 
@@ -96,9 +98,15 @@ export class LibraryPage extends LitElement {
     }
 
     private async loadDocs() {
-        this.allDocsSource = await db.docs.orderBy('updatedAt').reverse().toArray();
-        this.allTags = await this.repo.getAllTags();
-        this.applyFilters();
+        this.loading = true; // Start loading
+        try {
+
+            this.allDocsSource = await db.docs.orderBy('updatedAt').reverse().toArray();
+            this.allTags = await this.repo.getAllTags();
+            this.applyFilters();
+        } finally {
+            this.loading = false; // Stop loading
+        }
     }
 
     private applyFilters() {
@@ -350,6 +358,19 @@ export class LibraryPage extends LitElement {
         `;
     }
 
+    private renderSkeleton() {
+        return html`
+            <div class="flex flex-col gap-2 p-2 rounded-xl bg-slate-900/50 border border-slate-800/50">
+                <div class="aspect-[3/4] bg-slate-800 rounded-lg w-full animate-pulse"></div>
+
+                <div class="space-y-2 mt-1">
+                    <div class="h-3 bg-slate-800 rounded w-3/4 animate-pulse"></div>
+                    <div class="h-2 bg-slate-800/60 rounded w-1/2 animate-pulse"></div>
+                </div>
+            </div>
+        `;
+    }
+
     render() {
         const groups = this.groupedDocs;
         const isGallery = this.viewMode === 'gallery';
@@ -360,13 +381,19 @@ export class LibraryPage extends LitElement {
                 ${this.renderHeader(isGallery)}
                 ${this.renderSafetyPrompt()}
 
-                ${!hasDocs && !this.query && this.allDocsSource.length === 0
+                ${!hasDocs && !this.query && this.allDocsSource.length === 0 && !this.loading
                         ? this.renderEmptyState()
                         : html`
                             <div class="space-y-8 min-h-[50vh]">
-                                ${Object.entries(groups).map(([folderName, docs]) =>
-                                        this.renderFolderGroup(folderName, docs, isGallery)
-                                )}
+                                ${this.loading
+                                        ? html`
+                                            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                                                ${[...Array(10)].map(() => this.renderSkeleton())}
+                                            </div>`
+                                        : Object.entries(groups).map(([folderName, docs]) =>
+                                                this.renderFolderGroup(folderName, docs, isGallery)
+                                        )
+                                }
                                 <div id="load-more-sentinel" class="h-10 w-full"></div>
                             </div>
                         `
@@ -508,18 +535,29 @@ export class LibraryPage extends LitElement {
 
     private renderEmptyState() {
         return html`
-            <div class="flex flex-col items-center justify-center py-20 text-slate-500 text-center space-y-4">
-                <div class="w-24 h-24 bg-slate-900 rounded-full flex items-center justify-center mb-2">
-                    <svg class="w-10 h-10 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                              d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+            <div class="flex flex-col items-center justify-center min-h-[60vh] text-center p-6 space-y-6 relative">
+
+                <div class="w-32 h-32 bg-slate-900/50 rounded-full flex items-center justify-center border border-slate-800">
+                    <svg class="w-12 h-12 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
+                              d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
+                              d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/>
                     </svg>
                 </div>
+
                 <div>
-                    <h3 class="text-lg font-medium text-slate-300">No matching documents</h3>
-                    <p class="text-sm text-slate-500 max-w-xs mx-auto mt-1">
-                        Try a different keyword or tag.
+                    <h2 class="text-xl font-bold text-slate-200">Your Library is Empty</h2>
+                    <p class="text-sm text-slate-500 max-w-xs mx-auto mt-2">
+                        Tap the camera button below to digitize your first document securely.
                     </p>
+                </div>
+
+                <div class="absolute bottom-4 right-8 animate-bounce text-emerald-500">
+                    <svg class="w-8 h-8 rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
+                    </svg>
                 </div>
             </div>
         `;
