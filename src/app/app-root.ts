@@ -1,6 +1,8 @@
 import {html, LitElement} from 'lit';
 import {customElement, state} from 'lit/decorators.js';
 import {App} from '@capacitor/app';
+import {Capacitor} from '@capacitor/core';
+import {NativeBiometric} from '@capgo/capacitor-native-biometric'; // FIX: Correct package
 import {settings} from "../services/settings";
 
 import '../pages/scan-page';
@@ -41,6 +43,7 @@ type Fatal = { message: string; detail?: string };
 export class AppRoot extends LitElement {
     @state() private _isLoading = true;
     @state() private _isLocked = true;
+    private _isPrompting = false;
 
     createRenderRoot() {
         return this;
@@ -57,14 +60,24 @@ export class AppRoot extends LitElement {
         // 1. Initial Check
         this._checkAuth();
 
-        // 2. NEW: Listen for App Resume (Multitasking)
+        // 2. Listen for App Resume
         App.addListener('appStateChange', async (state) => {
+            const prefs = await settings.get();
+            if (!prefs.requireAuth) return;
+
             if (state.isActive) {
-                // App came to foreground -> Check if we need to lock
-                const prefs = await settings.get();
-                if (prefs.requireAuth) {
+                if (this._isPrompting) return;
+                // APP RESUMED: Check if we are currently unlocked in the service
+                const isAuth = await AuthService.isAuthenticated();
+                if (!isAuth) {
                     this._isLocked = true;
+                    this.requestUpdate();
+                    void this._triggerNativeUnlock();
                 }
+            } else {
+                // APP BACKGROUNDED: Immediately reset the service lock
+                // so it requires a new scan when the user returns.
+                AuthService.lock();
             }
         });
 
@@ -75,6 +88,10 @@ export class AppRoot extends LitElement {
         if (!location.hash) location.hash = '#/library';
 
         void (async () => {
+            if (Capacitor.isNativePlatform()) {
+                this.persist = {supported: true, persisted: true, grantedThisCall: false};
+                return;
+            }
             try {
                 this.persist = await getPersistenceStatus();
             } catch {
@@ -91,16 +108,10 @@ export class AppRoot extends LitElement {
 
         const runWarmup = async () => {
             if (location.hash.includes('scan')) return;
-
             const prefs = await settings.get();
-            if (!prefs.enableOcr) {
-                console.log('App: OCR disabled by user settings. Skipping warmup.');
-                return;
-            }
-
+            if (!prefs.enableOcr) return;
             try {
                 const {warmupOcr} = await import('../lib/ocr');
-                console.log('App: Warming up OCR engine in background...');
                 await warmupOcr();
             } catch (e) {
             }
@@ -108,7 +119,6 @@ export class AppRoot extends LitElement {
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const ric = (window as any).requestIdleCallback;
-
         if (typeof ric === 'function') {
             ric(() => void runGC(), {timeout: 2500});
             ric(() => void runWarmup(), {timeout: 10000});
@@ -120,15 +130,46 @@ export class AppRoot extends LitElement {
 
     private async _checkAuth() {
         try {
-            // Initial load check
             const isAuth = await AuthService.isAuthenticated();
             this._isLocked = !isAuth;
+
+            if (this._isLocked) {
+                void this._triggerNativeUnlock();
+            }
         } catch (e) {
             console.error("Auth check failed", e);
-            // Default to locked if check fails for safety
             this._isLocked = true;
         } finally {
             this._isLoading = false;
+        }
+    }
+
+    private async _triggerNativeUnlock() {
+        if (!Capacitor.isNativePlatform()) return;
+
+        if (this._isPrompting) return;
+
+        try {
+            const result = await NativeBiometric.isAvailable();
+            if (!result.isAvailable) return;
+
+            this._isPrompting = true;
+
+            // This calls the system prompt and sets _isUnlocked = true inside the service
+            const success = await AuthService.promptAuth();
+
+            if (success) {
+                this._isLocked = false;
+                this.requestUpdate();
+            }
+        } catch (e) {
+            console.log('Native unlock failed', e);
+        } finally {
+            // Wait a tiny bit before unlocking the guard to let
+            // the Android "resume" events finish firing.
+            setTimeout(() => {
+                this._isPrompting = false;
+            }, 500);
         }
     }
 
@@ -136,7 +177,7 @@ export class AppRoot extends LitElement {
         window.removeEventListener('hashchange', this._onHash);
         window.removeEventListener('error', this._onGlobalError);
         window.removeEventListener('unhandledrejection', this._onUnhandled);
-        App.removeAllListeners(); // Clean up listeners
+        App.removeAllListeners();
         super.disconnectedCallback();
     }
 
@@ -241,20 +282,16 @@ export class AppRoot extends LitElement {
                                   d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path>
                         </svg>
                     </div>
-                    <div class="flex flex-col items-center gap-2">
-                        <div class="text-2xl font-bold text-slate-100 tracking-tight">Sahifah Lens</div>
-                        <div class="text-sm text-slate-500 font-medium flex items-center gap-2">
-                            <div class="w-2 h-2 bg-emerald-500 rounded-full animate-ping"></div>
-                            Loading...
-                        </div>
-                    </div>
                 </div>
             `;
         }
 
         if (this._isLocked) {
             return html`
-                <auth-lock @unlocked=${() => this._isLocked = false}></auth-lock>`;
+                <auth-lock @unlocked=${() => {
+                    this._isLocked = false;
+                    this.requestUpdate();
+                }}></auth-lock>`;
         }
 
         if (this.fatal) return this.renderFatal();
@@ -264,10 +301,8 @@ export class AppRoot extends LitElement {
 
         return html`
             <div class="min-h-dvh flex flex-col bg-slate-950">
-
                 <main class="flex-1 w-full max-w-7xl mx-auto px-4 pt-[env(safe-area-inset-top)] pb-28 relative">
                     ${this.renderPersistenceBanner()}
-
                     ${r.name === 'library' ? html`
                         <library-page></library-page>` : null}
                     ${r.name === 'scan' ? html`
@@ -277,48 +312,40 @@ export class AppRoot extends LitElement {
                     ${r.name === 'settings' ? html`
                         <settings-page></settings-page>` : null}
                 </main>
-
                 ${showNav ? html`
                     <nav class="fixed bottom-0 left-0 right-0 z-50 bg-slate-950/90 backdrop-blur-md border-t border-slate-800 pb-[env(safe-area-inset-bottom)]">
                         <div class="max-w-7xl mx-auto flex items-center justify-around h-16 px-2">
-
                             <a href="#/library"
                                class="flex flex-col items-center gap-1 w-16 py-1 ${r.name === 'library' ? 'text-emerald-400' : 'text-slate-500 hover:text-slate-300'} transition-colors">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none"
-                                     stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round"
-                                     stroke-linejoin="round">
-                                    <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
                                 </svg>
                                 <span class="text-[10px] font-medium">Library</span>
                             </a>
-
                             <a id="MainScanBtn" href="#/scan?new=1"
                                class="flex flex-col items-center justify-center -mt-6 p-1 rounded-full bg-slate-950 border-4 border-slate-950 relative group">
                                 <div class="w-14 h-14 rounded-full bg-emerald-500 text-slate-950 flex items-center justify-center shadow-lg shadow-emerald-500/20 group-active:scale-95 transition-transform">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8" fill="none"
-                                         stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"
-                                         stroke-linecap="round" stroke-linejoin="round">
-                                        <path d="M12 4v16m8-8H4"></path>
+                                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                              d="M12 4v16m8-8H4"></path>
                                     </svg>
                                 </div>
                             </a>
-
                             <a href="#/settings"
                                class="flex flex-col items-center gap-1 w-16 py-1 ${r.name === 'settings' ? 'text-emerald-400' : 'text-slate-500 hover:text-slate-300'} transition-colors">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none"
-                                     stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round"
-                                     stroke-linejoin="round">
-                                    <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
-                                    <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
                                 </svg>
                                 <span class="text-[10px] font-medium">Settings</span>
                             </a>
-
                         </div>
                     </nav>
                 ` : null}
             </div>
-
             <toast-notification></toast-notification>
         `;
     }

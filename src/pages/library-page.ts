@@ -553,8 +553,8 @@ export class LibraryPage extends LitElement {
                     </p>
                 </div>
 
-                <div class="absolute bottom-4 right-8 animate-bounce text-emerald-500">
-                    <svg class="w-8 h-8 rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div class="absolute bottom-20 left-1/2 -translate-x-1/2 animate-bounce text-emerald-500">
+                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                               d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
                     </svg>

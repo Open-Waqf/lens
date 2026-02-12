@@ -8,55 +8,65 @@ export class AuthService {
     private static _isUnlocked = false;
 
     static async isAuthenticated(): Promise<boolean> {
-        // Update: await the settings
-        const currentSettings = await settings.get();
+        // If the variable is already true, don't even bother reading settings
+        if (this._isUnlocked) return true;
 
+        const currentSettings = await settings.get();
         if (!currentSettings.requireAuth) return true;
         return this._isUnlocked;
     }
 
+    static lock(): void {
+        this._isUnlocked = false;
+    }
+
     /**
      * Tries to authenticate the user using the best available method.
-     * - Mobile: FaceID / Fingerprint (Plugin)
-     * - Web: Windows Hello / TouchID (WebAuthn)
      */
     static async promptAuth(): Promise<boolean> {
-        // 1. Mobile Native Auth
         if (Capacitor.isNativePlatform()) {
             try {
-                // FIX 1: verifyIdentity returns void on success, throws on failure.
-                // We do not capture a result variable.
                 await NativeBiometric.verifyIdentity({
                     reason: "Access your private Sahifah vault",
                     title: "Unlock Sahifah",
                     subtitle: "Authenticate to continue",
-                    description: "Biometric authentication required"
+                    description: " "
                 });
 
-                // If code reaches here, auth succeeded
+                // SUCCESS: Mark as unlocked
                 this._isUnlocked = true;
                 return true;
-            } catch {
+            } catch (e) {
+                this._isUnlocked = false;
                 return false;
             }
         }
-
-        // 2. Web / PWA Auth (Windows Hello / TouchID)
         return await this._webAuthnVerify();
     }
 
-    /**
-     * Sets up authentication for the first time.
-     * Must be called when the user toggles the switch ON.
-     */
     static async setupAuth(): Promise<boolean> {
         if (Capacitor.isNativePlatform()) {
-            // Mobile: Just verify it works
-            const result = await NativeBiometric.isAvailable();
-            return !!result.isAvailable;
+            try {
+                const result = await NativeBiometric.isAvailable();
+                if (!result.isAvailable) return false;
+
+                await NativeBiometric.verifyIdentity({
+                    reason: "Enable App Lock",
+                    title: "Enable App Lock",
+                    subtitle: "Verify your identity",
+                    description: " "
+                });
+
+                // SUCCESS: Mark as unlocked so we don't loop
+                this._isUnlocked = true;
+                return true;
+            } catch (e) {
+                return false;
+            }
         } else {
-            // Web: We must "Register" a new credential
-            return await this._webAuthnRegister();
+            const success = await this._webAuthnRegister();
+            if (success) this._isUnlocked = true;
+            return success;
         }
     }
 
@@ -107,7 +117,7 @@ export class AuthService {
                 publicKey: {
                     challenge,
                     allowCredentials: [{
-                        id: this._base64ToBuffer(storedId), // Uses fixed helper
+                        id: this._base64ToBuffer(storedId),
                         type: "public-key"
                     }],
                     userVerification: "required"
@@ -131,7 +141,6 @@ export class AuthService {
     }
 
     private static _base64ToBuffer(base64: string): ArrayBuffer {
-        // FIX 2: Return the .buffer property to match ArrayBuffer return type
         return Uint8Array.from(atob(base64), c => c.charCodeAt(0)).buffer;
     }
 }

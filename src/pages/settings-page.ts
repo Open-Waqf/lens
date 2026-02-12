@@ -1,6 +1,6 @@
 import {html, LitElement} from 'lit';
 import {customElement, state} from 'lit/decorators.js';
-import { haptics } from '../services/haptics';
+import {haptics} from '../services/haptics';
 
 import JSZip from 'jszip';
 import {db} from '../services/db';
@@ -117,20 +117,24 @@ export class SettingsPage extends LitElement {
 
     private async toggleAuth() {
         void haptics.selection();
+
+        // Optimistic update: Flip it first
         const nextState = !this.requireAuth;
+        this.requireAuth = nextState;
 
         if (nextState === true) {
+            // Trying to ENABLE
             const success = await AuthService.setupAuth();
             if (!success) {
+                // Failed! Revert immediately
                 this.requireAuth = false;
-                this.msg = "Setup cancelled or not supported.";
+                this.msg = "Setup cancelled or biometrics not available.";
+                this.requestUpdate(); // Force UI re-render to uncheck box
                 return;
             }
         }
 
-        this.requireAuth = nextState;
-
-        // Use the new secure setter
+        // Only save if success (or if disabling)
         await settings.setAuth(nextState);
     }
 
