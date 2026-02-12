@@ -26,9 +26,16 @@ export class AuthService {
     }
 
     static lock(): void {
-        if (this.isPrompting || this._ignoreNextResume) return;
+        if (this.isPrompting) return;
+
+        // FIX: If we are ignoring resume (e.g. back from share sheet),
+        // we consume the flag and return WITHOUT locking.
+        if (this._ignoreNextResume) {
+            this._ignoreNextResume = false;
+            return;
+        }
+
         this._isUnlocked = false;
-        // Reset the shield after one use
         this._ignoreNextResume = false;
     }
 

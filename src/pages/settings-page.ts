@@ -193,7 +193,6 @@ export class SettingsPage extends LitElement {
         this.msg = null;
         this.err = null;
 
-        // Temporary file path in OPFS
         const tempPath = `exports/temp_backup_${Date.now()}.slbk`;
         const writer = new OPFSStreamWriter(tempPath);
 
@@ -212,33 +211,32 @@ export class SettingsPage extends LitElement {
             this.msg = 'Packaging backup...';
             this.requestUpdate();
 
-            // 1. Open the file stream
             await writer.open();
 
-            // 2. Setup the Zip/Encrypt Pipeline
-            const zipStream = zipFilesToStream(this.fileGenerator(), () => {
-                // Tracking happens in generator
+            const zipStream = zipFilesToStream(this.fileGenerator(), () => { /* Tracking */
             });
-
             const finalStream = pw ? encryptStream(zipStream, pw) : zipStream;
 
-            // 3. Pump chunks directly to disk
+            // FIX 1: Prevent UI Freeze (The 76% Hang)
             for await (const chunk of finalStream) {
                 await writer.write(chunk);
+                // Allow UI thread to breathe/update progress
+                await new Promise(r => setTimeout(r, 0));
             }
 
-            // 4. Close and get the File handle (points to disk, not RAM)
             const file = await writer.close();
 
-            // 5. Share/Download the File object
             const ext = pw ? 'slbk' : 'zip';
-            const finalName = `sahifah-backup-${Date.now()}.${ext}`;
+            const finalName = `sahifah-backup-${new Date().toISOString().split('T')[0]}.${ext}`;
 
-            // We must rename the file for the share API to be happy with the extension
+            // FIX 2: Better MIME type for Android compatibility
             const namedFile = new File([file], finalName, {
-                type: 'application/octet-stream',
+                type: pw ? 'application/octet-stream' : 'application/zip',
                 lastModified: Date.now()
             });
+
+            // FIX 3: Prevent Auto-Lock
+            AuthService.setIgnoreNextResume(true);
 
             await shareFile(namedFile, finalName);
 
@@ -251,14 +249,11 @@ export class SettingsPage extends LitElement {
             this.err = (e as Error).message;
             console.error(e);
         } finally {
-            // Clean up: try to close writer if it failed
             try {
                 await writer.close();
             } catch {
             }
-            // Clean up: delete the temp file
             try {
-                // You might need to import opfsRemoveEntry
                 const {opfsRemoveEntry} = await import('../services/filestore/opfs-store');
                 await opfsRemoveEntry(tempPath);
             } catch {
@@ -622,10 +617,21 @@ export class SettingsPage extends LitElement {
                                 <div class="text-xs text-slate-500">Merge or replace library</div>
                             </div>
                         </div>
-                        <input class="hidden" type="file" accept=".slbk,.zip" ?disabled=${this.busy}
+                        <input class="hidden" type="file"
+                               accept="*/*"
+                               ?disabled=${this.busy}
+                               @click=${() => AuthService.setIgnoreNextResume(true)}
                                @change=${(e: Event) => {
-                                   const f = (e.target as HTMLInputElement).files?.[0];
-                                   if (f) void this.importBackup(f);
+                                   const input = e.target as HTMLInputElement;
+                                   const f = input.files?.[0];
+                                   if (f) {
+                                       if (f.name.endsWith('.slbk') || f.name.endsWith('.zip') || f.type.includes('zip') || f.type.includes('octet')) {
+                                           void this.importBackup(f);
+                                       } else {
+                                           this.err = "Please select a .slbk or .zip file.";
+                                       }
+                                   }
+                                   input.value = '';
                                }}/>
                     </label>
 
