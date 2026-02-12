@@ -3,7 +3,6 @@ import tailwindcss from '@tailwindcss/vite';
 import {VitePWA} from 'vite-plugin-pwa';
 import progress from 'vite-plugin-progress';
 import {visualizer} from 'rollup-plugin-visualizer';
-import viteCompression from 'vite-plugin-compression';
 
 export default defineConfig({
     build: {
@@ -84,7 +83,6 @@ export default defineConfig({
             }
         }),
         progress(),
-        viteCompression(),
         visualizer({
             open: false,
             filename: 'dist/stats.html',

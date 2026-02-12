@@ -50,10 +50,26 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
         else if (req.blob) src = await createImageBitmap(req.blob);
         else throw new Error('No source image');
 
+        // 1. Determine Target Dimensions (Smart Resize)
+        // If outW/H is not provided, we clamp to a reasonable max (e.g. 2500px)
+        // to prevent 48MP images from crashing the browser/DB.
         let finalW = req.outW ?? src.width;
         let finalH = req.outH ?? src.height;
+
+        // Auto-clamp if no specific size requested (Safe default)
+        if (!req.outW && !req.outH) {
+            const MAX_DIM = 2500;
+            const maxSrc = Math.max(finalW, finalH);
+            if (maxSrc > MAX_DIM) {
+                const scale = MAX_DIM / maxSrc;
+                finalW = Math.round(finalW * scale);
+                finalH = Math.round(finalH * scale);
+            }
+        }
+
         let finalRgba: Uint8ClampedArray;
 
+        // 2. Crop / Warp
         if (req.quad) {
             const tmp = new OffscreenCanvas(src.width, src.height);
             const tctx = tmp.getContext('2d', {willReadFrequently: true})!;
@@ -69,11 +85,18 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
             tctx.drawImage(src, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
             tctx.restore();
 
-            finalRgba = tctx.getImageData(0, 0, crop.w, crop.h).data;
-            finalW = crop.w;
-            finalH = crop.h;
+            // If we need to resize the crop result to finalW/H
+            if (crop.w !== finalW || crop.h !== finalH) {
+                const resizeCanvas = new OffscreenCanvas(finalW, finalH);
+                const rctx = resizeCanvas.getContext('2d')!;
+                rctx.drawImage(tmp, 0, 0, finalW, finalH);
+                finalRgba = rctx.getImageData(0, 0, finalW, finalH).data;
+            } else {
+                finalRgba = tctx.getImageData(0, 0, crop.w, crop.h).data;
+            }
         }
 
+        // 3. Apply Filters & ENHANCEMENTS
         if (req.filter !== 'original') {
             if (req.filter === 'grayscale') {
                 for (let i = 0; i < finalRgba.length; i += 4) {
@@ -86,13 +109,20 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
             } else if (req.filter === 'magic') {
                 const magic = magicColorFromRgba(finalRgba, finalW, finalH);
                 finalRgba.set(magic);
+                // Magic filter implicitly sharpens, so we skip explicit sharpen here
             } else if (req.filter === 'whiteboard') {
                 const wb = whiteboardFromRgba(finalRgba, finalW, finalH);
                 finalRgba.set(wb);
             }
+        } else {
+            // Even for "Original", apply a mild unsharp mask to improve OCR/Readability
+            // This makes the "Scan" look better than the raw photo.
+            applyUnsharpMask(finalRgba, finalW, finalH, 0.5);
         }
 
+        // 4. Encoding
         if (req.masterJpegQuality !== undefined && req.thumbMax !== undefined) {
+            // Mode B: Batch Save
             const mBytes = await encodeJpeg(finalRgba, finalW, finalH, req.masterJpegQuality);
 
             const tScale = Math.min(1, req.thumbMax / Math.max(finalW, finalH));
@@ -103,11 +133,12 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
             const tctx = tCanvas.getContext('2d')!;
             const fullCanvas = new OffscreenCanvas(finalW, finalH);
             const fctx = fullCanvas.getContext('2d')!;
-            // Fix: Cast to 'any'
             fctx.putImageData(new ImageData(finalRgba as any, finalW, finalH), 0, 0);
 
             tctx.drawImage(fullCanvas, 0, 0, finalW, finalH, 0, 0, tW, tH);
-            const tBlob = await tCanvas.convertToBlob({type: 'image/jpeg', quality: 0.72});
+
+            // Thumbnails can be lower quality (70%) to load instantly in grid
+            const tBlob = await tCanvas.convertToBlob({type: 'image/jpeg', quality: 0.82});
             const tBytes = new Uint8Array(await tBlob.arrayBuffer());
 
             if (req.blob) src.close();
@@ -120,15 +151,16 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
             (self as unknown as Worker).postMessage(res, [mBytes.buffer, tBytes.buffer]);
 
         } else if (req.encode) {
+            // Mode A: Single Save
             const bytes = await encodeJpeg(finalRgba, finalW, finalH, req.quality ?? 0.85);
             if (req.blob) src.close();
             const res: WorkerResponse = {id: req.id, ok: true, bytes, width: finalW, height: finalH};
             (self as unknown as Worker).postMessage(res, [bytes.buffer]);
 
         } else {
+            // Preview Mode (Bitmap)
             const outC = new OffscreenCanvas(finalW, finalH);
             const ctx = outC.getContext('2d')!;
-            // Fix: Cast to 'any'
             ctx.putImageData(new ImageData(finalRgba as any, finalW, finalH), 0, 0);
             const outBmp = outC.transferToImageBitmap();
 
@@ -146,8 +178,50 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
 async function encodeJpeg(rgba: Uint8ClampedArray, w: number, h: number, q: number): Promise<Uint8Array> {
     const c = new OffscreenCanvas(w, h);
     const ctx = c.getContext('2d')!;
-    // Fix: Cast to 'any'
     ctx.putImageData(new ImageData(rgba as any, w, h), 0, 0);
     const blob = await c.convertToBlob({type: 'image/jpeg', quality: q});
     return new Uint8Array(await blob.arrayBuffer());
+}
+
+/**
+ * Fast Unsharp Mask (Sharpening)
+ * amount: 0.0 to 1.0 (Strength)
+ */
+function applyUnsharpMask(data: Uint8ClampedArray, w: number, h: number, amount: number) {
+    if (amount <= 0) return;
+
+    // Simple 3x3 convolution kernel for sharpening
+    //  0 -1  0
+    // -1  5 -1
+    //  0 -1  0
+    // But implemented efficiently without a full matrix copy
+
+    // We clone the data to read original values while writing new ones
+    const copy = new Uint8ClampedArray(data);
+
+    for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+            const idx = (y * w + x) * 4;
+
+            // Neighbors
+            const up = ((y - 1) * w + x) * 4;
+            const down = ((y + 1) * w + x) * 4;
+            const left = (y * w + (x - 1)) * 4;
+            const right = (y * w + (x + 1)) * 4;
+
+            for (let c = 0; c < 3; c++) {
+                const val = copy[idx + c];
+                const neighbors = copy[up + c] + copy[down + c] + copy[left + c] + copy[right + c];
+
+                // Formula: Original + (Original - Blurred) * Amount
+                // Approximation: 5*Center - Neighbors
+                const sharpened = (5 * val - neighbors);
+
+                // Blend based on amount
+                const final = val + (sharpened - val) * amount;
+
+                data[idx + c] = final < 0 ? 0 : (final > 255 ? 255 : final);
+            }
+        }
+    }
 }

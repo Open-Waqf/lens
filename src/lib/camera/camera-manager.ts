@@ -35,11 +35,11 @@ export class CameraManager {
                 audio: false,
                 video: {
                     facingMode: {ideal: 'environment'},
-                    width: {ideal: 1280},
-                    height: {ideal: 720},
+                    width: {ideal: 4096},
+                    height: {ideal: 2160},
                 },
             },
-            {audio: false, video: {facingMode: 'environment'}},
+            {audio: false, video: {facingMode: {ideal: 'environment'}}},
             {audio: false, video: true},
         ];
 

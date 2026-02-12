@@ -480,7 +480,7 @@ export class PageEditor extends LitElement {
             const mW = Math.round(rawSize.w * mScale);
             const mH = Math.round(rawSize.h * mScale);
 
-            const THUMB_MAX = 360;
+            const THUMB_MAX = 800;
             const tScale = Math.min(1, THUMB_MAX / largestDim);
             const tW = Math.round(rawSize.w * tScale);
             const tH = Math.round(rawSize.h * tScale);
