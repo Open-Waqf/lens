@@ -231,17 +231,21 @@ export class PageEditor extends LitElement {
         if (!this.edgesEl || !this.quad) return null;
 
         const rect = this.edgesEl.getBoundingClientRect();
-        const x = ev.clientX - rect.left;
-        const y = ev.clientY - rect.top;
 
-        const canvasScaleX = this.edgesEl.width / rect.width;
-        const canvasScaleY = this.edgesEl.height / rect.height;
+        // Calculate true scale of canvas vs screen
+        const scaleX = this.edgesEl.width / rect.width;
+        const scaleY = this.edgesEl.height / rect.height;
 
-        const clickX = x * canvasScaleX;
-        const clickY = y * canvasScaleY;
+        // Map touch to canvas coordinates
+        const x = (ev.clientX - rect.left) * scaleX;
+        const y = (ev.clientY - rect.top) * scaleY;
 
         const sx = this.edgesEl.width / this.baseW;
         const sy = this.edgesEl.height / this.baseH;
+
+        // HUGE HIT RADIUS: 70px on screen.
+        // This makes sure you almost never "miss" a corner.
+        const hitRadius = 70 * Math.max(scaleX, scaleY);
 
         let best: { i: number; d: number } | null = null;
 
@@ -249,8 +253,8 @@ export class PageEditor extends LitElement {
             const p = this.quad[i];
             const px = p.x * sx;
             const py = p.y * sy;
-            const d = Math.hypot(px - clickX, py - clickY);
-            if (d < 40 && (!best || d < best.d)) best = {i, d};
+            const d = Math.hypot(px - x, py - y);
+            if (d < hitRadius && (!best || d < best.d)) best = {i, d};
         }
         return best ? best.i : null;
     }
@@ -259,10 +263,13 @@ export class PageEditor extends LitElement {
         if (!this.quad) return;
         const idx = this.pickHandle(ev);
 
-        // FIX: If we didn't hit a handle, return immediately to let the browser scroll the page
+        // 1. SCROLL PRIORITY (Missed Handle):
+        // If we didn't touch a handle, allow browser default (scrolling).
         if (idx == null) return;
 
-        // FIX: We hit a handle, so prevent scrolling to start dragging
+        // 2. DRAG PRIORITY (Hit Handle):
+        // We touched a handle. Prevent default to STOP scrolling.
+        // Also capture pointer so even if you drag off-canvas, we keep tracking.
         ev.preventDefault();
 
         this.pushHistory();
@@ -609,10 +616,14 @@ export class PageEditor extends LitElement {
                         </div>
                     </div>
 
-                    <div class="relative aspect-[3/4] rounded-2xl overflow-hidden bg-slate-900 shadow-2xl border border-slate-800">
-                        <canvas data-edges class="w-full h-full object-contain select-none"
-                                @pointerdown=${this.onPointerDown} @pointermove=${this.onPointerMove}
-                                @pointerup=${this.onPointerUp} @pointercancel=${this.onPointerUp}></canvas>
+                    <div class="relative w-full flex justify-center bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 min-h-[50vh]">
+                        <canvas data-edges
+                                class="max-w-full max-h-[70vh] w-auto h-auto object-contain select-none z-10"
+                                style="touch-action: pan-y;"
+                                @pointerdown=${this.onPointerDown}
+                                @pointermove=${this.onPointerMove}
+                                @pointerup=${this.onPointerUp}
+                                @pointercancel=${this.onPointerUp}></canvas>
 
                         <div class=${['absolute top-4 right-4 rounded-full overflow-hidden border-4 border-white shadow-2xl z-20 w-32 h-32 pointer-events-none transition-opacity duration-200', this.showMagnify ? 'opacity-100' : 'opacity-0'].join(' ')}>
                             <canvas data-magnify class="block w-full h-full bg-black"></canvas>
@@ -667,7 +678,7 @@ export class PageEditor extends LitElement {
 
                 <div class="flex flex-col gap-3">
                     <div class="text-xs font-bold text-slate-500 uppercase tracking-widest px-1">Final Result</div>
-                    <div class="relative aspect-[3/4] rounded-2xl overflow-hidden bg-slate-900 shadow-2xl border border-slate-800 group">
+                    <div class="relative aspect-3/4 rounded-2xl overflow-hidden bg-slate-900 shadow-2xl border border-slate-800 group">
                         <canvas data-preview class="w-full h-full object-contain block"></canvas>
                         ${!this.sourceBitmap ? html`
                             <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-500">
