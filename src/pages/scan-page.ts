@@ -24,6 +24,7 @@ import {ScanSessionState} from './scan/scan-session-state';
 import {ScanRepo} from './scan/scan-repo';
 import {ocrQueue} from '../services/ocr-queue';
 import {AuthService} from "../services/auth-service";
+import {App} from "@capacitor/app";
 
 const APPEND_DOC_KEY = 'sahifah.appendToDocId';
 const AUTO_KEY = 'sahifah.autoCapture';
@@ -117,6 +118,18 @@ export class ScanPage extends LitElement {
             else await this.batchImport(pending);
         }
         ocrQueue.addEventListener('change', this.onOcrQueueChange);
+
+        if (Capacitor.isNativePlatform()) {
+            App.addListener('backButton', () => {
+                if (this.session.stage === 'edit') {
+                    void this.onEditorCancel();
+                } else if (this.session.stage === 'camera') {
+                    void this.exitScan();
+                } else if (location.hash !== '#/library') {
+                    location.hash = '#/library';
+                }
+            });
+        }
     }
 
     private onOcrQueueChange = () => {
@@ -326,8 +339,9 @@ export class ScanPage extends LitElement {
         }
 
         this.clearEditor();
-        // Fallback to idle if camera fails to start implicitly
-        this.beginCameraFromGesture(false);
+        this.error = null;
+
+        this.session.setStage('idle');
     };
 
     private onEditorSave = async (ev: CustomEvent<PageEditorSaveDetail>) => {
@@ -375,8 +389,9 @@ export class ScanPage extends LitElement {
             }
 
             this.clearEditor();
-            // Implicit restart - gracefully fail to dashboard if no camera
-            this.beginCameraFromGesture(false);
+            if (this.importReviewQueue.length === 0) {
+                this.session.setStage('idle');
+            }
         } catch (e) {
             this.error = (e as Error).message ?? String(e);
         } finally {
