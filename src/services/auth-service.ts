@@ -8,6 +8,11 @@ export class AuthService {
     private static _isUnlocked = false;
 
     private static _promptInFlight: Promise<boolean> | null = null;
+    private static _ignoreNextResume = false;
+
+    static setIgnoreNextResume(val: boolean) {
+        this._ignoreNextResume = val;
+    }
 
     static get isPrompting() {
         return this._promptInFlight !== null;
@@ -21,8 +26,10 @@ export class AuthService {
     }
 
     static lock(): void {
-        if (this.isPrompting) return;
+        if (this.isPrompting || this._ignoreNextResume) return;
         this._isUnlocked = false;
+        // Reset the shield after one use
+        this._ignoreNextResume = false;
     }
 
     static async promptAuth(): Promise<boolean> {

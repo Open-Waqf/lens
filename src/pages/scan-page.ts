@@ -23,6 +23,7 @@ import {CameraManager} from '../lib/camera/camera-manager';
 import {ScanSessionState} from './scan/scan-session-state';
 import {ScanRepo} from './scan/scan-repo';
 import {ocrQueue} from '../services/ocr-queue';
+import {AuthService} from "../services/auth-service";
 
 const APPEND_DOC_KEY = 'sahifah.appendToDocId';
 const AUTO_KEY = 'sahifah.autoCapture';
@@ -455,6 +456,7 @@ export class ScanPage extends LitElement {
 
     private async invokeNativeScanner(): Promise<void> {
         this.busy = true;
+        AuthService.setIgnoreNextResume(true);
         try {
             const limit = this.replacePageId ? 1 : 24;
             const {scannedImages} = await DocumentScanner.scanDocument({pageLimit: limit});
@@ -471,6 +473,7 @@ export class ScanPage extends LitElement {
             }
         } catch (e) {
         } finally {
+            AuthService.setIgnoreNextResume(false);
             this.busy = false;
         }
     }
