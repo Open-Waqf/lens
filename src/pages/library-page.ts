@@ -43,6 +43,8 @@ export class LibraryPage extends LitElement {
 
     @state() private loading = true;
 
+    private longPressTimer: any = null;
+
     // Highlight logic
     @state() private highlightDocId: string | null = null;
 
@@ -571,7 +573,8 @@ export class LibraryPage extends LitElement {
         const isHighlight = this.highlightDocId === doc.id;
         const highlightClass = isHighlight ? 'ring-2 ring-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.3)] z-10' : '';
 
-        const baseClasses = "group relative bg-slate-900 border rounded-xl overflow-hidden transition-all cursor-pointer";
+        // Added 'select-none' to prevent text selection while holding
+        const baseClasses = "group relative bg-slate-900 border rounded-xl overflow-hidden transition-all cursor-pointer select-none";
         const stateClasses = selected
             ? "border-emerald-500 ring-1 ring-emerald-500/50 bg-emerald-900/10"
             : "border-slate-800 hover:border-slate-700 active:bg-slate-800";
@@ -579,7 +582,6 @@ export class LibraryPage extends LitElement {
         const layoutClasses = isGallery ? "flex-col" : "flex";
 
         const qTrim = this.query.trim();
-        // Check OCR text first, then check user notes for the snippet
         let snippet = this.getSearchSnippet(doc.searchIndex, qTrim);
         if (!snippet && doc.notes) {
             snippet = this.getSearchSnippet(doc.notes, qTrim);
@@ -587,7 +589,19 @@ export class LibraryPage extends LitElement {
 
         return html`
             <div class="${baseClasses} ${stateClasses} ${layoutClasses} ${highlightClass}"
+                 @touchstart=${() => {
+                     this.longPressTimer = setTimeout(() => {
+                         if (!this.selectionMode) {
+                             this.toggleSelectionMode();
+                             this.toggleSelection(doc.id);
+                             void haptics.impact(ImpactStyle.Medium);
+                         }
+                     }, 600);
+                 }}
+                 @touchend=${() => clearTimeout(this.longPressTimer)}
+                 @touchmove=${() => clearTimeout(this.longPressTimer)}
                  @click=${() => {
+                     clearTimeout(this.longPressTimer);
                      if (this.selectionMode) this.toggleSelection(doc.id);
                      else location.hash = `#/doc/${doc.id}`;
                  }}>

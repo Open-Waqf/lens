@@ -15,8 +15,8 @@ import {ConfirmModal} from '../components/confirm-modal';
 import '../components/page-editor';
 import type {PageEditorSaveDetail} from '../components/page-editor';
 import type {DocRecord, PageRecord} from '../domain/types';
-import { haptics } from '../services/haptics';
-import { ImpactStyle } from '@capacitor/haptics';
+import {haptics} from '../services/haptics';
+import {ImpactStyle} from '@capacitor/haptics';
 
 @customElement('doc-page')
 export class DocPage extends LitElement {
@@ -382,8 +382,9 @@ export class DocPage extends LitElement {
 
         if (this.editingPage && this.editingBlob) {
             return html`
-                <div class="fixed inset-0 z-50 bg-black overflow-y-auto">
+                <div class="fixed inset-0 z-50 bg-black overflow-y-auto pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
                     <page-editor
+                            class="block w-full min-h-full"
                             .blob=${this.editingBlob}
                             ?disableAutoDetect=${true}
                             @page-editor-save=${this.onEditorSave}
@@ -559,16 +560,16 @@ export class DocPage extends LitElement {
                             <span class="text-emerald-500 text-xs">Filtered by search</span>
                         ` : null}
                     </div>
-                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                         ${visiblePages.map((p) => {
                             const realIdx = this.pages.indexOf(p);
                             const isDragging = this.draggingId === p.id;
                             const isDropTarget = this.dropTargetId === p.id;
 
                             return html`
-                                <div class="group relative rounded-xl border transition-all duration-200 
-                        ${isDragging ? 'opacity-30 scale-95 border-emerald-500' : 'bg-slate-950'} 
-                        ${isDropTarget ? 'border-emerald-400 translate-y-1' : 'border-slate-800'}"
+                                <div class="relative bg-slate-900 border-2 rounded-2xl overflow-hidden transition-all duration-200 
+                                    ${isDragging ? 'opacity-30 border-emerald-500 scale-95' : 'border-slate-800'} 
+                                    ${isDropTarget ? 'border-emerald-400 translate-y-2' : ''}"
                                      draggable="true"
                                      @dragstart=${() => this.onDragStart(p.id)}
                                      @dragover=${(e: DragEvent) => this.onDragOver(e, p.id)}
@@ -578,37 +579,37 @@ export class DocPage extends LitElement {
                                          this.dropTargetId = null;
                                      }}>
 
-                                    <div class="aspect-[3/4] bg-slate-900 cursor-grab active:cursor-grabbing relative rounded-t-xl overflow-hidden"
+                                    <div class="aspect-[3/4] bg-black cursor-pointer relative"
                                          @click=${() => this.openViewerAt(realIdx)}>
                                         ${this.thumbs[p.id]
                                                 ? html`<img src=${this.thumbs[p.id]}
-                                                            class="w-full h-full object-cover">`
+                                                            class="w-full h-full object-contain">`
                                                 : html`
                                                     <div class="w-full h-full flex items-center justify-center text-slate-700">
                                                         ?
                                                     </div>`
                                         }
-                                        <div class="absolute top-2 left-2 px-1.5 py-0.5 bg-black/60 backdrop-blur text-white text-[10px] font-bold rounded">
+                                        <div class="absolute top-2 left-2 px-2 py-1 bg-black/60 backdrop-blur text-white text-xs font-bold rounded-lg">
                                                 #${realIdx + 1}
                                         </div>
                                     </div>
 
-                                    <div class="p-2 flex items-center justify-center gap-2 bg-slate-950 border-t border-slate-900 rounded-b-xl">
-                                        <button class="p-2 rounded hover:bg-slate-800 text-slate-400 hover:text-emerald-400"
-                                                title="Edit" @click=${() => this.editPage(p)}>
-                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <div class="grid grid-cols-3 divide-x divide-slate-800 border-t border-slate-800 h-14 bg-slate-950">
+                                        <button class="flex items-center justify-center text-slate-400 active:text-emerald-500 active:bg-slate-900"
+                                                @click=${() => this.editPage(p)}>
+                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
                                                       stroke-width="2"></path>
                                             </svg>
                                         </button>
-                                        <button class="p-2 rounded hover:bg-red-900/30 text-slate-400 hover:text-red-400"
+                                        <button class="flex items-center justify-center text-slate-400 active:text-red-500 active:bg-slate-900"
                                                 @click=${() => this.deletePage(p.id)}>
-                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path d="M6 18L18 6M6 6l12 12" stroke-width="2"></path>
                                             </svg>
                                         </button>
-                                        <div class="p-2 text-slate-700 cursor-grab">
-                                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                        <div class="flex items-center justify-center text-slate-600 cursor-grab active:cursor-grabbing active:text-emerald-400 active:bg-slate-900">
+                                            <svg class="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
                                                 <path d="M7 7h2v2H7V7zm0 4h2v2H7v-2zm4-4h2v2h-2V7zm0 4h2v2h-2v-2z"></path>
                                             </svg>
                                         </div>
@@ -620,7 +621,7 @@ export class DocPage extends LitElement {
                 </div>
 
                 ${this.viewerOpen ? html`
-                    <div class="fixed inset-0 z-50 bg-black/95 backdrop-blur flex flex-col touch-none"
+                    <div class="fixed inset-0 z-50 bg-black flex flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
                          @click=${(e: Event) => e.target === e.currentTarget && (this.viewerOpen = false)}>
 
                         <div class="px-4 py-3 flex items-center justify-between bg-black/50 border-b border-white/10 z-50 shrink-0">

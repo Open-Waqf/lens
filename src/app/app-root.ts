@@ -337,7 +337,7 @@ export class AppRoot extends LitElement {
                     </nav>
                 ` : null}
             </div>
-            <toast-notification></toast-notification>
+            <toast-notification ?shifted=${showNav}></toast-notification>
         `;
     }
 }

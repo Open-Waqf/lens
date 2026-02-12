@@ -258,7 +258,13 @@ export class PageEditor extends LitElement {
     private onPointerDown = (ev: PointerEvent) => {
         if (!this.quad) return;
         const idx = this.pickHandle(ev);
+
+        // FIX: If we didn't hit a handle, return immediately to let the browser scroll the page
         if (idx == null) return;
+
+        // FIX: We hit a handle, so prevent scrolling to start dragging
+        ev.preventDefault();
+
         this.pushHistory();
         this.dragIdx = idx;
         (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
@@ -576,9 +582,9 @@ export class PageEditor extends LitElement {
                     <button class="ml-2 font-bold" @click=${() => this.err = null}>✕</button>
                 </div>` : null}
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 h-full p-2 md:p-4">
+            <div class="flex flex-col min-h-dvh gap-6 p-4 pb-32 bg-black text-slate-100">
 
-                <div class="flex flex-col gap-3 h-full">
+                <div class="flex flex-col gap-3">
                     <div class="flex items-center justify-between px-1">
                         <div class="text-xs font-bold text-slate-500 uppercase tracking-widest">Crop & Rotate</div>
                         <div class="flex gap-2">
@@ -603,8 +609,8 @@ export class PageEditor extends LitElement {
                         </div>
                     </div>
 
-                    <div class="flex-1 rounded-2xl overflow-hidden bg-black relative shadow-2xl border border-slate-800">
-                        <canvas data-edges class="w-full h-full object-contain touch-none select-none"
+                    <div class="relative aspect-[3/4] rounded-2xl overflow-hidden bg-slate-900 shadow-2xl border border-slate-800">
+                        <canvas data-edges class="w-full h-full object-contain select-none"
                                 @pointerdown=${this.onPointerDown} @pointermove=${this.onPointerMove}
                                 @pointerup=${this.onPointerUp} @pointercancel=${this.onPointerUp}></canvas>
 
@@ -614,9 +620,8 @@ export class PageEditor extends LitElement {
                     </div>
                 </div>
 
-                <div class="flex flex-col gap-3 h-full">
-                    <div class="text-xs font-bold text-slate-500 uppercase tracking-widest px-1">Filter & Finalize</div>
-
+                <div class="flex flex-col gap-3">
+                    <div class="text-xs font-bold text-slate-500 uppercase tracking-widest px-1">Filter</div>
                     <div class="flex overflow-x-auto gap-3 pb-2 -mx-1 px-1 no-scrollbar snap-x">
                         ${FILTERS.map(mode => html`
                             <button @click=${() => {
@@ -658,8 +663,11 @@ export class PageEditor extends LitElement {
                             </button>
                         `)}
                     </div>
+                </div>
 
-                    <div class="flex-1 rounded-2xl overflow-hidden bg-black relative shadow-2xl border border-slate-800 group">
+                <div class="flex flex-col gap-3">
+                    <div class="text-xs font-bold text-slate-500 uppercase tracking-widest px-1">Final Result</div>
+                    <div class="relative aspect-[3/4] rounded-2xl overflow-hidden bg-slate-900 shadow-2xl border border-slate-800 group">
                         <canvas data-preview class="w-full h-full object-contain block"></canvas>
                         ${!this.sourceBitmap ? html`
                             <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-500">
@@ -667,32 +675,32 @@ export class PageEditor extends LitElement {
                                 <span class="text-xs font-bold uppercase tracking-wider">Loading...</span>
                             </div>` : null}
                     </div>
+                </div>
 
-                    <div class="flex flex-col gap-3 pt-2">
-                        <label class="flex items-center gap-3 p-3 rounded-xl bg-slate-900/50 border border-slate-800 cursor-pointer select-none transition-colors hover:bg-slate-900">
-                            <input type="checkbox"
-                                   class="w-5 h-5 rounded border-slate-700 bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-0"
-                                   .checked=${this.extractText}
-                                   @change=${(e: Event) => this.extractText = (e.target as HTMLInputElement).checked}>
-                            <div class="flex-1">
-                                <div class="text-sm font-bold text-slate-200">Extract Text (OCR)</div>
-                                <div class="text-[10px] text-slate-500">Make document searchable</div>
-                            </div>
-                        </label>
-
-                        <div class="flex gap-3">
-                            <button class="flex-1 px-6 py-3.5 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-300 font-bold tracking-wide transition-colors"
-                                    ?disabled=${this.busy} @click=${this.onCancel}>
-                                Back
-                            </button>
-                            <button class="flex-[2] px-6 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 active:scale-95 transition-all text-white font-bold tracking-wide shadow-lg shadow-emerald-900/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                                    ?disabled=${this.busy} @click=${() => void this.onSave()}>
-                                ${this.busy
-                                        ? html`
-                                            <div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> Saving...`
-                                        : 'Save Document'}
-                            </button>
+                <div class="flex flex-col gap-4 pt-2">
+                    <label class="flex items-center gap-3 p-4 rounded-xl bg-slate-900/50 border border-slate-800 cursor-pointer select-none transition-colors hover:bg-slate-900">
+                        <input type="checkbox"
+                               class="w-5 h-5 rounded border-slate-700 bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-0"
+                               .checked=${this.extractText}
+                               @change=${(e: Event) => this.extractText = (e.target as HTMLInputElement).checked}>
+                        <div class="flex-1">
+                            <div class="text-sm font-bold text-slate-200">Extract Text (OCR)</div>
+                            <div class="text-[10px] text-slate-500">Make document searchable</div>
                         </div>
+                    </label>
+
+                    <div class="flex gap-3">
+                        <button class="flex-1 px-6 py-4 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-300 font-bold tracking-wide transition-colors"
+                                ?disabled=${this.busy} @click=${this.onCancel}>
+                            Back
+                        </button>
+                        <button class="flex-[2] px-6 py-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 active:scale-95 transition-all text-white font-bold tracking-wide shadow-lg shadow-emerald-900/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                ?disabled=${this.busy} @click=${() => void this.onSave()}>
+                            ${this.busy
+                                    ? html`
+                                        <div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> Saving...`
+                                    : 'Save Document'}
+                        </button>
                     </div>
                 </div>
             </div>

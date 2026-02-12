@@ -1,5 +1,5 @@
 import {css, html, LitElement} from 'lit';
-import {customElement, state} from 'lit/decorators.js';
+import {customElement, property, state} from 'lit/decorators.js';
 
 export interface ToastOptions {
     message: string;
@@ -9,13 +9,15 @@ export interface ToastOptions {
 
 @customElement('toast-notification')
 export class ToastNotification extends LitElement {
+    @property({type: Boolean, reflect: true}) shifted = false;
     @state() private toasts: Array<ToastOptions & { id: number }> = [];
     private counter = 0;
 
     static styles = css`
         :host {
             position: fixed;
-            bottom: 24px;
+            /* Default position for pages WITHOUT a bottom bar */
+            bottom: calc(16px + env(safe-area-inset-bottom));
             left: 0;
             right: 0;
             z-index: 100;
@@ -24,12 +26,19 @@ export class ToastNotification extends LitElement {
             flex-direction: column;
             align-items: center;
             gap: 8px;
+            transition: bottom 0.3s ease; /* Smooth move when nav appears/disappears */
+        }
+
+        :host([shifted]) {
+            /* 64px (nav height) + 16px (gap) + safe area */
+            bottom: calc(64px + 16px + env(safe-area-inset-bottom));
         }
 
         .toast {
             background: #0f172a; /* Slate 900 */
             color: white;
             padding: 12px 24px;
+            pointer-events: auto;
             border-radius: 99px;
             font-size: 14px;
             font-weight: 600;
