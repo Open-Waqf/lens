@@ -12,6 +12,7 @@ import {ConfirmModal} from '../components/confirm-modal';
 import {ocrQueue} from '../services/ocr-queue';
 import {haptics} from "../services/haptics";
 import {ImpactStyle} from "@capacitor/haptics";
+import {showToast} from "../components/toast-notification";
 
 type ViewMode = 'list' | 'gallery';
 
@@ -203,6 +204,7 @@ export class LibraryPage extends LitElement {
         for (const id of this.selectedIds) {
             await this.repo.deleteDocCompletely(id);
         }
+        showToast(`Deleted ${count} documents`, 'info');
         this.selectedIds = new Set();
         this.selectionMode = false;
         await this.loadDocs();
@@ -261,8 +263,9 @@ export class LibraryPage extends LitElement {
             this.highlightDocId = masterId;
             await this.loadDocs();
             void haptics.impact(ImpactStyle.Medium);
+            showToast(`Merged ${ids.length} documents successfully`, 'success');
         } catch (e) {
-            alert("Merge failed: " + e);
+            showToast('Merge failed: ' + String(e), 'error')
         } finally {
         }
     }
@@ -291,6 +294,7 @@ export class LibraryPage extends LitElement {
         this.selectedIds = new Set();
         await this.loadDocs();
         void haptics.impact(ImpactStyle.Light);
+        showToast(`Moved to "${finalFolder || 'Unsorted'}"`, 'success');
     }
 
     private renderSafetyPrompt() {

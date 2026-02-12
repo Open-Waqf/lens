@@ -8,12 +8,14 @@ import '../pages/library-page';
 import '../pages/doc-page';
 import '../pages/settings-page';
 import '../components/auth-lock';
+import '../components/toast-notification'
 
 import {ConfirmModal} from '../components/confirm-modal';
 import {getPersistenceStatus, type PersistenceStatus} from '../services/storage-persistence';
 import {garbageCollectOpfsDocs} from '../services/opfs-gc';
 import {AuthService} from '../services/auth-service';
 import {resetAllStorage} from '../services/reset-storage';
+import {showToast} from "../components/toast-notification";
 
 type Route =
     | { name: 'library' }
@@ -180,7 +182,7 @@ export class AppRoot extends LitElement {
             await resetAllStorage();
             location.reload();
         } catch (e) {
-            alert('Reset failed: ' + String(e));
+            showToast('Reset failed: ' + String(e), 'error')
             this.resetting = false;
         }
     }
@@ -316,6 +318,8 @@ export class AppRoot extends LitElement {
                     </nav>
                 ` : null}
             </div>
+
+            <toast-notification></toast-notification>
         `;
     }
 }
