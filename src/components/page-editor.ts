@@ -14,14 +14,8 @@ export type PageEditorSaveDetail = {
     extractText: boolean;
 };
 
-// CSS approximations for the UI previews (Real processing happens in Worker)
-const FILTER_PREVIEWS: { mode: FilterMode; label: string; style: string }[] = [
-    {mode: 'original', label: 'Original', style: ''},
-    {mode: 'magic', label: 'Magic', style: 'filter: contrast(1.1) saturate(1.3) brightness(1.05);'},
-    {mode: 'whiteboard', label: 'Whiteboard', style: 'filter: grayscale(0.1) contrast(1.2) brightness(1.1);'},
-    {mode: 'grayscale', label: 'Grayscale', style: 'filter: grayscale(1);'},
-    {mode: 'bw', label: 'B&W', style: 'filter: grayscale(1) contrast(1.6);'},
-];
+// We define the available filters here, but the visual style is now dynamic
+const FILTERS: FilterMode[] = ['original', 'magic', 'bw', 'grayscale', 'whiteboard'];
 
 @customElement('page-editor')
 export class PageEditor extends LitElement {
@@ -61,6 +55,22 @@ export class PageEditor extends LitElement {
     @state() private showMagnify = false;
     @state() private magnifyX = 0;
     @state() private magnifyY = 0;
+
+    // --- Helper for CSS Filters (Visual Preview only) ---
+    private getCssFilter(mode: string): string {
+        switch (mode) {
+            case 'grayscale':
+                return 'grayscale(100%)';
+            case 'bw':
+                return 'grayscale(100%) contrast(150%) brightness(90%)';
+            case 'magic':
+                return 'contrast(110%) saturate(130%) sepia(10%)';
+            case 'whiteboard':
+                return 'grayscale(20%) brightness(110%) contrast(120%)';
+            default:
+                return 'none';
+        }
+    }
 
     private pushHistory(): void {
         if (!this.quad) return;
@@ -561,25 +571,27 @@ export class PageEditor extends LitElement {
     render() {
         return html`
             ${this.err ? html`
-                <div class="p-3 rounded-lg bg-red-950/40 border border-red-900 text-red-200">${this.err}
+                <div class="fixed top-4 left-4 right-4 z-[100] p-4 rounded-xl bg-red-950/90 backdrop-blur border border-red-900 text-red-100 shadow-xl flex items-center justify-between animate-bounce">
+                    <span>${this.err}</span>
+                    <button class="ml-2 font-bold" @click=${() => this.err = null}>✕</button>
                 </div>` : null}
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 h-full">
 
-                <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 space-y-3 flex flex-col">
-                    <div class="flex items-center justify-between">
-                        <div class="text-sm font-medium text-slate-200">Crop & Rotate</div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 h-full p-2 md:p-4">
+
+                <div class="flex flex-col gap-3 h-full">
+                    <div class="flex items-center justify-between px-1">
+                        <div class="text-xs font-bold text-slate-500 uppercase tracking-widest">Crop & Rotate</div>
                         <div class="flex gap-2">
-                            <button class="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-400 active:scale-95 transition-transform"
+                            <button class="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-400 active:scale-95 transition-transform border border-slate-700 hover:text-white"
                                     ?disabled=${this.busy}
                                     @click=${() => void this.autoDetectEdges()}>
                                 AUTO
                             </button>
-                            <button class="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-400 active:scale-95 transition-transform"
+                            <button class="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-400 active:scale-95 transition-transform border border-slate-700 hover:text-white"
                                     @click=${() => this.rotate90()}>
                                 ⟳ 90°
                             </button>
-
-                            <button class="p-1.5 rounded-lg bg-slate-800 text-slate-400 active:scale-95 transition-transform"
+                            <button class="p-1.5 rounded-lg bg-slate-800 text-slate-400 active:scale-95 transition-transform border border-slate-700 hover:text-white"
                                     title="Undo"
                                     ?disabled=${this.busy || this.history.length === 0}
                                     @click=${() => this.undo()}>
@@ -591,67 +603,96 @@ export class PageEditor extends LitElement {
                         </div>
                     </div>
 
-                    <div class="flex-1 rounded-xl overflow-hidden border border-slate-800 bg-black relative shadow-inner min-h-[300px]">
+                    <div class="flex-1 rounded-2xl overflow-hidden bg-black relative shadow-2xl border border-slate-800">
                         <canvas data-edges class="w-full h-full object-contain touch-none select-none"
                                 @pointerdown=${this.onPointerDown} @pointermove=${this.onPointerMove}
                                 @pointerup=${this.onPointerUp} @pointercancel=${this.onPointerUp}></canvas>
-                        <div class=${['absolute top-2 right-2 rounded-xl overflow-hidden border-2 border-slate-700 bg-black shadow-2xl z-20', this.showMagnify ? '' : 'hidden'].join(' ')}>
-                            <canvas data-magnify class="block"></canvas>
+
+                        <div class=${['absolute top-4 right-4 rounded-full overflow-hidden border-4 border-white shadow-2xl z-20 w-32 h-32 pointer-events-none transition-opacity duration-200', this.showMagnify ? 'opacity-100' : 'opacity-0'].join(' ')}>
+                            <canvas data-magnify class="block w-full h-full bg-black"></canvas>
                         </div>
                     </div>
                 </div>
 
-                <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 space-y-3 flex flex-col">
-                    <div class="text-sm font-medium text-slate-200">Filter & Finalize</div>
+                <div class="flex flex-col gap-3 h-full">
+                    <div class="text-xs font-bold text-slate-500 uppercase tracking-widest px-1">Filter & Finalize</div>
 
-                    <div class="flex overflow-x-auto gap-3 pb-2 -mx-1 px-1 no-scrollbar">
-                        ${FILTER_PREVIEWS.map(f => html`
-                            <button class="flex flex-col items-center gap-1 group min-w-[64px] active:scale-95 transition-transform"
-                                    @click=${() => {
-                                        this.pushHistory();
-                                        this.filter = f.mode;
-                                        this.queuePreview();
-                                        void haptics.impact(ImpactStyle.Light);
-                                    }}>
-                                <div class="w-16 h-16 rounded-xl border-2 overflow-hidden relative transition-all ${this.filter === f.mode ? 'border-emerald-500 ring-2 ring-emerald-500/30' : 'border-slate-800 group-hover:border-slate-600'}">
+                    <div class="flex overflow-x-auto gap-3 pb-2 -mx-1 px-1 no-scrollbar snap-x">
+                        ${FILTERS.map(mode => html`
+                            <button @click=${() => {
+                                this.pushHistory();
+                                this.filter = mode;
+                                this.queuePreview();
+                                void haptics.impact(ImpactStyle.Light);
+                            }}
+                                    class="flex flex-col items-center gap-2 min-w-[70px] snap-start group relative">
+
+                                <div class="relative w-16 h-16 rounded-xl overflow-hidden border-2 transition-all duration-200 
+                                    ${this.filter === mode
+                                        ? 'border-emerald-500 scale-105 shadow-[0_0_15px_rgba(16,185,129,0.4)]'
+                                        : 'border-slate-800 opacity-70 group-hover:opacity-100 group-hover:border-slate-600'}">
+
                                     ${this.thumbUrl ? html`
-                                        <img src=${this.thumbUrl} class="w-full h-full object-cover" style="${f.style}">
+                                        <img src=${this.thumbUrl}
+                                             class="w-full h-full object-cover"
+                                             style="filter: ${this.getCssFilter(mode)}">
                                     ` : html`
                                         <div class="w-full h-full bg-slate-900 animate-pulse"></div>`}
+
+                                    ${this.filter === mode ? html`
+                                        <div class="absolute inset-0 bg-emerald-500/20 flex items-center justify-center">
+                                            <div class="bg-emerald-500 rounded-full p-0.5 shadow-lg">
+                                                <svg class="w-3 h-3 text-slate-900" fill="none" viewBox="0 0 24 24"
+                                                     stroke="currentColor">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                          stroke-width="4" d="M5 13l4 4L19 7"/>
+                                                </svg>
+                                            </div>
+                                        </div>
+                                    ` : null}
                                 </div>
-                                <span class="text-[10px] font-medium ${this.filter === f.mode ? 'text-emerald-400' : 'text-slate-500'}">${f.label}</span>
+
+                                <span class="text-[10px] font-bold tracking-wide uppercase transition-colors ${this.filter === mode ? 'text-emerald-400' : 'text-slate-500'}">
+                                    ${mode}
+                                </span>
                             </button>
                         `)}
                     </div>
 
-                    <div class="flex-1 rounded-xl overflow-hidden border border-slate-800 bg-black relative shadow-inner min-h-[300px]">
+                    <div class="flex-1 rounded-2xl overflow-hidden bg-black relative shadow-2xl border border-slate-800 group">
                         <canvas data-preview class="w-full h-full object-contain block"></canvas>
                         ${!this.sourceBitmap ? html`
-                            <div class="absolute inset-0 flex items-center justify-center text-xs text-slate-500 animate-pulse">
-                                Loading Preview...
+                            <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-500">
+                                <div class="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+                                <span class="text-xs font-bold uppercase tracking-wider">Loading...</span>
                             </div>` : null}
                     </div>
 
-                    <div class="flex gap-2 pt-2 border-t border-slate-800/50">
-                        <div class="flex items-center gap-2 px-2">
-                            <input type="checkbox" id="ocr-check"
-                                   class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-emerald-600 focus:ring-emerald-500"
+                    <div class="flex flex-col gap-3 pt-2">
+                        <label class="flex items-center gap-3 p-3 rounded-xl bg-slate-900/50 border border-slate-800 cursor-pointer select-none transition-colors hover:bg-slate-900">
+                            <input type="checkbox"
+                                   class="w-5 h-5 rounded border-slate-700 bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-0"
                                    .checked=${this.extractText}
                                    @change=${(e: Event) => this.extractText = (e.target as HTMLInputElement).checked}>
-                            <label for="ocr-check"
-                                   class="text-xs text-slate-300 select-none cursor-pointer font-medium">
-                                OCR
-                            </label>
+                            <div class="flex-1">
+                                <div class="text-sm font-bold text-slate-200">Extract Text (OCR)</div>
+                                <div class="text-[10px] text-slate-500">Make document searchable</div>
+                            </div>
+                        </label>
+
+                        <div class="flex gap-3">
+                            <button class="flex-1 px-6 py-3.5 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-300 font-bold tracking-wide transition-colors"
+                                    ?disabled=${this.busy} @click=${this.onCancel}>
+                                Back
+                            </button>
+                            <button class="flex-[2] px-6 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 active:scale-95 transition-all text-white font-bold tracking-wide shadow-lg shadow-emerald-900/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                    ?disabled=${this.busy} @click=${() => void this.onSave()}>
+                                ${this.busy
+                                        ? html`
+                                            <div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> Saving...`
+                                        : 'Save Document'}
+                            </button>
                         </div>
-                        <div class="flex-1"></div>
-                        <button class="px-6 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-300 font-medium transition-colors"
-                                ?disabled=${this.busy} @click=${this.onCancel}>
-                            Back
-                        </button>
-                        <button class="px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 active:scale-95 transition-all text-white font-bold shadow-lg shadow-emerald-900/20"
-                                ?disabled=${this.busy} @click=${() => void this.onSave()}>
-                            ${this.busy ? 'Saving...' : 'Save'}
-                        </button>
                     </div>
                 </div>
             </div>
