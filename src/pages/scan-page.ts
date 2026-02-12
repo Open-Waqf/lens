@@ -132,6 +132,35 @@ export class ScanPage extends LitElement {
         }
     }
 
+    private async removePage(pageId: string, e?: Event) {
+        if (e) e.stopPropagation(); // Stop the click from opening the editor
+
+        // Optional: Confirm before deleting to prevent accidents
+        const ok = await ConfirmModal.ask({
+            title: 'Delete Scan?',
+            description: 'This page will be discarded.',
+            confirm: 'Delete',
+            destructive: true
+        });
+        if (!ok) return;
+
+        try {
+            await this.repo.deletePage(pageId);
+            this.newPageIds.delete(pageId);
+
+            // Refresh the UI strip
+            await this.refreshDocInfo();
+
+            // If we deleted the page currently being edited, close the editor
+            if (this.editingPageId === pageId) {
+                this.clearEditor();
+                this.session.setStage('camera');
+            }
+        } catch (e) {
+            console.error("Failed to delete page", e);
+        }
+    }
+
     private onOcrQueueChange = () => {
         this.requestUpdate();
     };
@@ -808,16 +837,35 @@ export class ScanPage extends LitElement {
         const selected = this.editingPageId || this.selectedPageId;
 
         return html`
-            <div class="flex gap-3 overflow-x-auto py-2 px-1 no-scrollbar">
-                ${this.strip.map((it) => html`
-                    <button class="relative shrink-0 rounded-lg border ${selected === it.id ? 'border-emerald-500 ring-2 ring-emerald-500/20' : 'border-slate-800'} overflow-hidden transition-all active:scale-95"
-                            style="width: 84px; height: 108px;"
-                            title="Edit page"
-                            @click=${() => void this.openExistingPageInEditor(it.id)}>
-                        <img src=${it.url} class="w-full h-full object-cover" alt="thumb"/>
-                        ${it.isNew ? html`<span
-                                class="absolute top-1 left-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500 text-white font-bold shadow-sm">NEW</span>` : null}
-                    </button>
+            <div class="flex gap-4 overflow-x-auto py-3 px-4 no-scrollbar snap-x items-start">
+                ${this.strip.map((it, idx) => html`
+                    <div class="relative shrink-0 snap-center group pt-2">
+
+                        <button class="relative block rounded-lg border ${selected === it.id ? 'border-emerald-500 ring-2 ring-emerald-500/20' : 'border-slate-800'} overflow-hidden transition-all active:scale-95 bg-black"
+                                style="width: 84px; height: 108px;"
+                                title="Edit page"
+                                @click=${() => void this.openExistingPageInEditor(it.id)}>
+
+                            <img src=${it.url} class="w-full h-full object-cover opacity-90 group-hover:opacity-100"
+                                 alt="thumb"/>
+
+                            <div class="absolute bottom-1 right-1 text-[9px] font-bold text-white bg-black/60 px-1.5 py-0.5 rounded backdrop-blur-sm">
+                                ${idx + 1}
+                            </div>
+
+                            ${it.isNew ? html`
+                                <span class="absolute top-1 left-1 text-[8px] px-1.5 py-0.5 rounded bg-emerald-600 text-white font-bold shadow-sm">NEW</span>
+                            ` : null}
+                        </button>
+
+                        <button class="absolute top-0 right-[-6px] w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center shadow-md z-10 active:scale-90 transition-transform border-2 border-slate-950"
+                                @click=${(e: Event) => this.removePage(it.id, e)}>
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3"
+                                      d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    </div>
                 `)}
             </div>
         `;
