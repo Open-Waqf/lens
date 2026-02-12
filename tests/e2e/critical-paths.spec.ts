@@ -1,4 +1,5 @@
 import {expect, test} from '@playwright/test';
+import fs from 'fs';
 
 const MOCK_IMAGE_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
@@ -41,13 +42,13 @@ test('Disaster Recovery Flow: Import -> Encrypt -> Wipe -> Restore', async ({pag
     // Using a broad text search for the Save button inside the editor
     await page.locator('button').filter({hasText: /Save/i}).click();
 
-    await expect(page.locator('page-editor')).not.toBeVisible({ timeout: 15000 });
+    await expect(page.locator('page-editor')).not.toBeVisible({timeout: 15000});
 
     // CHECKPOINT: Go to Library and wait for the document to appear
     await page.goto('http://localhost:4173/#/library');
 
     // Wait for the "No scans yet" message to disappear
-    await expect(page.locator('text=Your Library is Empty')).not.toBeVisible({ timeout: 10000 });
+    await expect(page.locator('text=Your Library is Empty')).not.toBeVisible({timeout: 10000});
 
     // 4. BACKUP
     await page.goto('http://localhost:4173/#/settings');
@@ -66,7 +67,7 @@ test('Disaster Recovery Flow: Import -> Encrypt -> Wipe -> Restore', async ({pag
 
     // Click the "Export" button that belongs to the modal.
     // We use a locator that ensures we are clicking the one with the primary action.
-    await page.getByRole('button', { name: 'Export', exact: true }).click();
+    await page.getByRole('button', {name: 'Export', exact: true}).click();
 
     // Now the download should trigger
     const download = await downloadPromise;
@@ -89,18 +90,27 @@ test('Disaster Recovery Flow: Import -> Encrypt -> Wipe -> Restore', async ({pag
     const restoreChooser = await restoreChooserPromise;
     await restoreChooser.setFiles(backupPath!);
 
+    const buffer = fs.readFileSync(backupPath!);
+
+    // Set the files while forcing the .slbk extension
+    await restoreChooser.setFiles({
+        name: 'restore-test.slbk',
+        mimeType: 'application/octet-stream',
+        buffer: buffer
+    });
+
     await page.getByPlaceholder('Password').fill('secure123');
-    await page.getByRole('button', { name: 'Restore', exact: true }).click();
+    await page.getByRole('button', {name: 'Restore', exact: true}).click();
 
     // Handle Merge/Replace modal
     const confirmInput = page.getByPlaceholder('MERGE or REPLACE');
 
     // Use a longer timeout here because decryption/unzipping can be slow
-    await expect(confirmInput).toBeVisible({ timeout: 15000 });
+    await expect(confirmInput).toBeVisible({timeout: 15000});
 
     // --- STEP C: Handle Merge/Replace Modal ---
     await confirmInput.fill('REPLACE');
-    await page.locator('button').filter({ hasText: /Continue/i }).click();
+    await page.locator('button').filter({hasText: /Continue/i}).click();
 
     // 7. VERIFY
     await expect(page.locator('text=Restore complete!')).toBeVisible({timeout: 10000});

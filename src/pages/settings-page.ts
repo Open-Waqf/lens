@@ -156,6 +156,7 @@ export class SettingsPage extends LitElement {
         const docs = await db.docs.toArray();
         const pages = await db.pages.toArray();
 
+        // FIX 1: Math was wrong. docs.length must be part of the progress!
         this.backupTotal = docs.length + (pages.length * 2);
         this.backupProgress = 0;
 
@@ -165,18 +166,23 @@ export class SettingsPage extends LitElement {
             try {
                 const img = await store.get(p.imagePath);
                 yield {name: p.imagePath, data: img};
-                this.backupProgress++;
+                this.backupProgress++; // Increment 1
                 this.requestUpdate();
 
                 const thumb = await store.get(p.thumbPath);
                 yield {name: p.thumbPath, data: thumb};
-                this.backupProgress++;
+                this.backupProgress++; // Increment 2
                 this.requestUpdate();
             } catch (e) {
                 console.warn(`Skipping missing file: ${p.id}`, e);
             }
         }
+
         for (const d of docs) {
+            // FIX 2: Increment progress for every doc so we reach 100%
+            this.backupProgress++;
+            this.requestUpdate();
+
             if (d.pdfPath && (await store.exists(d.pdfPath))) {
                 try {
                     const pdf = await store.get(d.pdfPath);
@@ -184,6 +190,11 @@ export class SettingsPage extends LitElement {
                 } catch (e) {
                     console.warn(`Backup: Failed to read PDF for doc ${d.id}`, e);
                 }
+            }
+
+            // Let the UI breathe
+            if (this.backupProgress % 5 === 0) {
+                await new Promise(r => setTimeout(r, 10));
             }
         }
     }
@@ -193,13 +204,13 @@ export class SettingsPage extends LitElement {
         this.msg = null;
         this.err = null;
 
-        const tempPath = `exports/temp_backup_${Date.now()}.slbk`;
+        const tempPath = `exports/backup_${Date.now()}.slbk`;
         const writer = new OPFSStreamWriter(tempPath);
 
         try {
             const pw = await ConfirmModal.prompt({
                 title: 'Encrypt Backup',
-                description: 'Enter a password to protect your files (Optional).',
+                description: 'Enter a password (Optional).',
                 placeholder: 'Password123',
                 confirm: 'Export'
             });
@@ -213,31 +224,35 @@ export class SettingsPage extends LitElement {
 
             await writer.open();
 
-            const zipStream = zipFilesToStream(this.fileGenerator(), () => { /* Tracking */
+            const zipStream = zipFilesToStream(this.fileGenerator(), () => {
             });
             const finalStream = pw ? encryptStream(zipStream, pw) : zipStream;
 
-            // FIX 1: Prevent UI Freeze (The 76% Hang)
+            let chunkCount = 0;
             for await (const chunk of finalStream) {
                 await writer.write(chunk);
-                // Allow UI thread to breathe/update progress
-                await new Promise(r => setTimeout(r, 0));
+                chunkCount++;
+
+                // FIX THE 76% FREEZE:
+                // Give the UI more time to breathe every few chunks.
+                // This prevents the Capacitor bridge from choking.
+                if (chunkCount % 5 === 0) {
+                    await new Promise(r => setTimeout(r, 25));
+                }
             }
 
             const file = await writer.close();
+            const dateStr = new Date().toISOString().split('T')[0];
+            const finalName = pw
+                ? `lens-backup-${dateStr}.slbk.zip`
+                : `lens-backup-${dateStr}.zip`;
 
-            const ext = pw ? 'slbk' : 'zip';
-            const finalName = `sahifah-backup-${new Date().toISOString().split('T')[0]}.${ext}`;
-
-            // FIX 2: Better MIME type for Android compatibility
             const namedFile = new File([file], finalName, {
                 type: pw ? 'application/octet-stream' : 'application/zip',
                 lastModified: Date.now()
             });
 
-            // FIX 3: Prevent Auto-Lock
             AuthService.setIgnoreNextResume(true);
-
             await shareFile(namedFile, finalName);
 
             const now = Date.now();
@@ -599,7 +614,7 @@ export class SettingsPage extends LitElement {
                             </div>
                             <div class="text-left">
                                 <div class="text-slate-200 font-medium">Export Backup</div>
-                                <div class="text-xs text-slate-500">Save library to .slbk file</div>
+                                <div class="text-xs text-slate-500">Save to device Documents folder</div>
                             </div>
                         </div>
                     </button>

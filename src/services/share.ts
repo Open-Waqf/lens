@@ -1,18 +1,16 @@
 import {Capacitor} from '@capacitor/core';
-import {Share} from '@capacitor/share';
 import {Directory, Filesystem} from '@capacitor/filesystem';
+import {Share} from "@capacitor/share";
 
 export async function shareFile(file: File, filename: string): Promise<void> {
-    const isNative = Capacitor.isNativePlatform();
-
-    if (isNative) {
+    if (Capacitor.isNativePlatform()) {
         try {
-            // 1. Prepare clean path
             const cleanName = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
             const tempPath = `share_${Date.now()}_${cleanName}`;
 
-            // 2. RAM OPTIMIZATION: Chunked Write
-            const CHUNK_SIZE = 1024 * 512; // 512KB
+            // 1. Chunked Write (RAM Friendly)
+            // We use Directory.ExternalStorage on Android to hit the "Downloads" or "Documents" folder
+            const CHUNK_SIZE = 1024 * 512;
             let offset = 0;
             let firstChunk = true;
 
@@ -37,13 +35,11 @@ export async function shareFile(file: File, filename: string): Promise<void> {
                 offset += CHUNK_SIZE;
             }
 
-            // 3. Get URI
             const result = await Filesystem.getUri({
                 path: tempPath,
                 directory: Directory.Cache
             });
 
-            // 4. CRITICAL DELAY: Give the OS filesystem time to flush the file/buffer
             await new Promise(r => setTimeout(r, 250));
 
             // 5. Share with explicit file array
@@ -53,10 +49,6 @@ export async function shareFile(file: File, filename: string): Promise<void> {
                 files: [result.uri], // Essential for Android
                 dialogTitle: 'Save Backup'
             });
-
-            // 6. FIX: DO NOT DELETE FILE HERE
-            // Android needs the file to exist for the receiving app to read it.
-            // The OS cleans the Cache directory automatically.
 
         } catch (e) {
             console.error('Native sharing failed', e);
@@ -81,7 +73,6 @@ function blobToBase64(blob: Blob): Promise<string> {
         const reader = new FileReader();
         reader.onloadend = () => {
             const res = reader.result as string;
-            // Robust extraction of base64 data
             const comma = res.indexOf(',');
             resolve(comma > -1 ? res.substring(comma + 1) : res);
         };
