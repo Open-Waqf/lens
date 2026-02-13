@@ -590,7 +590,11 @@ export class SettingsPage extends LitElement {
                 <div class="h-4 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
                     <div class="h-full ${color} transition-all duration-500" style="width: ${Math.max(2, pct)}%"></div>
                 </div>
-                <div class="text-[10px] text-slate-500">Managed by browser. The OS may clear this if storage is low.
+                <div class="text-[10px] text-slate-500">
+                    ${this.caps.isCapacitor
+                            ? "Your documents are stored securely on this device's storage."
+                            : "Managed by browser. The OS may clear this if device storage is critically low."
+                    }
                 </div>
             </section>
         `;

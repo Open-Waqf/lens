@@ -62,6 +62,9 @@ export class DocPage extends LitElement {
     @state() private draggingId: string | null = null;
     @state() private dropTargetId: string | null = null;
 
+    @state() private folderSuggestions: string[] = [];
+    @state() private tagSuggestions: string[] = [];
+
     async connectedCallback(): Promise<void> {
         super.connectedCallback();
         await this.load();
@@ -185,6 +188,18 @@ export class DocPage extends LitElement {
         const pages = await db.pages.where('docId').equals(this.docId).sortBy('createdAt');
         const map = new Map(pages.map(p => [p.id, p]));
         this.pages = doc.pageIds.map(id => map.get(id)).filter(Boolean) as PageRecord[];
+
+        const allDocs = await db.docs.toArray();
+        const folders = new Set<string>();
+        const tags = new Set<string>();
+
+        for (const d of allDocs) {
+            if (d.folder) folders.add(d.folder);
+            if (d.tags) d.tags.forEach(t => tags.add(t));
+        }
+
+        this.folderSuggestions = Array.from(folders).sort();
+        this.tagSuggestions = Array.from(tags).sort();
 
         const store = getFileStore();
         for (const u of Object.values(this.thumbs)) URL.revokeObjectURL(u);
@@ -495,14 +510,28 @@ export class DocPage extends LitElement {
                         <div class="space-y-1">
                             <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Folder</div>
                             <input class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 min-h-[44px]"
+                                   list="folder-list"
+                                   placeholder="e.g. Finance"
                                    .value=${live(this.doc.folder ?? '')}
                                    @change=${(e: Event) => this.saveMeta({folder: (e.target as HTMLInputElement).value || null})}/>
+
+                            <datalist id="folder-list">
+                                ${this.folderSuggestions.map(f => html`
+                                    <option value=${f}></option>`)}
+                            </datalist>
                         </div>
                         <div class="space-y-1">
                             <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Tags</div>
                             <input class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 min-h-[44px]"
+                                   list="tag-list"
+                                   placeholder="e.g. 2024, Paid"
                                    .value=${live(this.doc.tags.join(', '))}
                                    @change=${(e: Event) => this.saveMeta({tags: (e.target as HTMLInputElement).value.split(',').map(s => s.trim()).filter(Boolean)})}/>
+
+                            <datalist id="tag-list">
+                                ${this.tagSuggestions.map(t => html`
+                                    <option value=${t}></option>`)}
+                            </datalist>
                         </div>
                     </div>
 
