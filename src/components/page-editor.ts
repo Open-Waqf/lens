@@ -14,7 +14,6 @@ export type PageEditorSaveDetail = {
     extractText: boolean;
 };
 
-// We define the available filters here, but the visual style is now dynamic
 const FILTERS: FilterMode[] = ['original', 'magic', 'bw', 'grayscale', 'whiteboard'];
 
 @customElement('page-editor')
@@ -34,8 +33,6 @@ export class PageEditor extends LitElement {
 
     private sourceBitmap: ImageBitmap | null = null;
     private baseCanvas: HTMLCanvasElement | null = null;
-
-    // Small thumbnail for the filter picker UI
     @state() private thumbUrl: string | null = null;
 
     private baseW = 0;
@@ -56,7 +53,6 @@ export class PageEditor extends LitElement {
     @state() private magnifyX = 0;
     @state() private magnifyY = 0;
 
-    // --- Helper for CSS Filters (Visual Preview only) ---
     private getCssFilter(mode: string): string {
         switch (mode) {
             case 'grayscale':
@@ -185,7 +181,6 @@ export class PageEditor extends LitElement {
 
     private updateThumbUrl(source: HTMLCanvasElement) {
         const t = document.createElement('canvas');
-        // Create slightly larger thumbnail for clearer preview
         const scale = 160 / Math.max(source.width, source.height);
         t.width = source.width * scale;
         t.height = source.height * scale;
@@ -229,26 +224,15 @@ export class PageEditor extends LitElement {
 
     private pickHandle(ev: PointerEvent): number | null {
         if (!this.edgesEl || !this.quad) return null;
-
         const rect = this.edgesEl.getBoundingClientRect();
-
-        // Calculate true scale of canvas vs screen
         const scaleX = this.edgesEl.width / rect.width;
         const scaleY = this.edgesEl.height / rect.height;
-
-        // Map touch to canvas coordinates
         const x = (ev.clientX - rect.left) * scaleX;
         const y = (ev.clientY - rect.top) * scaleY;
-
         const sx = this.edgesEl.width / this.baseW;
         const sy = this.edgesEl.height / this.baseH;
-
-        // HUGE HIT RADIUS: 70px on screen.
-        // This makes sure you almost never "miss" a corner.
         const hitRadius = 70 * Math.max(scaleX, scaleY);
-
         let best: { i: number; d: number } | null = null;
-
         for (let i = 0; i < 4; i++) {
             const p = this.quad[i];
             const px = p.x * sx;
@@ -262,16 +246,8 @@ export class PageEditor extends LitElement {
     private onPointerDown = (ev: PointerEvent) => {
         if (!this.quad) return;
         const idx = this.pickHandle(ev);
-
-        // 1. SCROLL PRIORITY (Missed Handle):
-        // If we didn't touch a handle, allow browser default (scrolling).
         if (idx == null) return;
-
-        // 2. DRAG PRIORITY (Hit Handle):
-        // We touched a handle. Prevent default to STOP scrolling.
-        // Also capture pointer so even if you drag off-canvas, we keep tracking.
         ev.preventDefault();
-
         this.pushHistory();
         this.dragIdx = idx;
         (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
@@ -280,18 +256,14 @@ export class PageEditor extends LitElement {
 
     private onPointerMove = (ev: PointerEvent) => {
         if (this.dragIdx == null || !this.quad) return;
-
         const rect = this.edgesEl.getBoundingClientRect();
         const x = ev.clientX - rect.left;
         const y = ev.clientY - rect.top;
-
         const ix = clamp((x / rect.width) * this.baseW, 0, this.baseW - 1);
         const iy = clamp((y / rect.height) * this.baseH, 0, this.baseH - 1);
-
         const q = [...this.quad] as Quad;
         q[this.dragIdx] = {x: ix, y: iy};
         this.quad = q;
-
         this.magnifyX = ix;
         this.magnifyY = iy;
         this.drawMagnifier();
@@ -345,11 +317,9 @@ export class PageEditor extends LitElement {
 
     private async autoDetectEdges(): Promise<void> {
         if (!this.baseCanvas || !this.quad) return;
-
         this.busy = true;
         this.requestUpdate();
         await new Promise(r => setTimeout(r, 50));
-
         try {
             this.startWorker();
             this.pushHistory();
@@ -364,9 +334,7 @@ export class PageEditor extends LitElement {
             tctx.drawImage(this.baseCanvas, 0, 0, w, h);
             const img = tctx.getImageData(0, 0, w, h);
             const quad = await this.detectQuad(img.data, w, h);
-
             if (!quad) return;
-
             const sx = this.baseW / w;
             const sy = this.baseH / h;
             const mapped: Quad = [
@@ -375,13 +343,10 @@ export class PageEditor extends LitElement {
                 {x: quad[2].x * sx, y: quad[2].y * sy},
                 {x: quad[3].x * sx, y: quad[3].y * sy},
             ];
-
             if (quadArea(mapped) / (this.baseW * this.baseH) < 0.08) return;
-
             this.quad = mapped;
             this.drawEdges();
             this.queuePreview();
-
         } finally {
             this.busy = false;
         }
@@ -426,39 +391,67 @@ export class PageEditor extends LitElement {
         try {
             const mappedQuad = this.mapQuadToSource(this.quad);
             const outSize = computeOutputSize(mappedQuad);
-            const maxPreview = 1400;
-            const scale = Math.min(1, maxPreview / Math.max(outSize.w, outSize.h));
-            const pW = Math.round(outSize.w * scale);
-            const pH = Math.round(outSize.h * scale);
+            const out = this.previewEl;
+            if (!out) return;
+
+            // FIX: Dynamic Sizing to match Android/Mobile viewports
+            // 1. Determine available width (container) and safe max height
+            const container = out.parentElement;
+            const cw = container?.clientWidth || window.innerWidth;
+            const maxH = window.innerHeight * 0.65; // Matches Crop view constraint
+
+            // 2. Calculate aspect-ratio preserving dimensions
+            const ratio = outSize.w / outSize.h;
+            let finalW = cw;
+            let finalH = cw / ratio;
+
+            if (finalH > maxH) {
+                finalH = maxH;
+                finalW = finalH * ratio;
+            }
+
+            finalW = Math.round(finalW);
+            finalH = Math.round(finalH);
+
+            // 3. Set visual size (CSS) explicitly to avoid "small" rendering
+            out.style.width = `${finalW}px`;
+            out.style.height = `${finalH}px`;
+
+            // 4. Set buffer size (DPR aware) for sharpness
+            const dpr = window.devicePixelRatio || 1;
+            out.width = Math.round(finalW * dpr);
+            out.height = Math.round(finalH * dpr);
+
+            // 5. Ask worker for a buffer that matches this resolution (or capped max)
+            // We request a slightly larger buffer if possible to ensure downscaling is crisp
+            const maxWorkerDim = 1600;
+            const scale = Math.min(1, maxWorkerDim / Math.max(out.width, out.height));
+
+            // We can ask worker to render at exact target scale if we pass outW/outH appropriately
+            // But preserving the aspect ratio from computeOutputSize is safer.
+            // We simply draw the result into our sized canvas.
+            const reqW = Math.round(outSize.w * scale);
+            const reqH = Math.round(outSize.h * scale);
+
             const res = await this.runWorkerTask({
                 id: `prev-${token}`,
                 bitmap: await createImageBitmap(this.sourceBitmap),
                 quad: mappedQuad,
                 rotation: 0,
                 filter: this.filter,
-                outW: pW,
-                outH: pH,
+                outW: reqW,
+                outH: reqH,
                 encode: false
             });
+
             if (token !== this._previewToken) return;
             if (!res.ok) throw new Error(res.error);
             if (!res.bitmap) throw new Error('No bitmap returned');
-            const out = this.previewEl;
-            if (!out) return;
-            const dpr = window.devicePixelRatio || 1;
-            const cw = Math.max(1, out.clientWidth || 1);
-            const ch = Math.max(1, out.clientHeight || 1);
-            out.width = Math.round(cw * dpr);
-            out.height = Math.round(ch * dpr);
+
             const ctx = out.getContext('2d')!;
-            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-            ctx.clearRect(0, 0, cw, ch);
-            const s = Math.min(cw / res.width!, ch / res.height!);
-            const dw = res.width! * s;
-            const dh = res.height! * s;
-            const dx = (cw - dw) / 2;
-            const dy = (ch - dh) / 2;
-            ctx.drawImage(res.bitmap, dx, dy, dw, dh);
+            ctx.clearRect(0, 0, out.width, out.height);
+            // Draw result to fill the calculated space
+            ctx.drawImage(res.bitmap, 0, 0, out.width, out.height);
             res.bitmap.close();
         } catch (e) {
         } finally {
@@ -470,34 +463,26 @@ export class PageEditor extends LitElement {
         if (!this.sourceBitmap || !this.quad) return;
         this.err = null;
         this.busy = true;
-
         this.requestUpdate();
         await new Promise(r => setTimeout(r, 50));
-
         try {
             const mappedQuad = this.mapQuadToSource(this.quad);
             const rawSize = computeOutputSize(mappedQuad);
-
             const MIN_OCR_DIM = 1600;
             const MAX_DIM = 2500;
-
             const largestDim = Math.max(rawSize.w, rawSize.h);
             let mScale = 1;
-
             if (largestDim < MIN_OCR_DIM) {
                 mScale = MIN_OCR_DIM / largestDim;
             } else if (largestDim > MAX_DIM) {
                 mScale = MAX_DIM / largestDim;
             }
-
             const mW = Math.round(rawSize.w * mScale);
             const mH = Math.round(rawSize.h * mScale);
-
             const THUMB_MAX = 800;
             const tScale = Math.min(1, THUMB_MAX / largestDim);
             const tW = Math.round(rawSize.w * tScale);
             const tH = Math.round(rawSize.h * tScale);
-
             const masterTask = this.runWorkerTask({
                 id: `save-m-${Date.now()}`,
                 blob: this.blob,
@@ -509,7 +494,6 @@ export class PageEditor extends LitElement {
                 encode: true,
                 quality: 0.92
             });
-
             const thumbTask = this.runWorkerTask({
                 id: `save-t-${Date.now()}`,
                 blob: this.blob,
@@ -521,20 +505,16 @@ export class PageEditor extends LitElement {
                 encode: true,
                 quality: 0.82
             });
-
             const [resM, resT] = await Promise.all([masterTask, thumbTask]);
-
             if (!resM.ok) throw new Error(resM.error || 'Failed to encode master');
             if (!resT.ok) throw new Error(resT.error || 'Failed to encode thumb');
             if (!resM.bytes) throw new Error('Missing master bytes');
             if (!resT.bytes) throw new Error('Missing thumb bytes');
-
             const detail: PageEditorSaveDetail = {
                 master: {bytes: resM.bytes, width: resM.width!, height: resM.height!},
                 thumb: {bytes: resT.bytes, width: resT.width!, height: resT.height!},
                 extractText: this.extractText,
             };
-
             this.dispatchEvent(
                 new CustomEvent<PageEditorSaveDetail>('page-editor-save', {detail, bubbles: true, composed: true}),
             );
@@ -595,7 +575,8 @@ export class PageEditor extends LitElement {
                     <div class="flex items-center justify-between px-1">
                         <div class="text-xs font-bold text-slate-500 uppercase tracking-widest">Crop & Rotate</div>
                         <div class="flex gap-2">
-                            <button aria-label="Auto Detect Edges" class="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-400 active:scale-95 transition-transform border border-slate-700 hover:text-white"
+                            <button aria-label="Auto Detect Edges"
+                                    class="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-400 active:scale-95 transition-transform border border-slate-700 hover:text-white"
                                     ?disabled=${this.busy}
                                     @click=${() => void this.autoDetectEdges()}>
                                 AUTO
@@ -678,10 +659,10 @@ export class PageEditor extends LitElement {
 
                 <div class="flex flex-col gap-3">
                     <div class="text-xs font-bold text-slate-500 uppercase tracking-widest px-1">Final Result</div>
-                    <div class="relative min-h-[50vh] rounded-2xl overflow-hidden bg-slate-900 shadow-2xl border border-slate-800 group">
-                        <canvas data-preview class="w-full h-full object-contain block"></canvas>
+                    <div class="relative w-full flex justify-center bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 group">
+                        <canvas data-preview class="block max-w-full object-contain"></canvas>
                         ${!this.sourceBitmap ? html`
-                            <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-500">
+                            <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-500 min-h-[200px]">
                                 <div class="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
                                 <span class="text-xs font-bold uppercase tracking-wider">Loading...</span>
                             </div>` : null}

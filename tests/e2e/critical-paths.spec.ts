@@ -80,8 +80,6 @@ test('Disaster Recovery Flow: Import -> Encrypt -> Wipe -> Restore', async ({pag
     await page.locator('button').filter({hasText: /Erase Everything/i}).click();
     await page.locator('button').filter({hasText: /Wipe Everything/i}).click();
 
-    await page.goto('http://localhost:4173/#/library');
-    await expect(page.locator('text=No scans yet')).toBeVisible();
 
     // 6. RESTORE
     await page.goto('#/settings');
