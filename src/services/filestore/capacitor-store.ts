@@ -79,4 +79,35 @@ export class CapacitorFileStore implements FileStore {
             console.error('Failed to recreate folder', path, e);
         }
     }
+
+    async getUsageEstimate(): Promise<number> {
+        let total = 0;
+        try {
+            // 1. Measure 'pages' folder (Images)
+            const pages = await Filesystem.readdir({
+                path: 'pages',
+                directory: Directory.Data
+            });
+            for (const file of pages.files) {
+                total += file.size;
+            }
+
+            // 2. Measure 'docs' folder (PDF exports etc)
+            // We use a try-catch because 'docs' might not exist yet
+            try {
+                const docs = await Filesystem.readdir({
+                    path: 'docs',
+                    directory: Directory.Data
+                });
+                for (const file of docs.files) {
+                    total += file.size;
+                }
+            } catch {
+            }
+
+        } catch (e) {
+            console.warn('Failed to calculate storage size', e);
+        }
+        return total;
+    }
 }

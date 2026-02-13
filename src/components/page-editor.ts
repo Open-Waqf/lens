@@ -586,7 +586,7 @@ export class PageEditor extends LitElement {
             ${this.err ? html`
                 <div class="fixed top-4 left-4 right-4 z-[100] p-4 rounded-xl bg-red-950/90 backdrop-blur border border-red-900 text-red-100 shadow-xl flex items-center justify-between animate-bounce">
                     <span>${this.err}</span>
-                    <button class="ml-2 font-bold" @click=${() => this.err = null}>✕</button>
+                    <button aria-label="Clear error" class="ml-2 font-bold" @click=${() => this.err = null}>✕</button>
                 </div>` : null}
 
             <div class="flex flex-col min-h-dvh gap-6 p-4 pb-32 bg-black text-slate-100">
@@ -595,7 +595,7 @@ export class PageEditor extends LitElement {
                     <div class="flex items-center justify-between px-1">
                         <div class="text-xs font-bold text-slate-500 uppercase tracking-widest">Crop & Rotate</div>
                         <div class="flex gap-2">
-                            <button class="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-400 active:scale-95 transition-transform border border-slate-700 hover:text-white"
+                            <button aria-label="Auto Detect Edges" class="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-400 active:scale-95 transition-transform border border-slate-700 hover:text-white"
                                     ?disabled=${this.busy}
                                     @click=${() => void this.autoDetectEdges()}>
                                 AUTO
@@ -710,7 +710,7 @@ export class PageEditor extends LitElement {
                             ${this.busy
                                     ? html`
                                         <div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> Saving...`
-                                    : 'Save Document'}
+                                    : 'Save Scan'}
                         </button>
                     </div>
                 </div>

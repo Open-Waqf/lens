@@ -75,7 +75,7 @@ export class AuthLock extends LitElement {
                 <h2>Sahifah is Locked</h2>
                 <p>Use your device security (Fingerprint, FaceID, or PIN) to unlock.</p>
 
-                <button @click=${this._tryUnlock}>Unlock Vault</button>
+                <button aria-label="Unlock Vault" @click=${this._tryUnlock}>Unlock Vault</button>
 
                 ${this.error ? html`
                     <div class="error-msg">Authentication failed. Try again.</div>` : null}

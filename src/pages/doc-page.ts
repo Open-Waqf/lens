@@ -5,7 +5,7 @@ import {live} from 'lit/directives/live.js';
 import {db} from '../services/db';
 import {getFileStore} from '../services/filestore';
 import {buildPdfForDoc, type PdfQuality} from '../lib/pdf';
-import {jsonFile, makeZip} from '../lib/zip';
+import {jsonFileMap, makeZip} from '../lib/zip';
 import {bytesToBlob} from '../lib/bytes';
 import {ScanRepo} from './scan/scan-repo';
 
@@ -367,9 +367,9 @@ export class DocPage extends LitElement {
             const cleanDoc = JSON.parse(JSON.stringify(this.doc));
             const cleanPages = JSON.parse(JSON.stringify(this.pages));
 
-            Object.assign(files, jsonFile('meta.json', {doc: cleanDoc, pages: cleanPages}));
-
+            Object.assign(files, jsonFileMap('meta.json', {doc: cleanDoc, pages: cleanPages}));
             const zip = makeZip(files);
+
             const zipBlob = bytesToBlob(zip, 'application/zip');
             const zipFilename = `${safeName(this.doc.title)}-images.zip`;
             const zipFile = new File([zipBlob], zipFilename, {type: 'application/zip'});

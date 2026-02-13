@@ -18,6 +18,7 @@ import {AuthService} from '../services/auth-service';
 import {OPFSStreamWriter} from '../services/filestore/opfs-store';
 
 import {repairLibrary} from '../services/repair';
+import {CapacitorFileStore} from "../services/filestore/capacitor-store";
 
 type RestoreMode = 'merge' | 'replace';
 
@@ -98,6 +99,24 @@ export class SettingsPage extends LitElement {
     }
 
     private async loadStorageStats() {
+        // 1. Native App Strategy (Real File Usage)
+        if (this.caps.isCapacitor) {
+            try {
+                const store = getFileStore();
+                // Check if the store has our new method (it will if it's CapacitorFileStore)
+                if (store instanceof CapacitorFileStore) {
+                    this.storageUsed = await store.getUsageEstimate();
+                    // On Native, quota is the total device free space, but harder to get accurately.
+                    // We can leave quota as 0 (hide the bar) or set a fake high number.
+                    this.storageQuota = 0;
+                }
+            } catch (e) {
+                console.warn('Native storage check failed', e);
+            }
+            return;
+        }
+
+        // 2. Web/PWA Strategy (Browser Quota)
         if (navigator.storage && navigator.storage.estimate) {
             try {
                 const est = await navigator.storage.estimate();
@@ -581,21 +600,27 @@ export class SettingsPage extends LitElement {
     private renderStorageSection() {
         const pct = this.storageQuota > 0 ? (this.storageUsed / this.storageQuota) * 100 : 0;
         const color = pct > 90 ? 'bg-red-500' : (pct > 70 ? 'bg-amber-500' : 'bg-emerald-500');
+
+        // Dynamic text based on platform
+        const infoText = this.caps.isCapacitor
+            ? "Your documents are stored securely on this device's internal storage."
+            : "Managed by browser. The OS may clear this if storage is low.";
+
         return html`
             <section class="space-y-2">
                 <div class="flex items-center justify-between text-xs text-slate-400 uppercase tracking-wider font-semibold">
                     <span>Local Storage</span>
-                    <span>${this.formatBytes(this.storageUsed)} / ${this.formatBytes(this.storageQuota)}</span>
+                    <span>${this.formatBytes(this.storageUsed)} ${this.storageQuota > 0 ? '/ ' + this.formatBytes(this.storageQuota) : ''}</span>
                 </div>
-                <div class="h-4 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
-                    <div class="h-full ${color} transition-all duration-500" style="width: ${Math.max(2, pct)}%"></div>
-                </div>
-                <div class="text-[10px] text-slate-500">
-                    ${this.caps.isCapacitor
-                            ? "Your documents are stored securely on this device's storage."
-                            : "Managed by browser. The OS may clear this if device storage is critically low."
-                    }
-                </div>
+
+                ${this.storageQuota > 0 ? html`
+                    <div class="h-4 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                        <div class="h-full ${color} transition-all duration-500"
+                             style="width: ${Math.max(2, pct)}%"></div>
+                    </div>
+                ` : null}
+
+                <div class="text-[10px] text-slate-500">${infoText}</div>
             </section>
         `;
     }
