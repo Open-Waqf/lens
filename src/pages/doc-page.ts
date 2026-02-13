@@ -72,6 +72,43 @@ export class DocPage extends LitElement {
         super.disconnectedCallback();
     }
 
+    private async exportImagesJpeg(): Promise<void> {
+        if (!this.doc || this.pages.length === 0) return;
+        this.busy = true;
+        try {
+            const store = getFileStore();
+            const files: File[] = [];
+
+            // Limit batch size to prevent crashing on low-memory devices (e.g. max 10 at a time)
+            // For now, we try all, but in a real large doc, chunking might be needed.
+            for (let i = 0; i < this.pages.length; i++) {
+                const p = this.pages[i];
+                const bytes = await store.get(p.imagePath);
+                const blob = bytesToBlob(bytes, 'image/jpeg');
+                // Create a nice filename: "Title - Page 1.jpg"
+                const name = `${safeName(this.doc.title)} - Page ${i + 1}.jpg`;
+                files.push(new File([blob], name, {type: 'image/jpeg'}));
+            }
+
+            if (navigator.canShare && navigator.canShare({files})) {
+                await navigator.share({
+                    files,
+                    title: this.doc.title,
+                    text: `${this.doc.title} - ${this.pages.length} pages`
+                });
+            } else {
+                this.error = "Your device does not support sharing multiple images at once.";
+            }
+        } catch (e) {
+            // Ignore AbortError (user cancelled share sheet)
+            if ((e as Error).name !== 'AbortError') {
+                this.error = (e as Error).message;
+            }
+        } finally {
+            this.busy = false;
+        }
+    }
+
     private revokeUrls() {
         for (const u of Object.values(this.thumbs)) URL.revokeObjectURL(u);
         if (this.viewerUrl) URL.revokeObjectURL(this.viewerUrl);
@@ -322,6 +359,10 @@ export class DocPage extends LitElement {
         try {
             await this.repo.deletePage(pageId);
             await this.load();
+            if (this.pages.length === 0 && this.doc) {
+                await this.repo.deleteDocCompletely(this.doc.id);
+                location.hash = '#/library';
+            }
         } catch (e) {
             this.error = (e as Error).message;
         } finally {
@@ -535,6 +576,10 @@ export class DocPage extends LitElement {
                             ${this.busy ? 'Working...' : 'Export PDF'}
                         </button>
                         <button class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm min-h-[44px]"
+                                ?disabled=${this.busy || this.pages.length === 0} @click=${() => this.exportImagesJpeg()}>
+                            Share Images
+                        </button>
+                        <button class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm min-h-[44px]"
                                 ?disabled=${this.busy || this.pages.length === 0} @click=${this.exportImagesZip}>
                             Export Zip
                         </button>
@@ -583,7 +628,7 @@ export class DocPage extends LitElement {
                                          @click=${() => this.openViewerAt(realIdx)}>
                                         ${this.thumbs[p.id]
                                                 ? html`<img src=${this.thumbs[p.id]}
-                                                            class="w-full h-full object-contain">`
+                                                            class="w-full h-full object-cover">`
                                                 : html`
                                                     <div class="w-full h-full flex items-center justify-center text-slate-700">
                                                         ?

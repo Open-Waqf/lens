@@ -678,7 +678,7 @@ export class PageEditor extends LitElement {
 
                 <div class="flex flex-col gap-3">
                     <div class="text-xs font-bold text-slate-500 uppercase tracking-widest px-1">Final Result</div>
-                    <div class="relative aspect-3/4 rounded-2xl overflow-hidden bg-slate-900 shadow-2xl border border-slate-800 group">
+                    <div class="relative min-h-[50vh] rounded-2xl overflow-hidden bg-slate-900 shadow-2xl border border-slate-800 group">
                         <canvas data-preview class="w-full h-full object-contain block"></canvas>
                         ${!this.sourceBitmap ? html`
                             <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-500">
