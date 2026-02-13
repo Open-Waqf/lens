@@ -43,7 +43,7 @@ export function processPhoto(opts: PipelineInput): Promise<PipelineOutput> {
             rotation: opts.rotation,
             filter: opts.filter,
             masterJpegQuality: opts.masterJpegQuality ?? 0.82,
-            thumbMax: 360,
+            thumbMax: 800,
         });
     });
 }

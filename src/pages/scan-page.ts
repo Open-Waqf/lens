@@ -148,14 +148,28 @@ export class ScanPage extends LitElement {
             await this.repo.deletePage(pageId);
             this.newPageIds.delete(pageId);
 
-            // Refresh the UI strip
+            // 1. Refresh to see what's left
             await this.refreshDocInfo();
 
-            // If we deleted the page currently being edited, close the editor
-            if (this.editingPageId === pageId) {
+            // 2. Handle Empty State (Go back to Start)
+            if (this.session.pageCount === 0) {
                 this.clearEditor();
-                this.session.setStage('camera');
+                this.session.setStage('idle');
+                return;
             }
+
+            // 3. Handle Multi-Page State
+            // If we deleted the page we were looking at, switch to the new first page.
+            if (this.editingPageId === pageId) {
+                const newFirstPage = this.strip[0];
+                if (newFirstPage) {
+                    await this.openExistingPageInEditor(newFirstPage.id);
+                } else {
+                    this.session.setStage('camera'); // Fallback
+                }
+            }
+            // If we deleted a background page, stay where we are (strip is already updated)
+
         } catch (e) {
             console.error("Failed to delete page", e);
         }
@@ -405,14 +419,16 @@ export class ScanPage extends LitElement {
             await this.refreshDocInfo();
 
             if (this.editingPageId && this.importReviewQueue.length > 0 && this.importReviewQueue[0] === this.editingPageId) {
-                this.importReviewQueue.shift();
-                const nextId = this.importReviewQueue[0] ?? null;
+                this.importReviewQueue.shift(); // Remove the one we just saved
+                const nextId = this.importReviewQueue[0]; // Peek next
 
                 if (nextId) {
                     this.importReviewIndex = this.importReviewTotal - this.importReviewQueue.length + 1;
+                    await new Promise(r => setTimeout(r, 50));
                     await this.openExistingPageInEditor(nextId);
-                    return;
+                    return; // RETURN EARLY to prevent falling through to clearEditor
                 } else {
+                    // Queue is done
                     this.clearImportReview();
                 }
             }

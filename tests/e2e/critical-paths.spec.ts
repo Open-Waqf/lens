@@ -48,7 +48,7 @@ test('Disaster Recovery Flow: Import -> Encrypt -> Wipe -> Restore', async ({pag
     await page.goto('http://localhost:4173/#/library');
 
     // Wait for the "No scans yet" message to disappear
-    await expect(page.locator('text=Your Library is Empty')).not.toBeVisible({timeout: 10000});
+    await expect(page.locator('text=No scans yet')).not.toBeVisible({timeout: 10000});
 
     // 4. BACKUP
     await page.goto('http://localhost:4173/#/settings');
@@ -81,7 +81,7 @@ test('Disaster Recovery Flow: Import -> Encrypt -> Wipe -> Restore', async ({pag
     await page.locator('button').filter({hasText: /Wipe Everything/i}).click();
 
     await page.goto('http://localhost:4173/#/library');
-    await expect(page.locator('text=Your Library is Empty')).toBeVisible();
+    await expect(page.locator('text=No scans yet')).toBeVisible();
 
     // 6. RESTORE
     await page.goto('#/settings');
@@ -115,5 +115,5 @@ test('Disaster Recovery Flow: Import -> Encrypt -> Wipe -> Restore', async ({pag
     // 7. VERIFY
     await expect(page.locator('text=Restore complete!')).toBeVisible({timeout: 10000});
     await page.goto('#/library');
-    await expect(page.locator('text=Your Library is Empty')).not.toBeVisible();
+    await expect(page.locator('text=No scans yet')).not.toBeVisible();
 });

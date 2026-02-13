@@ -377,29 +377,55 @@ export class LibraryPage extends LitElement {
         const groups = this.groupedDocs;
         const isGallery = this.viewMode === 'gallery';
         const hasDocs = this.visibleDocs.length > 0;
+        const isSearchEmpty = !hasDocs && (this.query || this.selectedTag);
+        const isLibraryEmpty = !hasDocs && !this.query && !this.selectedTag && this.allDocsSource.length === 0;
 
         return html`
             <div class="space-y-4 pb-4">
                 ${this.renderHeader(isGallery)}
                 ${this.renderSafetyPrompt()}
 
-                ${!hasDocs && !this.query && this.allDocsSource.length === 0 && !this.loading
+                ${isLibraryEmpty && !this.loading
                         ? this.renderEmptyState()
-                        : html`
-                            <div class="space-y-8 min-h-[50vh]">
-                                ${this.loading
-                                        ? html`
-                                            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                                                ${[...Array(10)].map(() => this.renderSkeleton())}
-                                            </div>`
-                                        : Object.entries(groups).map(([folderName, docs]) =>
-                                                this.renderFolderGroup(folderName, docs, isGallery)
-                                        )
-                                }
-                                <div id="load-more-sentinel" class="h-10 w-full"></div>
-                            </div>
-                        `
+                        : isSearchEmpty && !this.loading
+                                ? this.renderNoSearchResults()
+                                : html`
+                                    <div class="space-y-8 min-h-[50vh]">
+                                        ${this.loading
+                                                ? html`
+                                                    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                                                        ${[...Array(10)].map(() => this.renderSkeleton())}
+                                                    </div>`
+                                                : Object.entries(groups).map(([folderName, docs]) =>
+                                                        this.renderFolderGroup(folderName, docs, isGallery)
+                                                )
+                                        }
+                                        <div id="load-more-sentinel" class="h-10 w-full"></div>
+                                    </div>
+                                `
                 }
+            </div>
+        `;
+    }
+
+    private renderNoSearchResults() {
+        return html`
+            <div class="flex flex-col items-center justify-center py-20 text-center space-y-4">
+                <div class="p-4 rounded-full bg-slate-900/50 text-slate-500">
+                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                    </svg>
+                </div>
+                <div class="text-slate-400">No documents match "<b>${this.query}</b>"</div>
+                <button class="text-emerald-400 text-sm font-bold hover:underline"
+                        @click=${() => {
+                            this.query = '';
+                            this.selectedTag = null;
+                            this.applyFilters();
+                        }}>
+                    Clear Filters
+                </button>
             </div>
         `;
     }
@@ -549,7 +575,7 @@ export class LibraryPage extends LitElement {
                 </div>
 
                 <div>
-                    <h2 class="text-xl font-bold text-slate-200">Your Library is Empty</h2>
+                    <h2 class="text-xl font-bold text-slate-200">No scans yet</h2>
                     <p class="text-sm text-slate-500 max-w-xs mx-auto mt-2">
                         Tap the camera button below to digitize your first document securely.
                     </p>
