@@ -334,6 +334,7 @@ export class ScanPage extends LitElement {
     }
 
     private async openNewBlobInEditor(blob: Blob, initialQuad: Quad | null = null): Promise<void> {
+        this.showPermissionError = false;
         await this.stopCamera();
         this.captured = blob;
         this.editingPageId = null;
@@ -343,6 +344,7 @@ export class ScanPage extends LitElement {
     }
 
     private async openExistingPageInEditor(pageId: string): Promise<void> {
+        this.showPermissionError = false;
         this.error = null;
         await this.stopCamera();
         try {
@@ -600,24 +602,39 @@ export class ScanPage extends LitElement {
 
     private async pickFiles(opts: { multiple: boolean }): Promise<void> {
         this.error = null;
-        try {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = 'image/*';
-            input.multiple = opts.multiple;
-            const files: File[] = await new Promise((resolve) => {
-                input.onchange = () => resolve(input.files ? Array.from(input.files) : []);
-                input.click();
-            });
-            if (files.length === 0) return;
-            if (files.length === 1) {
-                await this.openNewBlobInEditor(files[0]);
-                return;
-            }
-            await this.batchImport(files);
-        } catch (e) {
-            this.error = (e as Error).message ?? String(e);
+
+        // Use the input rendered in the DOM for better reliability
+        const input = this.renderRoot.querySelector('#import-input') as HTMLInputElement;
+
+        if (!input) {
+            this.error = "Import unavailable";
+            return;
         }
+
+        input.multiple = opts.multiple;
+        input.value = ''; // Reset value to allow selecting same file twice
+
+        // We use a one-time promise wrapper for the change event
+        return new Promise((resolve) => {
+            const handler = async () => {
+                input.removeEventListener('change', handler); // Cleanup
+                const files = input.files ? Array.from(input.files) : [];
+
+                if (files.length === 0) {
+                    resolve();
+                    return;
+                }
+
+                this.showPermissionError = false;
+
+                if (files.length === 1) await this.openNewBlobInEditor(files[0]);
+                else await this.batchImport(files);
+                resolve();
+            };
+
+            input.addEventListener('change', handler);
+            input.click();
+        });
     }
 
     private async batchImport(files: File[]): Promise<void> {
@@ -787,6 +804,16 @@ export class ScanPage extends LitElement {
         }
     }
 
+    private renderHiddenInput() {
+        return html`
+            <input type="file"
+                   id="import-input"
+                   accept="image/jpeg,image/png,image/webp,application/pdf"
+                   multiple
+                   style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;">
+        `;
+    }
+
     private renderBanner() {
         if (this.replacePageId) {
             return html`
@@ -948,6 +975,7 @@ export class ScanPage extends LitElement {
                     </button>
 
                     <button class="w-full py-3 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded-xl font-bold transition-all"
+                            ?disabled=${this.busy}
                             @click=${() => this.pickFiles({multiple: !this.replacePageId})}>
                         Import from Files
                     </button>
@@ -965,6 +993,13 @@ export class ScanPage extends LitElement {
     }
 
     render() {
+        return html`
+            ${this.renderHiddenInput()}
+            ${this.renderContent()}
+        `;
+    }
+
+    renderContent() {
         if (this.showWelcome) return this.renderWelcome();
         if (this.showPermissionError) return this.renderPermissionUI();
 

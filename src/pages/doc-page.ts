@@ -4,7 +4,6 @@ import {live} from 'lit/directives/live.js';
 
 import {db} from '../services/db';
 import {getFileStore} from '../services/filestore';
-import {shareFile} from '../services/share';
 import {buildPdfForDoc, type PdfQuality} from '../lib/pdf';
 import {jsonFile, makeZip} from '../lib/zip';
 import {bytesToBlob} from '../lib/bytes';
@@ -17,6 +16,7 @@ import type {PageEditorSaveDetail} from '../components/page-editor';
 import type {DocRecord, PageRecord} from '../domain/types';
 import {haptics} from '../services/haptics';
 import {ImpactStyle} from '@capacitor/haptics';
+import {shareFile, shareFiles} from "../services/share";
 
 @customElement('doc-page')
 export class DocPage extends LitElement {
@@ -72,6 +72,29 @@ export class DocPage extends LitElement {
         super.disconnectedCallback();
     }
 
+    private async exportSingleImage(pageId: string): Promise<void> {
+        if (!this.doc) return;
+        this.busy = true;
+        try {
+            const store = getFileStore();
+            const page = this.pages.find(p => p.id === pageId);
+            if (!page) throw new Error("Page not found");
+
+            const bytes = await store.get(page.imagePath);
+            const blob = bytesToBlob(bytes, 'image/jpeg');
+            const pageNum = this.pages.indexOf(page) + 1;
+            const name = `${safeName(this.doc.title)} - Page ${pageNum}.jpg`;
+            const file = new File([blob], name, {type: 'image/jpeg'});
+
+            await shareFile(file, name); // Uses the native-safe service
+        } catch (e) {
+            this.error = (e as Error).message;
+        } finally {
+            this.busy = false;
+        }
+    }
+
+    // 3. UPDATE: Batch Images (Share Images) with limited fallback
     private async exportImagesJpeg(): Promise<void> {
         if (!this.doc || this.pages.length === 0) return;
         this.busy = true;
@@ -79,31 +102,19 @@ export class DocPage extends LitElement {
             const store = getFileStore();
             const files: File[] = [];
 
-            // Limit batch size to prevent crashing on low-memory devices (e.g. max 10 at a time)
-            // For now, we try all, but in a real large doc, chunking might be needed.
             for (let i = 0; i < this.pages.length; i++) {
                 const p = this.pages[i];
                 const bytes = await store.get(p.imagePath);
                 const blob = bytesToBlob(bytes, 'image/jpeg');
-                // Create a nice filename: "Title - Page 1.jpg"
                 const name = `${safeName(this.doc.title)} - Page ${i + 1}.jpg`;
                 files.push(new File([blob], name, {type: 'image/jpeg'}));
             }
 
-            if (navigator.canShare && navigator.canShare({files})) {
-                await navigator.share({
-                    files,
-                    title: this.doc.title,
-                    text: `${this.doc.title} - ${this.pages.length} pages`
-                });
-            } else {
-                this.error = "Your device does not support sharing multiple images at once.";
-            }
+            // Share multiple files via service
+            await shareFiles(files, this.doc.title);
         } catch (e) {
-            // Ignore AbortError (user cancelled share sheet)
-            if ((e as Error).name !== 'AbortError') {
-                this.error = (e as Error).message;
-            }
+            this.error = (e as Error).message;
+
         } finally {
             this.busy = false;
         }
@@ -293,7 +304,6 @@ export class DocPage extends LitElement {
         this.busy = true;
         this.exportProgress = 0;
         this.exportTotal = this.pages.length;
-
         try {
             const store = getFileStore();
             await new Promise(r => setTimeout(r, 50));
@@ -310,11 +320,14 @@ export class DocPage extends LitElement {
             const filename = `${safeName(this.doc.title)}.pdf`;
             const blob = bytesToBlob(pdfBytes, 'application/pdf');
             const pdfFile = new File([blob], filename, {type: 'application/pdf'});
+
+            // UPDATED: Use service
             await shareFile(pdfFile, filename);
 
             const pdfPath = `docs/${this.doc.id}/exports/${Date.now()}.pdf`;
             await store.put(pdfPath, pdfBytes, 'application/pdf');
             await this.saveMeta({pdfPath});
+
         } catch (e) {
             this.error = (e as Error).message;
         } finally {
@@ -334,11 +347,18 @@ export class DocPage extends LitElement {
                 const bytes = await store.get(p.imagePath);
                 files[`pages/${String(i + 1).padStart(3, '0')}.jpg`] = bytes;
             }
-            Object.assign(files, jsonFile('meta.json', {doc: this.doc, pages: this.pages}));
+
+            // FIX RECURSION: Sanitize objects before stringifying
+            const cleanDoc = JSON.parse(JSON.stringify(this.doc));
+            const cleanPages = JSON.parse(JSON.stringify(this.pages));
+
+            Object.assign(files, jsonFile('meta.json', {doc: cleanDoc, pages: cleanPages}));
+
             const zip = makeZip(files);
             const zipBlob = bytesToBlob(zip, 'application/zip');
             const zipFilename = `${safeName(this.doc.title)}-images.zip`;
             const zipFile = new File([zipBlob], zipFilename, {type: 'application/zip'});
+
             await shareFile(zipFile, zipFilename);
         } catch (e) {
             this.error = (e as Error).message;
@@ -576,7 +596,8 @@ export class DocPage extends LitElement {
                             ${this.busy ? 'Working...' : 'Export PDF'}
                         </button>
                         <button class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm min-h-[44px]"
-                                ?disabled=${this.busy || this.pages.length === 0} @click=${() => this.exportImagesJpeg()}>
+                                ?disabled=${this.busy || this.pages.length === 0}
+                                @click=${() => this.exportImagesJpeg()}>
                             Share Images
                         </button>
                         <button class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm min-h-[44px]"
@@ -639,7 +660,7 @@ export class DocPage extends LitElement {
                                         </div>
                                     </div>
 
-                                    <div class="grid grid-cols-3 divide-x divide-slate-800 border-t border-slate-800 h-14 bg-slate-950">
+                                    <div class="flex items-center justify-between border-t border-slate-800 h-14 bg-slate-950 px-2">
                                         <button class="flex items-center justify-center text-slate-400 active:text-emerald-500 active:bg-slate-900"
                                                 @click=${() => this.editPage(p)}>
                                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -651,6 +672,14 @@ export class DocPage extends LitElement {
                                                 @click=${() => this.deletePage(p.id)}>
                                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path d="M6 18L18 6M6 6l12 12" stroke-width="2"></path>
+                                            </svg>
+                                        </button>
+                                        <button class="p-2 text-slate-400 hover:text-emerald-400"
+                                                @click=${() => this.exportSingleImage(p.id)}
+                                                title="Share this image">
+                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                                      d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"></path>
                                             </svg>
                                         </button>
                                         <div class="flex items-center justify-center text-slate-600 cursor-grab active:cursor-grabbing active:text-emerald-400 active:bg-slate-900">

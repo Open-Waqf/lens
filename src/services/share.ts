@@ -1,71 +1,94 @@
 import {Capacitor} from '@capacitor/core';
 import {Directory, Filesystem} from '@capacitor/filesystem';
 import {Share} from "@capacitor/share";
+import {showToast} from "../components/toast-notification";
 
-export async function shareFile(file: File, filename: string): Promise<void> {
-    if (Capacitor.isNativePlatform()) {
-        try {
-            const cleanName = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
-            const tempPath = `share_${Date.now()}_${cleanName}`;
+// 1. Support function to write a file to temp storage (Native only)
+async function writeTempFile(file: File): Promise<string> {
+    const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const tempPath = `share_${Date.now()}_${cleanName}`;
 
-            // 1. Chunked Write (RAM Friendly)
-            // We use Directory.ExternalStorage on Android to hit the "Downloads" or "Documents" folder
-            const CHUNK_SIZE = 1024 * 512;
-            let offset = 0;
-            let firstChunk = true;
+    // Chunked Write to prevent Out-Of-Memory on large files
+    const CHUNK_SIZE = 1024 * 512; // 512KB chunks
+    let offset = 0;
+    let firstChunk = true;
 
-            while (offset < file.size) {
-                const chunk = file.slice(offset, offset + CHUNK_SIZE);
-                const base64Data = await blobToBase64(chunk);
+    while (offset < file.size) {
+        const chunk = file.slice(offset, offset + CHUNK_SIZE);
+        const base64Data = await blobToBase64(chunk);
 
-                if (firstChunk) {
-                    await Filesystem.writeFile({
-                        path: tempPath,
-                        data: base64Data,
-                        directory: Directory.Cache
-                    });
-                    firstChunk = false;
-                } else {
-                    await Filesystem.appendFile({
-                        path: tempPath,
-                        data: base64Data,
-                        directory: Directory.Cache
-                    });
-                }
-                offset += CHUNK_SIZE;
-            }
-
-            const result = await Filesystem.getUri({
+        if (firstChunk) {
+            await Filesystem.writeFile({
                 path: tempPath,
+                data: base64Data,
+                directory: Directory.Cache,
+                recursive: true
+            });
+            firstChunk = false;
+        } else {
+            await Filesystem.appendFile({
+                path: tempPath,
+                data: base64Data,
                 directory: Directory.Cache
             });
+        }
+        offset += CHUNK_SIZE;
+    }
 
-            await new Promise(r => setTimeout(r, 250));
+    const result = await Filesystem.getUri({
+        path: tempPath,
+        directory: Directory.Cache
+    });
 
-            // 5. Share with explicit file array
+    return result.uri;
+}
+
+// 2. Main function for Batch Sharing (Multiple Files)
+export async function shareFiles(files: File[], title: string = 'Share'): Promise<void> {
+    if (Capacitor.isNativePlatform()) {
+        try {
+            const uris: string[] = [];
+            // Write all files to temp storage first
+            for (const f of files) {
+                const uri = await writeTempFile(f);
+                uris.push(uri);
+            }
+
+            // Share all URIs at once
             await Share.share({
-                title: filename,
-                url: result.uri,
-                files: [result.uri], // Essential for Android
-                dialogTitle: 'Save Backup'
+                title: title,
+                files: uris,
+                dialogTitle: title
             });
 
         } catch (e) {
             console.error('Native sharing failed', e);
-            downloadFileFallback(file, filename);
+            if (files.length === 1) downloadFileFallback(files[0], files[0].name);
+            else showToast("Sharing failed. Please try exporting as Zip.", 'error');
         }
     } else {
         // Web Fallback
-        if (navigator.share && navigator.canShare && navigator.canShare({files: [file]})) {
+        if (navigator.share && navigator.canShare && navigator.canShare({files})) {
             try {
-                await navigator.share({files: [file], title: filename});
+                await navigator.share({files, title});
             } catch (e) {
-                if ((e as Error).name !== 'AbortError') downloadFileFallback(file, filename);
+                // Ignore AbortError (user cancelled)
+                if ((e as Error).name !== 'AbortError') {
+                    if (files.length === 1) downloadFileFallback(files[0], files[0].name);
+                }
             }
         } else {
-            downloadFileFallback(file, filename);
+            if (files.length === 1) downloadFileFallback(files[0], files[0].name);
+            else showToast("Browser cannot share multiple files. Use 'Export Zip'.", 'info');
         }
     }
+}
+
+// 3. Backward compatibility for Single File
+export async function shareFile(file: File, filename: string): Promise<void> {
+    // Ensure the file object has the correct name property
+    const namedFile = new File([file], filename, {type: file.type});
+    await shareFiles([namedFile], filename);
 }
 
 function blobToBase64(blob: Blob): Promise<string> {
