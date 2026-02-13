@@ -11,7 +11,7 @@
 
 Sahifah Lens allows users to digitize documents, perform OCR, and organize their personal library directly on their
 device. Built on the principle of **Amanah** (Trust), it ensures that your sensitive documents never leave your physical
-control.
+control. Read our [Local Privacy Policy](PRIVACY_POLICY.md).
 
 ---
 
@@ -25,6 +25,7 @@ control.
 * **Stream-Encrypted Backups:** Export your library as a `.slbk` vault using AES-GCM with a unified chunk-streaming
   protocol (Magic: `SLBK`).
 * **Nuclear Reset:** A "Reset Storage" kill-switch erases all local documents and database entries instantly.
+* **Inclusive Design:** Optimized for screen readers with semantic labels and high-contrast controls.
 * **Offline First:** Fully functional in airplane mode; OCR and image processing are 100% local.
 
 ### 📸 Intelligent Scanning & Editing
@@ -76,12 +77,18 @@ npm run dev
 
 ```
 
-### 4. Native Setup (Android/iOS)
+### 4. Native Setup
 
 ```bash
+# Android (Ready)
 npm run build
 npx cap sync
-npx cap open android # or ios
+npx cap open android
+
+# iOS (Requires setup)
+npm run build
+npx cap add ios
+npx cap open ios
 
 ```
 
@@ -89,8 +96,12 @@ npx cap open android # or ios
 
 ## ⚠️ Disclaimers
 
-* **Storage Persistence:** On mobile, the OS may clear browser data if storage is low. **Always export an Encrypted
-  Backup** to secure your data permanently.
+* **Storage Persistence:**
+* **Native App (APK):** Documents are stored persistently in the device's internal storage.
+* **Web/PWA:** Managed by the browser. The OS may clear this if storage is low.
+* **Recommendation:** Always export an **Encrypted Backup** to secure your data permanently.
+
+
 * **Sovereignty:** You are responsible for your own keys/passwords. There is no "Forgot Password" link because there is
   no server.
 

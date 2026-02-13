@@ -614,6 +614,7 @@ export class ScanPage extends LitElement {
         input.multiple = opts.multiple;
         input.value = ''; // Reset value to allow selecting same file twice
 
+        AuthService.setIgnoreNextResume(true);
         // We use a one-time promise wrapper for the change event
         return new Promise((resolve) => {
             const handler = async () => {
