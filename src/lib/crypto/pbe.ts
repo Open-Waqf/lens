@@ -14,6 +14,7 @@ const MAX_META_SIZE = 4 * 1024 * 1024;
 const HEADER_FIXED_SIZE = 4 + 2 + 1 + 4 + 1 + SALT_SIZE + 1 + IV_SIZE + 8;
 export const ERR_INCORRECT_PASSWORD = 'Incorrect password.';
 export const ERR_CORRUPTED_VAULT = 'Vault file is corrupted or incomplete.';
+export const ERR_UNSUPPORTED_VAULT_VERSION = 'Vault file version is not supported.';
 
 export type EncryptOptions = {
     iterations?: number;
@@ -331,20 +332,13 @@ async function decryptLegacyAfterMagic(
     password: string,
     firstTwoBytes: Uint8Array
 ): Promise<AsyncGenerator<Uint8Array>> {
-    const potentialVersion = new DataView(firstTwoBytes.buffer, firstTwoBytes.byteOffset, firstTwoBytes.byteLength).getUint16(0, true);
-
-    let iterations = 100000;
-    let salt: Uint8Array;
-
-    if (potentialVersion === LEGACY_VERSION_V2) {
-        iterations = await reader.readUint32LE();
-        salt = await reader.readExactly(SALT_SIZE);
-    } else {
-        const restSalt = await reader.readExactly(SALT_SIZE - 2);
-        salt = new Uint8Array(SALT_SIZE);
-        salt.set(firstTwoBytes, 0);
-        salt.set(restSalt, 2);
+    const versionLe = new DataView(firstTwoBytes.buffer, firstTwoBytes.byteOffset, firstTwoBytes.byteLength).getUint16(0, true);
+    if (versionLe !== LEGACY_VERSION_V2) {
+        throw new Error(ERR_UNSUPPORTED_VAULT_VERSION);
     }
+
+    const iterations = await reader.readUint32LE();
+    const salt = await reader.readExactly(SALT_SIZE);
 
     const key = await deriveAesKey(password, salt, iterations);
 
@@ -388,10 +382,15 @@ export async function* decryptStream(
 
         const versionBytes = await reader.readExactly(2);
         const versionBe = new DataView(versionBytes.buffer, versionBytes.byteOffset, versionBytes.byteLength).getUint16(0, false);
+        const versionLe = new DataView(versionBytes.buffer, versionBytes.byteOffset, versionBytes.byteLength).getUint16(0, true);
 
         const gen = versionBe === CURRENT_VERSION
             ? await decryptV3(reader, password)
-            : await decryptLegacyAfterMagic(reader, password, versionBytes);
+            : versionLe === LEGACY_VERSION_V2
+                ? await decryptLegacyAfterMagic(reader, password, versionBytes)
+                : (() => {
+                    throw new Error(ERR_UNSUPPORTED_VAULT_VERSION);
+                })();
 
         for await (const chunk of gen) {
             yield chunk;

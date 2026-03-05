@@ -54,5 +54,9 @@ The payload currently contains a streamed ZIP archive of:
 
 ## Compatibility Notes
 
-- App import retains support for legacy SLBK layouts (pre-v3) produced by earlier versions.
 - New exports are always v3 `.slbk`.
+- Import compatibility matrix:
+  - v3: supported
+  - legacy v2: supported (read-only compatibility path)
+  - version > v3: rejected with `Vault file version is not supported.`
+- Parsers should fail closed on unknown versions and should not attempt implicit downgrade/fallback.

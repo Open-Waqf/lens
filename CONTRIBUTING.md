@@ -44,6 +44,11 @@ Backups use a specific chunked-streaming protocol to allow multi-gigabyte export
 * **Web Crypto API:** Only use the native `crypto.subtle` API. Avoid third-party JS crypto libraries for core
   encryption.
 
+### 4. Localization
+
+* **No hardcoded UI text:** User-facing strings must use translation keys from `src/lib/locales/en.ts` via `t(...)`.
+* **App shell included:** Navigation labels, fatal/recovery prompts, and toast messages in `app-root` follow the same rule.
+
 ---
 
 ## 🚀 Development Workflow

@@ -14,10 +14,15 @@ describe('mapRestoreError', () => {
         expect(mapped.message).toBe('Vault file is corrupted or incomplete.');
     });
 
+    it('maps unsupported version errors to direct localized message', () => {
+        const mapped = mapRestoreError(new Error('Vault file version is not supported.'));
+        expect(mapped.direct).toBe(true);
+        expect(mapped.message).toBe('Vault file version is not supported.');
+    });
+
     it('keeps unexpected errors as wrapped candidates', () => {
         const mapped = mapRestoreError(new Error('Some unknown failure'));
         expect(mapped.direct).toBe(false);
         expect(mapped.message).toBe('Some unknown failure');
     });
 });
-

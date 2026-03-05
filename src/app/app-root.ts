@@ -105,7 +105,7 @@ export class AppRoot extends LitElement {
             try {
                 const cleaned = await garbageCollectOpfsDocs();
                 if (cleaned > 0) {
-                    showToast(`Storage Audit: Cleaned ${cleaned} orphaned files.`, 'info');
+                    showToast(t('storage.audit.auto_cleaned', {count: cleaned}), 'info');
                 }
             } catch {
             }
@@ -199,7 +199,7 @@ export class AppRoot extends LitElement {
             super.performUpdate();
         } catch (e) {
             const err = e as Error;
-            this.fatal = {message: err?.message ?? 'Render error', detail: err?.stack};
+            this.fatal = {message: err?.message ?? t('errors.render'), detail: err?.stack};
         }
     }
 
@@ -210,7 +210,7 @@ export class AppRoot extends LitElement {
     private _onGlobalError = (ev: Event) => {
         const e = ev as ErrorEvent;
         if (e.message?.includes('ResizeObserver')) return;
-        this.fatal = {message: e.message || 'Error', detail: e.error?.stack};
+        this.fatal = {message: e.message || t('errors.generic'), detail: e.error?.stack};
     };
 
     private _onUnhandled = (ev: PromiseRejectionEvent) => {
@@ -229,9 +229,9 @@ export class AppRoot extends LitElement {
 
     private async resetAndReload(): Promise<void> {
         const ok = await ConfirmModal.ask({
-            title: 'Factory Reset?',
-            description: 'This will erase ALL local documents and settings.\nCannot be undone.',
-            confirm: 'Reset Everything',
+            title: t('settings.factory_reset_title'),
+            description: t('settings.factory_reset_body'),
+            confirm: t('settings.factory_reset_confirm'),
             destructive: true
         });
 
@@ -242,7 +242,7 @@ export class AppRoot extends LitElement {
             await resetAllStorage();
             location.reload();
         } catch (e) {
-            showToast('Reset failed: ' + String(e), 'error')
+            showToast(t('settings.nuke_failed', {error: String(e)}), 'error');
             this.resetting = false;
         }
     }
@@ -258,17 +258,17 @@ export class AppRoot extends LitElement {
                     </svg>
                 </div>
                 <div class="space-y-2">
-                    <h1 class="text-xl font-bold text-slate-100">Something went wrong</h1>
+                    <h1 class="text-xl font-bold text-slate-100">${t('app.fatal_title')}</h1>
                     <div class="text-[10px] text-red-400 bg-black/50 p-4 rounded-lg overflow-x-auto max-w-sm mx-auto text-left whitespace-pre-wrap max-h-48">
                         ${this.fatal.message} ${this.fatal.detail || ''}
                     </div>
                 </div>
                 <button class="w-full max-w-xs py-3 rounded-xl bg-emerald-600 text-white font-bold"
-                        @click=${() => location.reload()}>Reload
+                        @click=${() => location.reload()}>${t('app.reload')}
                 </button>
                 <button class="w-full max-w-xs py-3 rounded-xl bg-slate-900 text-red-400 text-sm"
                         ?disabled=${this.resetting} @click=${() => this.resetAndReload()}>
-                    ${this.resetting ? 'Erasing...' : 'Factory Reset'}
+                    ${this.resetting ? t('settings.erasing') : t('app.factory_reset')}
                 </button>
             </div>
         `;
@@ -367,7 +367,7 @@ export class AppRoot extends LitElement {
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                           d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
                                 </svg>
-                                <span class="text-[10px] font-medium">Library</span>
+                                <span class="text-[10px] font-medium">${t('nav.library')}</span>
                             </a>
                             <a id="MainScanBtn" href="#/scan?new=1"
                                aria-label=${t('nav.new_scan')}
@@ -387,7 +387,7 @@ export class AppRoot extends LitElement {
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                           d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
                                 </svg>
-                                <span class="text-[10px] font-medium">Settings</span>
+                                <span class="text-[10px] font-medium">${t('nav.settings')}</span>
                             </a>
                         </div>
                     </nav>
