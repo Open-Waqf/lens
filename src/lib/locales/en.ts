@@ -119,6 +119,20 @@ export const en = {
     'doc.show_ocr': 'Show OCR',
     'doc.viewer_hint': 'Swipe to flip • Double tap to zoom',
     'doc.share_failed_zip': 'Sharing failed. Please try exporting as Zip.',
-    'doc.browser_share_zip': "Browser cannot share multiple files. Use 'Export Zip'."
-};
+    'doc.browser_share_zip': "Browser cannot share multiple files. Use 'Export Zip'.",
 
+    // Settings / Backup
+    'settings.encrypt_backup_title': 'Encrypt Backup',
+    'settings.encrypt_backup_desc': 'Enter a password.',
+    'settings.decrypt_backup_title': 'Decrypt Backup',
+    'settings.decrypt_backup_desc': 'Enter password',
+    'settings.backup_password_required': 'Password is required for .slbk export.',
+    'settings.restore_password_required': 'Password is required for .slbk backups.',
+    'settings.packaging_backup': 'Packaging backup...',
+    'settings.backup_exported': 'Backup exported successfully.',
+    'settings.decrypting_stream': 'Decrypting stream...',
+    'settings.unpacking_library': 'Unpacking library...',
+    'settings.restore_complete_processed': 'Restore complete. Processed {{count}} files.',
+    'settings.restore_complete': 'Restore complete! You can return to the Library.',
+    'settings.restore_failed': 'Restore failed: {{error}}',
+};

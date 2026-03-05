@@ -22,7 +22,7 @@ control. Read our [Local Privacy Policy](PRIVACY_POLICY.md).
 * **Zero-Cloud Architecture:** Documents are stored in the **Origin Private File System (OPFS)**, isolated from other
   websites.
 * **Biometric App Lock:** Immediate re-locking upon app multitasking/resume to prevent unauthorized physical access.
-* **Stream-Encrypted Backups:** Export your library as a `.slbk` vault using AES-GCM with a unified chunk-streaming
+* **Stream-Encrypted Backups:** Export your library as a `.slbk` vault using AES-256-GCM with a chunked streaming
   protocol (Magic: `SLBK`).
 * **Nuclear Reset:** A "Reset Storage" kill-switch erases all local documents and database entries instantly.
 * **Inclusive Design:** Optimized for screen readers with semantic labels and high-contrast controls.
@@ -48,7 +48,8 @@ control. Read our [Local Privacy Policy](PRIVACY_POLICY.md).
 
 * **UI:** TypeScript + Lit (Web Components) + Tailwind CSS.
 * **Persistence:** Dexie.js (IndexedDB) for metadata; OPFS for high-performance binary storage.
-* **Crypto:** Web Crypto API using PBKDF2 for key derivation and AES-GCM for stream encryption.
+* **Crypto:** Web Crypto API using PBKDF2-SHA-256 (`600,000` iterations, `16-byte` random salt) and AES-256-GCM
+  (`12-byte` random IV per encrypted chunk).
 * **Native:** Capacitor 6+ for high-quality camera access, Biometrics, and native system sharing.
 * **Sensory:** Hybrid Haptic engine for tactile feedback on both Web and Native.
 
@@ -100,6 +101,13 @@ npx cap open ios
 * **Native App (APK):** Binary files are stored in persistent app-internal storage. Metadata still depends on WebView IndexedDB.
 * **Web/PWA:** Managed by the browser. The OS may clear this if storage is low.
 * **Recommendation:** Always export an **Encrypted Backup** to secure your data permanently.
+
+* **Vault Format:** `.slbk` header spec is documented in [VAULT_SPEC.md](VAULT_SPEC.md). You can inspect an exported
+  backup without decrypting via:
+
+```bash
+node scripts/slbk-verify.mjs ./lens-backup-YYYY-MM-DD.slbk
+```
 
 
 * **Sovereignty:** You are responsible for your own keys/passwords. There is no "Forgot Password" link because there is

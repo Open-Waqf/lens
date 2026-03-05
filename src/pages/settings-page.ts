@@ -16,6 +16,7 @@ import pkg from '../../package.json'
 import {settings} from '../services/settings';
 import {AuthService} from '../services/auth-service';
 import {OPFSStreamWriter} from '../services/filestore/opfs-store';
+import {t} from '../lib/i18n';
 
 import {repairLibrary} from '../services/repair';
 import {CapacitorFileStore} from "../services/filestore/capacitor-store";
@@ -279,8 +280,8 @@ export class SettingsPage extends LitElement {
 
         try {
             const pw = await ConfirmModal.prompt({
-                title: 'Encrypt Backup',
-                description: 'Enter a password (Optional).',
+                title: t('settings.encrypt_backup_title'),
+                description: t('settings.encrypt_backup_desc'),
                 placeholder: 'Password123',
                 confirm: 'Export'
             });
@@ -288,15 +289,28 @@ export class SettingsPage extends LitElement {
                 this.busy = false;
                 return;
             }
+            const password = pw.trim();
+            if (!password) {
+                this.err = t('settings.backup_password_required');
+                this.busy = false;
+                return;
+            }
 
-            this.msg = 'Packaging backup...';
+            this.msg = t('settings.packaging_backup');
             this.requestUpdate();
 
             await writer.open();
 
             const zipStream = zipFilesToStream(this.fileGenerator(), () => {
             });
-            const finalStream = pw ? encryptStream(zipStream, pw) : zipStream;
+            const docCount = await db.docs.count();
+            const finalStream = encryptStream(zipStream, password, {
+                docCount,
+                meta: {
+                    app: 'sahifah-lens',
+                    version: pkg.version,
+                }
+            });
 
             let chunkCount = 0;
             for await (const chunk of finalStream) {
@@ -313,12 +327,10 @@ export class SettingsPage extends LitElement {
 
             const file = await writer.close();
             const dateStr = new Date().toISOString().split('T')[0];
-            const finalName = pw
-                ? `lens-backup-${dateStr}.slbk.zip`
-                : `lens-backup-${dateStr}.zip`;
+            const finalName = `lens-backup-${dateStr}.slbk`;
 
             const namedFile = new File([file], finalName, {
-                type: pw ? 'application/octet-stream' : 'application/zip',
+                type: 'application/octet-stream',
                 lastModified: Date.now()
             });
 
@@ -328,7 +340,7 @@ export class SettingsPage extends LitElement {
             const now = Date.now();
             localStorage.setItem('sahifah.lastBackup', String(now));
             this.lastBackupDate = now;
-            this.msg = 'Backup exported successfully.';
+            this.msg = t('settings.backup_exported');
 
         } catch (e) {
             this.err = (e as Error).message;
@@ -419,7 +431,7 @@ export class SettingsPage extends LitElement {
             for (const page of backupData.pages) await db.pages.put(page);
         });
 
-        this.msg = `Restore complete. Processed ${this.backupProgress} files.`;
+        this.msg = t('settings.restore_complete_processed', {count: this.backupProgress});
     }
 
     private async importBackup(file: File): Promise<void> {
@@ -433,8 +445,8 @@ export class SettingsPage extends LitElement {
 
         try {
             const pw = await ConfirmModal.prompt({
-                title: 'Decrypt Backup',
-                description: 'Enter password (leave empty if not encrypted)',
+                title: t('settings.decrypt_backup_title'),
+                description: t('settings.decrypt_backup_desc'),
                 placeholder: 'Password',
                 confirm: 'Restore'
             });
@@ -443,19 +455,25 @@ export class SettingsPage extends LitElement {
                 this.busy = false;
                 return;
             }
+            const password = pw.trim();
 
-            this.msg = 'Decrypting stream...';
+            this.msg = t('settings.decrypting_stream');
             this.requestUpdate();
 
             await writer.open();
             const fileStream = file.stream();
 
-            if (pw) {
+            if (password) {
                 // SECURE PATH: Stream decryption
-                for await (const chunk of decryptStream(fileStream, pw)) {
+                for await (const chunk of decryptStream(fileStream, password)) {
                     await writer.write(chunk);
                 }
             } else {
+                const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+                const magic = new TextDecoder().decode(head);
+                if (magic === 'SLBK') {
+                    throw new Error(t('settings.restore_password_required'));
+                }
                 // PLAIN PATH: Copy file directly
                 const reader = fileStream.getReader();
                 while (true) {
@@ -469,17 +487,17 @@ export class SettingsPage extends LitElement {
             // Close to flush to disk
             const decryptedFile = await writer.close();
 
-            this.msg = 'Unpacking library...';
+            this.msg = t('settings.unpacking_library');
             this.requestUpdate();
 
             // Pass the disk-backed file to your existing zip handler
             await this.restoreFromZip(decryptedFile);
 
-            this.msg = 'Restore complete! You can return to the Library.';
+            this.msg = t('settings.restore_complete');
 
         } catch (e) {
             console.error(e);
-            this.err = 'Restore failed: ' + (e as Error).message;
+            this.err = t('settings.restore_failed', {error: (e as Error).message});
         } finally {
             try {
                 await writer.close();
