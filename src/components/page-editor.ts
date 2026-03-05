@@ -59,6 +59,17 @@ export class PageEditor extends LitElement {
     @state() private magnifyX = 0;
     @state() private magnifyY = 0;
 
+    private getCornerHandleStyle(index: number): string {
+        if (!this.quad || !this.edgesEl) return 'display:none';
+        const p = this.quad[index];
+        if (!p) return 'display:none';
+        const sx = this.edgesEl.width / this.baseW;
+        const sy = this.edgesEl.height / this.baseH;
+        const x = p.x * sx;
+        const y = p.y * sy;
+        return `left:${x}px;top:${y}px;`;
+    }
+
     private getCssFilter(mode: string): string {
         switch (mode) {
             case 'grayscale':
@@ -624,6 +635,14 @@ export class PageEditor extends LitElement {
                                 @pointermove=${this.onPointerMove}
                                 @pointerup=${this.onPointerUp}
                                 @pointercancel=${this.onPointerUp}></canvas>
+
+                        ${[0, 1, 2, 3].map(i => html`
+                            <div
+                                    data-testid="corner-handle-${i}"
+                                    class="absolute z-20 -translate-x-1/2 -translate-y-1/2 min-w-[44px] min-h-[44px] w-11 h-11 pointer-events-none"
+                                    style=${this.getCornerHandleStyle(i)}
+                                    aria-hidden="true"></div>
+                        `)}
 
                         <div class=${['absolute top-4 right-4 rounded-full overflow-hidden border-4 border-white shadow-2xl z-20 w-32 h-32 pointer-events-none transition-opacity duration-200', this.showMagnify ? 'opacity-100' : 'opacity-0'].join(' ')}>
                             <canvas data-magnify class="block w-full h-full bg-black"></canvas>
