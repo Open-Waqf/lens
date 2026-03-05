@@ -97,7 +97,7 @@ npx cap open ios
 ## ⚠️ Disclaimers
 
 * **Storage Persistence:**
-* **Native App (APK):** Documents are stored persistently in the device's internal storage.
+* **Native App (APK):** Binary files are stored in persistent app-internal storage. Metadata still depends on WebView IndexedDB.
 * **Web/PWA:** Managed by the browser. The OS may clear this if storage is low.
 * **Recommendation:** Always export an **Encrypted Backup** to secure your data permanently.
 

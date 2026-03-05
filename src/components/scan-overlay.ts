@@ -1,6 +1,7 @@
 import {html, LitElement} from 'lit';
 import {customElement, property} from 'lit/decorators.js';
 import type {DetectedQuad, Quad} from '../lib/scan/quad';
+import {t} from '../lib/i18n';
 
 @customElement('scan-overlay')
 export class ScanOverlay extends LitElement {
@@ -27,8 +28,7 @@ export class ScanOverlay extends LitElement {
         const det = this.detected;
         const q = this.quad;
 
-        // 2. NEW: The "Ghost Frame" (Static Guide)
-        // Helps user center the camera BEFORE detection starts
+        // 2. The "Ghost Frame" (Static Guide)
         const ghostFrame = html`
             <svg class="absolute inset-0 w-full h-full pointer-events-none" preserveAspectRatio="none">
                 <rect x="15%" y="20%" width="70%" height="60%"
@@ -39,7 +39,7 @@ export class ScanOverlay extends LitElement {
                       rx="20"/>
                 <text x="50%" y="85%" fill="white" font-size="14" text-anchor="middle" opacity="0.6"
                       style="text-shadow: 0 1px 3px black;">
-                    Align document here
+                    ${t('scan.guide_align')}
                 </text>
             </svg>
         `;

@@ -19,6 +19,8 @@ import {OPFSStreamWriter} from '../services/filestore/opfs-store';
 
 import {repairLibrary} from '../services/repair';
 import {CapacitorFileStore} from "../services/filestore/capacitor-store";
+import {hasIndexLossRiskFlag, runStorageHealthProbe} from '../services/storage-health';
+import {rebuildLibraryIndexFromFiles} from '../services/rebuild-index';
 
 type RestoreMode = 'merge' | 'replace';
 
@@ -54,6 +56,7 @@ export class SettingsPage extends LitElement {
     @state() private repairProgress = '';
 
     @state() private enableOcr = true;
+    @state() private hasIndexRisk = false;
 
     async connectedCallback() {
         super.connectedCallback();
@@ -61,6 +64,7 @@ export class SettingsPage extends LitElement {
         this.lastBackupDate = Number(localStorage.getItem('sahifah.lastBackup')) || null;
         void this.loadStorageStats();
         void tryPersistStorage();
+        await this.refreshStorageRisk();
         if (location.hash.includes('repair=1')) {
             this.showRepairTool = true;
         }
@@ -76,16 +80,54 @@ export class SettingsPage extends LitElement {
 
     private async runRepair() {
         this.busy = true;
-        this.repairProgress = 'Starting scan...';
-
         try {
-            await repairLibrary((_curr, _total, msg) => {
-                this.repairProgress = msg;
-                this.requestUpdate();
-            });
+            await this.runThumbnailRepairFlow();
             this.msg = "Library repair complete.";
         } catch (e) {
             this.err = "Repair failed: " + String(e);
+        } finally {
+            this.busy = false;
+        }
+    }
+
+    private async runThumbnailRepairFlow() {
+        this.repairProgress = 'Starting scan...';
+        await repairLibrary((_curr, _total, msg) => {
+            this.repairProgress = msg;
+            this.requestUpdate();
+        });
+    }
+
+    private async rebuildIndex() {
+        const ok = await ConfirmModal.ask({
+            title: 'Rebuild Library Index?',
+            description: 'This recreates document metadata from files currently on disk. Existing metadata will be replaced.',
+            confirm: 'Rebuild',
+            destructive: true
+        });
+        if (!ok) return;
+
+        this.busy = true;
+        this.msg = 'Rebuilding index from files...';
+        this.err = null;
+
+        try {
+            const result = await rebuildLibraryIndexFromFiles();
+            await this.refreshStorageRisk();
+            this.msg = `Recovery complete. Restored ${result.docsRecovered} documents and ${result.pagesRecovered} pages.`;
+
+            const runRepairNow = await ConfirmModal.ask({
+                title: 'Run Thumbnail Repair?',
+                description: 'Recommended after recovery to regenerate any missing previews.',
+                confirm: 'Run Repair',
+            });
+            if (runRepairNow) {
+                this.msg = 'Running thumbnail repair...';
+                await this.runThumbnailRepairFlow();
+                this.msg = "Recovery complete. Thumbnails repaired.";
+            }
+        } catch (e) {
+            this.err = 'Recovery failed: ' + String(e);
         } finally {
             this.busy = false;
         }
@@ -96,6 +138,15 @@ export class SettingsPage extends LitElement {
         this.requireAuth = s.requireAuth;
         this.defaultVault = s.defaultVault;
         this.enableOcr = s.enableOcr;
+    }
+
+    private async refreshStorageRisk() {
+        this.hasIndexRisk = hasIndexLossRiskFlag();
+        try {
+            const report = await runStorageHealthProbe();
+            this.hasIndexRisk = report.possibleIndexLoss;
+        } catch {
+        }
     }
 
     private async loadStorageStats() {
@@ -696,6 +747,24 @@ export class SettingsPage extends LitElement {
                             </div>
                             ${this.repairProgress ? html`<span
                                     class="text-xs font-mono text-indigo-300">${this.repairProgress}</span>` : null}
+                        </button>
+                    ` : null}
+
+                    ${(this.hasIndexRisk || this.showRepairTool) ? html`
+                        <button class="flex items-center justify-between p-4 rounded-xl bg-red-950/20 border border-red-500/30 hover:bg-red-900/30 transition-colors"
+                                ?disabled=${this.busy} @click=${() => this.rebuildIndex()}>
+                            <div class="flex items-center gap-3">
+                                <div class="p-2 rounded-lg bg-red-900/40 text-red-300">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                              d="M4 4v6h6M20 20v-6h-6M5.636 18.364A9 9 0 1020 12"></path>
+                                    </svg>
+                                </div>
+                                <div class="text-left">
+                                    <div class="text-red-100 font-medium">Rebuild Library Index</div>
+                                    <div class="text-xs text-red-300/80">Recover documents from files if metadata was lost</div>
+                                </div>
+                            </div>
                         </button>
                     ` : null}
 
