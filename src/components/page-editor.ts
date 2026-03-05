@@ -7,11 +7,18 @@ import {computeOutputSize} from '../lib/image/warp';
 import type {WorkerRequest, WorkerResponse} from '../lib/image/worker';
 import {haptics} from '../services/haptics';
 import {ImpactStyle} from "@capacitor/haptics";
+import {t} from '../lib/i18n';
+import {Icons} from './icons';
 
 export type PageEditorSaveDetail = {
     master: { bytes: Uint8Array; width: number; height: number };
     thumb: { bytes: Uint8Array; width: number; height: number };
     extractText: boolean;
+};
+
+export type PageEditorShareDetail = {
+    master: { bytes: Uint8Array; width: number; height: number };
+    format: 'jpg' | 'pdf';
 };
 
 const FILTERS: FilterMode[] = ['original', 'magic', 'bw', 'grayscale', 'whiteboard'];
@@ -31,6 +38,7 @@ export class PageEditor extends LitElement {
     @state() private rotation: 0 | 90 | 180 | 270 = 0;
     @state() private busy = false;
     @state() private err: string | null = null;
+    @state() private shareFormat: 'jpg' | 'pdf' = 'jpg';
 
     private sourceBitmap: ImageBitmap | null = null;
     private baseCanvas: HTMLCanvasElement | null = null;
@@ -509,10 +517,6 @@ export class PageEditor extends LitElement {
             }
             const mW = Math.round(rawSize.w * mScale);
             const mH = Math.round(rawSize.h * mScale);
-            const THUMB_MAX = 800;
-            const tScale = Math.min(1, THUMB_MAX / largestDim);
-            const tW = Math.round(rawSize.w * tScale);
-            const tH = Math.round(rawSize.h * tScale);
             const masterTask = this.runWorkerTask({
                 id: `save-m-${Date.now()}`,
                 blob: this.blob,
@@ -524,6 +528,10 @@ export class PageEditor extends LitElement {
                 encode: true,
                 quality: 0.92
             });
+            const THUMB_MAX = 800;
+            const tScale = Math.min(1, THUMB_MAX / largestDim);
+            const tW = Math.round(rawSize.w * tScale);
+            const tH = Math.round(rawSize.h * tScale);
             const thumbTask = this.runWorkerTask({
                 id: `save-t-${Date.now()}`,
                 blob: this.blob,
@@ -547,6 +555,55 @@ export class PageEditor extends LitElement {
             };
             this.dispatchEvent(
                 new CustomEvent<PageEditorSaveDetail>('page-editor-save', {detail, bubbles: true, composed: true}),
+            );
+        } catch (e) {
+            this.err = (e as Error).message ?? String(e);
+        } finally {
+            this.busy = false;
+        }
+    }
+
+    private async onShareNow(): Promise<void> {
+        if (!this.sourceBitmap || !this.quad) return;
+        this.err = null;
+        this.busy = true;
+        this.requestUpdate();
+        await new Promise(r => setTimeout(r, 50));
+        try {
+            const mappedQuad = this.mapQuadToSource(this.quad);
+            const rawSize = computeOutputSize(mappedQuad);
+            const MIN_OCR_DIM = 1600;
+            const MAX_DIM = 2500;
+            const largestDim = Math.max(rawSize.w, rawSize.h);
+            let mScale = 1;
+            if (largestDim < MIN_OCR_DIM) {
+                mScale = MIN_OCR_DIM / largestDim;
+            } else if (largestDim > MAX_DIM) {
+                mScale = MAX_DIM / largestDim;
+            }
+            const mW = Math.round(rawSize.w * mScale);
+            const mH = Math.round(rawSize.h * mScale);
+
+            const resM = await this.runWorkerTask({
+                id: `share-m-${Date.now()}`,
+                blob: this.blob,
+                quad: mappedQuad,
+                rotation: 0,
+                filter: this.filter,
+                outW: mW,
+                outH: mH,
+                encode: true,
+                quality: 0.92
+            });
+            if (!resM.ok) throw new Error(resM.error || 'Failed to encode share image');
+            if (!resM.bytes) throw new Error('Missing share bytes');
+
+            const detail: PageEditorShareDetail = {
+                master: {bytes: resM.bytes, width: resM.width!, height: resM.height!},
+                format: this.shareFormat,
+            };
+            this.dispatchEvent(
+                new CustomEvent<PageEditorShareDetail>('page-editor-share', {detail, bubbles: true, composed: true}),
             );
         } catch (e) {
             this.err = (e as Error).message ?? String(e);
@@ -686,11 +743,7 @@ export class PageEditor extends LitElement {
                                     ${this.filter === mode ? html`
                                         <div class="absolute inset-0 bg-emerald-500/20 flex items-center justify-center">
                                             <div class="bg-emerald-500 rounded-full p-0.5 shadow-lg">
-                                                <svg class="w-3 h-3 text-slate-900" fill="none" viewBox="0 0 24 24"
-                                                     stroke="currentColor">
-                                                    <path stroke-linecap="round" stroke-linejoin="round"
-                                                          stroke-width="4" d="M5 13l4 4L19 7"/>
-                                                </svg>
+                                                <span class="text-slate-900">${Icons.Check('w-3 h-3 block')}</span>
                                             </div>
                                         </div>
                                     ` : null}
@@ -716,7 +769,7 @@ export class PageEditor extends LitElement {
                     </div>
                 </div>
 
-                <div class="flex flex-col gap-4 pt-2">
+                <div class="flex flex-col gap-4 pt-2 pb-36">
                     <label class="flex items-center gap-3 p-4 rounded-xl bg-slate-900/50 border border-slate-800 cursor-pointer select-none transition-colors hover:bg-slate-900">
                         <input type="checkbox"
                                class="w-5 h-5 rounded border-slate-700 bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-0"
@@ -728,21 +781,51 @@ export class PageEditor extends LitElement {
                         </div>
                     </label>
 
-                    <div class="flex gap-3">
-                        <button class="flex-1 px-6 py-4 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-300 font-bold tracking-wide transition-colors"
+                    <div class="fixed left-0 right-0 bottom-0 z-40 bg-slate-950/95 backdrop-blur-md border-t border-slate-800 pb-[env(safe-area-inset-bottom)]">
+                        <div class="max-w-7xl mx-auto px-4 py-3 space-y-2">
+                        <div class="rounded-xl border border-slate-700 p-1 bg-slate-900/80 flex gap-1">
+                            <button class="flex-1 px-3 py-2.5 rounded-lg text-sm font-semibold transition-colors min-h-[44px] ${this.shareFormat === 'jpg' ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800'}"
+                                    aria-label=${t('scan.share_format_jpg')}
+                                    ?disabled=${this.busy}
+                                    @click=${() => this.shareFormat = 'jpg'}>
+                                ${t('scan.share_format_jpg')}
+                            </button>
+                            <button class="flex-1 px-3 py-2.5 rounded-lg text-sm font-semibold transition-colors min-h-[44px] ${this.shareFormat === 'pdf' ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800'}"
+                                    aria-label=${t('scan.share_format_pdf')}
+                                    ?disabled=${this.busy}
+                                    @click=${() => this.shareFormat = 'pdf'}>
+                                ${t('scan.share_format_pdf')}
+                            </button>
+                        </div>
+                        <div class="flex items-center gap-2">
+                        <button class="flex-1 px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-300 font-bold tracking-wide transition-colors min-h-[44px] flex items-center justify-center"
+                                type="button"
+                                aria-label=${t('common.back')}
                                 ?disabled=${this.busy} @click=${this.onCancel}>
-                            Back
+                            <span class="inline-flex items-center justify-center shrink-0">${Icons.Back('w-5 h-5 block')}</span>
+                            <span class="sr-only">${t('common.back')}</span>
                         </button>
-                        <button aria-label="Save Scan"
-                                class="flex-[2] px-6 py-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 active:scale-95 transition-all text-white font-bold tracking-wide shadow-lg shadow-emerald-900/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        <button aria-label=${t('common.share_now')}
+                                class="flex-1 px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-200 font-bold tracking-wide transition-colors min-h-[44px] flex items-center justify-center"
+                                type="button"
+                                ?disabled=${this.busy || !this.isQuadValid}
+                                @click=${() => void this.onShareNow()}>
+                            <span class="inline-flex items-center justify-center shrink-0">${Icons.Share('w-5 h-5 block')}</span>
+                            <span class="sr-only">${t('common.share_now')}</span>
+                        </button>
+                        <button aria-label=${t('scan.save_scan')}
+                                class="flex-[1.2] px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 active:scale-95 transition-all text-white font-bold tracking-wide shadow-lg shadow-emerald-900/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 min-h-[44px]"
+                                type="button"
                                 ?disabled=${this.busy || !this.isQuadValid} @click=${() => void this.onSave()}>
                             ${this.busy
                                     ? html`
-                                        <div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> Saving...`
-                                    : 'Save Scan'}
+                                        <div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                        <span class="sr-only">${t('scan.save_scan')}</span>`
+                                    : html`<span class="inline-flex items-center justify-center shrink-0">${Icons.Check('w-5 h-5 block')}</span><span class="sr-only">${t('scan.save_scan')}</span>`}
                         </button>
+                        </div>
+                        </div>
                     </div>
-                </div>
             </div>
         `;
     }

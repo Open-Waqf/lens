@@ -13,6 +13,7 @@ import {ConfirmModal} from '../components/confirm-modal';
 
 import '../components/page-editor';
 import type {PageEditorSaveDetail} from '../components/page-editor';
+import type {PageEditorShareDetail} from '../components/page-editor';
 import type {DocRecord, PageRecord} from '../domain/types';
 import {haptics} from '../services/haptics';
 import {ImpactStyle} from '@capacitor/haptics';
@@ -21,6 +22,8 @@ import {AuthService} from "../services/auth-service";
 import {t} from '../lib/i18n';
 import {writeClipboardWithAutoClear} from '../services/clipboard';
 import {showToast} from '../components/toast-notification';
+import {PDFDocument} from 'pdf-lib';
+import {Icons} from '../components/icons';
 
 @customElement('doc-page')
 export class DocPage extends LitElement {
@@ -65,6 +68,7 @@ export class DocPage extends LitElement {
 
     @state() private draggingId: string | null = null;
     @state() private dropTargetId: string | null = null;
+    private pointerDragActive = false;
 
     @state() private folderSuggestions: string[] = [];
     @state() private tagSuggestions: string[] = [];
@@ -79,18 +83,8 @@ export class DocPage extends LitElement {
         super.disconnectedCallback();
     }
 
-    private async confirmDecryptedShare(): Promise<boolean> {
-        return await ConfirmModal.ask({
-            title: t('doc.share_decrypted_title'),
-            description: t('doc.share_decrypted_body'),
-            confirm: t('common.share_now'),
-            destructive: false
-        });
-    }
-
     private async exportSingleImage(pageId: string): Promise<void> {
         if (!this.doc) return;
-        if (!(await this.confirmDecryptedShare())) return;
         
         this.busy = true;
         try {
@@ -115,7 +109,6 @@ export class DocPage extends LitElement {
     // 3. UPDATE: Batch Images (Share Images) with limited fallback
     private async exportImagesJpeg(): Promise<void> {
         if (!this.doc || this.pages.length === 0) return;
-        if (!(await this.confirmDecryptedShare())) return;
 
         this.busy = true;
         try {
@@ -156,20 +149,32 @@ export class DocPage extends LitElement {
 
     private onDragOver(e: DragEvent, id: string) {
         e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
         if (this.draggingId === id) return;
         this.dropTargetId = id;
     }
 
     private async onDrop(e: DragEvent, targetId: string) {
         e.preventDefault();
-        if (!this.draggingId || this.draggingId === targetId || !this.doc) {
+        const sourceId = this.draggingId || e.dataTransfer?.getData('text/plain') || null;
+        if (!sourceId || sourceId === targetId || !this.doc) {
+            this.draggingId = null;
+            this.dropTargetId = null;
+            return;
+        }
+
+        await this.reorderByIds(sourceId, targetId);
+    }
+
+    private async reorderByIds(sourceId: string, targetId: string): Promise<void> {
+        if (!this.doc || sourceId === targetId) {
             this.draggingId = null;
             this.dropTargetId = null;
             return;
         }
 
         const ids = [...this.doc.pageIds];
-        const fromIdx = ids.indexOf(this.draggingId);
+        const fromIdx = ids.indexOf(sourceId);
         const toIdx = ids.indexOf(targetId);
 
         if (fromIdx !== -1 && toIdx !== -1) {
@@ -185,6 +190,42 @@ export class DocPage extends LitElement {
         this.draggingId = null;
         this.dropTargetId = null;
     }
+
+    private onHandlePointerDown(e: PointerEvent, id: string) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.pointerDragActive = true;
+        this.draggingId = id;
+        this.dropTargetId = id;
+        this.triggerHapticTick();
+    }
+
+    private onHandlePointerMove(e: PointerEvent) {
+        if (!this.pointerDragActive) return;
+        const hit = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+        const card = hit?.closest('[data-page-card-id]') as HTMLElement | null;
+        const targetId = card?.dataset.pageCardId || null;
+        if (!targetId) return;
+        if (this.draggingId === targetId) return;
+        this.dropTargetId = targetId;
+    }
+
+    private onHandlePointerUp = async (e: PointerEvent) => {
+        if (!this.pointerDragActive) return;
+        e.preventDefault();
+        e.stopPropagation();
+        this.pointerDragActive = false;
+
+        const sourceId = this.draggingId;
+        const targetId = this.dropTargetId;
+        if (sourceId && targetId && sourceId !== targetId) {
+            await this.reorderByIds(sourceId, targetId);
+            return;
+        }
+
+        this.draggingId = null;
+        this.dropTargetId = null;
+    };
 
     private async triggerHapticTick() {
         try {
@@ -286,6 +327,33 @@ export class DocPage extends LitElement {
         }
     }
 
+    private onEditorShare = async (ev: CustomEvent<PageEditorShareDetail>) => {
+        this.busy = true;
+        try {
+            const {master, format} = ev.detail;
+            const pageIndex = this.editingPage ? this.pages.findIndex(p => p.id === this.editingPage!.id) + 1 : 0;
+            const baseName = `${safeName(this.doc?.title || t('scan.title'))}-Page-${Math.max(pageIndex, 1)}`;
+            const filename = format === 'pdf' ? `${baseName}.pdf` : `${baseName}.jpg`;
+            const file = format === 'pdf'
+                ? new File([bytesToBlob(await this.buildSinglePagePdf(master.bytes), 'application/pdf')], filename, {type: 'application/pdf'})
+                : new File([bytesToBlob(master.bytes, 'image/jpeg')], filename, {type: 'image/jpeg'});
+            AuthService.ignoreNextResumeForExternalAction('share-doc-editor');
+            await shareFile(file, filename);
+        } catch (e) {
+            this.error = (e as Error).message;
+        } finally {
+            this.busy = false;
+        }
+    };
+
+    private async buildSinglePagePdf(imageBytes: Uint8Array): Promise<Uint8Array> {
+        const pdf = await PDFDocument.create();
+        const image = await pdf.embedJpg(imageBytes);
+        const page = pdf.addPage([image.width, image.height]);
+        page.drawImage(image, {x: 0, y: 0, width: image.width, height: image.height});
+        return await pdf.save();
+    }
+
     private async openViewerAt(index: number): Promise<void> {
         if (index < 0 || index >= this.pages.length) return;
         this.viewerIndex = index;
@@ -355,7 +423,6 @@ export class DocPage extends LitElement {
 
     private async exportPdf(): Promise<void> {
         if (!this.doc) return;
-        if (!(await this.confirmDecryptedShare())) return;
 
         this.busy = true;
         this.exportProgress = 0;
@@ -394,7 +461,6 @@ export class DocPage extends LitElement {
 
     private async exportImagesZip(): Promise<void> {
         if (!this.doc) return;
-        if (!(await this.confirmDecryptedShare())) return;
 
         this.busy = true;
         try {
@@ -507,6 +573,7 @@ export class DocPage extends LitElement {
                             .blob=${this.editingBlob}
                             ?disableAutoDetect=${true}
                             @page-editor-save=${this.onEditorSave}
+                            @page-editor-share=${this.onEditorShare}
                             @page-editor-cancel=${() => {
                                 this.editingPage = null;
                                 this.editingBlob = null;
@@ -527,10 +594,7 @@ export class DocPage extends LitElement {
                 <div class="flex items-center justify-between">
                     <a class="text-sm text-slate-300 hover:underline flex items-center gap-1 min-h-[44px]"
                        href="#/library">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                  d="M15 19l-7-7 7-7"></path>
-                        </svg>
+                        ${Icons.Back('w-4 h-4')}
                         ${t('doc.library_back')}
                     </a>
                 </div>
@@ -713,8 +777,7 @@ export class DocPage extends LitElement {
                                 <div class="relative bg-slate-900 border-2 rounded-2xl overflow-hidden transition-all duration-200 
                                     ${isDragging ? 'opacity-30 border-emerald-500 scale-95' : 'border-slate-800'} 
                                     ${isDropTarget ? 'border-emerald-400 translate-y-2' : ''}"
-                                     draggable="true"
-                                     @dragstart=${() => this.onDragStart(p.id)}
+                                     data-page-card-id=${p.id}
                                      @dragover=${(e: DragEvent) => this.onDragOver(e, p.id)}
                                      @drop=${(e: DragEvent) => this.onDrop(e, p.id)}
                                      @dragend=${() => {
@@ -738,28 +801,44 @@ export class DocPage extends LitElement {
                                     </div>
 
                                     <div class="flex items-center justify-between border-t border-slate-800 h-14 bg-slate-950 px-2">
-                                        <button class="flex items-center justify-center text-slate-400 active:text-emerald-500 active:bg-slate-900"
+                                        <button type="button"
+                                                class="w-10 h-10 rounded-lg flex items-center justify-center text-slate-300 hover:text-emerald-400 hover:bg-slate-900 active:scale-95 transition-all"
+                                                aria-label=${t('scan.edit_page')}
                                                 @click=${() => this.editPage(p)}>
-                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                                                      stroke-width="2"></path>
-                                            </svg>
+                                            ${Icons.Edit('w-5 h-5')}
                                         </button>
-                                        <button class="flex items-center justify-center text-slate-400 active:text-red-500 active:bg-slate-900"
+                                        <button type="button"
+                                                class="w-10 h-10 rounded-lg flex items-center justify-center text-slate-300 hover:text-red-400 hover:bg-slate-900 active:scale-95 transition-all"
+                                                aria-label=${t('common.delete')}
                                                 @click=${() => this.deletePage(p.id)}>
-                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path d="M6 18L18 6M6 6l12 12" stroke-width="2"></path>
-                                            </svg>
+                                            ${Icons.Close('w-5 h-5')}
                                         </button>
-                                        <button class="p-2 text-slate-400 hover:text-emerald-400"
+                                        <button type="button"
+                                                class="w-10 h-10 rounded-lg flex items-center justify-center text-slate-300 hover:text-emerald-400 hover:bg-slate-900 active:scale-95 transition-all"
+                                                aria-label=${t('common.share_now')}
                                                 @click=${() => this.exportSingleImage(p.id)}
                                                 title="Share this image">
-                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                      d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"></path>
-                                            </svg>
+                                            ${Icons.Share('w-5 h-5')}
                                         </button>
-                                        <div class="flex items-center justify-center text-slate-600 cursor-grab active:cursor-grabbing active:text-emerald-400 active:bg-slate-900">
+                                        <div class="w-10 h-10 rounded-lg flex items-center justify-center text-slate-300 hover:text-emerald-400 hover:bg-slate-900 cursor-grab active:cursor-grabbing active:scale-95 transition-all"
+                                             draggable="true"
+                                             style="touch-action:none;"
+                                             @pointerdown=${(e: PointerEvent) => this.onHandlePointerDown(e, p.id)}
+                                             @pointermove=${(e: PointerEvent) => this.onHandlePointerMove(e)}
+                                             @pointerup=${this.onHandlePointerUp}
+                                             @pointercancel=${this.onHandlePointerUp}
+                                             @dragstart=${(e: DragEvent) => {
+                                                 e.stopPropagation();
+                                                 if (e.dataTransfer) {
+                                                     e.dataTransfer.effectAllowed = 'move';
+                                                     e.dataTransfer.setData('text/plain', p.id);
+                                                 }
+                                                 this.onDragStart(p.id);
+                                             }}
+                                             @dragend=${() => {
+                                                 this.draggingId = null;
+                                                 this.dropTargetId = null;
+                                             }}>
                                             <svg class="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
                                                 <path d="M7 7h2v2H7V7zm0 4h2v2H7v-2zm4-4h2v2h-2V7zm0 4h2v2h-2v-2z"></path>
                                             </svg>

@@ -24,6 +24,7 @@ import {
     clearStorageCleanupPending,
     hasStorageCleanupPending
 } from '../services/storage-cleanup-flag';
+import type {ScanStage} from '../pages/scan/scan-session-state';
 
 type Route =
     | { name: 'library' }
@@ -62,6 +63,7 @@ export class AppRoot extends LitElement {
     @state() private hasStorageRisk = false;
     @state() private hasStorageCleanupPending = false;
     @state() private hidePersistBanner = false;
+    @state() private scanStage: ScanStage = 'idle';
 
     connectedCallback(): void {
         super.connectedCallback();
@@ -213,6 +215,11 @@ export class AppRoot extends LitElement {
 
     private _onHash = () => {
         this.route = parseHash();
+        if (this.route.name !== 'scan') this.scanStage = 'idle';
+    };
+
+    private _onScanStageChange = (ev: CustomEvent<{ stage: ScanStage }>) => {
+        this.scanStage = ev.detail.stage;
     };
 
     private _onGlobalError = (ev: Event) => {
@@ -364,7 +371,7 @@ export class AppRoot extends LitElement {
         if (this.fatal) return this.renderFatal();
 
         const r = this.route;
-        const showNav = r.name !== 'doc';
+        const showNav = r.name !== 'doc' && !(r.name === 'scan' && this.scanStage === 'edit');
 
         return html`
             <div class="min-h-dvh flex flex-col bg-slate-950">
@@ -375,7 +382,7 @@ export class AppRoot extends LitElement {
                     ${r.name === 'library' ? html`
                         <library-page></library-page>` : null}
                     ${r.name === 'scan' ? html`
-                        <scan-page></scan-page>` : null}
+                        <scan-page @scan-stage-change=${this._onScanStageChange}></scan-page>` : null}
                     ${r.name === 'doc' ? html`
                         <doc-page .docId=${r.id}></doc-page>` : null}
                     ${r.name === 'settings' ? html`

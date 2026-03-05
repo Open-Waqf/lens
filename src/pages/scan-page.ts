@@ -17,10 +17,11 @@ import {getPlatformCaps} from '../services/platform';
 import '../components/scan-overlay';
 import '../components/page-editor';
 import type {PageEditorSaveDetail} from '../components/page-editor';
+import type {PageEditorShareDetail} from '../components/page-editor';
 import {ConfirmModal} from '../components/confirm-modal';
 
 import {CameraManager} from '../lib/camera/camera-manager';
-import {ScanSessionState, MAX_PAGES_PER_BATCH} from './scan/scan-session-state';
+import {ScanSessionState, MAX_PAGES_PER_BATCH, type ScanStage} from './scan/scan-session-state';
 import {ScanRepo} from './scan/scan-repo';
 import {ocrQueue} from '../services/ocr-queue';
 import {AuthService} from "../services/auth-service";
@@ -29,6 +30,8 @@ import {t} from '../lib/i18n';
 import {recordSuccessfulSaveAndShouldRemind} from '../services/backup-reminder';
 import {showToast} from '../components/toast-notification';
 import {toUserErrorMessage} from '../lib/user-error';
+import {shareFile} from '../services/share';
+import {PDFDocument} from 'pdf-lib';
 
 const APPEND_DOC_KEY = 'sahifah.appendToDocId';
 const AUTO_KEY = 'sahifah.autoCapture';
@@ -99,6 +102,7 @@ export class ScanPage extends LitElement {
     private detGov = new DetectGovernor();
     private detectLoopTimer: number | null = null;
     private detectLoopToken = 0;
+    private lastAnnouncedStage: ScanStage | null = null;
 
     async connectedCallback(): Promise<void> {
         super.connectedCallback();
@@ -204,7 +208,23 @@ export class ScanPage extends LitElement {
         this.revokeStrip();
         this.clearImportReview();
         ocrQueue.removeEventListener('change', this.onOcrQueueChange);
+        this.dispatchStageChange('idle');
         super.disconnectedCallback();
+    }
+
+    protected updated(): void {
+        const currentStage = this.session.stage;
+        if (this.lastAnnouncedStage === currentStage) return;
+        this.dispatchStageChange(currentStage);
+    }
+
+    private dispatchStageChange(stage: ScanStage): void {
+        this.lastAnnouncedStage = stage;
+        this.dispatchEvent(new CustomEvent<{ stage: ScanStage }>('scan-stage-change', {
+            detail: {stage},
+            bubbles: true,
+            composed: true
+        }));
     }
 
     private onHashChange = () => {
@@ -463,6 +483,36 @@ export class ScanPage extends LitElement {
             this.busy = false;
         }
     };
+
+    private onEditorShare = async (ev: CustomEvent<PageEditorShareDetail>) => {
+        this.busy = true;
+        this.error = null;
+        this.requestUpdate();
+
+        try {
+            const {master, format} = ev.detail;
+            const safeTitle = (this.docTitle || t('scan.title')).replace(/[^a-zA-Z0-9._-]/g, '_');
+            const suffix = Date.now();
+            const filename = format === 'pdf' ? `${safeTitle}-${suffix}.pdf` : `${safeTitle}-${suffix}.jpg`;
+            const file = format === 'pdf'
+                ? new File([bytesToBlob(await this.buildSinglePagePdf(master.bytes), 'application/pdf')], filename, {type: 'application/pdf'})
+                : new File([bytesToBlob(master.bytes, 'image/jpeg')], filename, {type: 'image/jpeg'});
+            AuthService.ignoreNextResumeForExternalAction('share-scan-quick');
+            await shareFile(file, filename);
+        } catch (e) {
+            this.error = toUserErrorMessage(e);
+        } finally {
+            this.busy = false;
+        }
+    };
+
+    private async buildSinglePagePdf(imageBytes: Uint8Array): Promise<Uint8Array> {
+        const pdf = await PDFDocument.create();
+        const image = await pdf.embedJpg(imageBytes);
+        const page = pdf.addPage([image.width, image.height]);
+        page.drawImage(image, {x: 0, y: 0, width: image.width, height: image.height});
+        return await pdf.save();
+    }
 
     private revokeStrip() {
         for (const it of this.strip) URL.revokeObjectURL(it.url);
@@ -1179,15 +1229,10 @@ export class ScanPage extends LitElement {
                                     .initialQuad=${this.editorInitialQuad}
                                     ?disableAutoDetect=${!!this.editingPageId || !!this.editorInitialQuad}
                                     @page-editor-save=${this.onEditorSave}
+                                    @page-editor-share=${this.onEditorShare}
                                     @page-editor-cancel=${this.onEditorCancel}
                             ></page-editor>
                         `)}
-                        <div class="flex justify-end mt-6 pb-10">
-                            <button class="px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 disabled:opacity-60 min-h-[44px]"
-                                    ?disabled=${this.busy} @click=${() => void this.exitScan()}>
-                                ${this.session.exitLabel}
-                            </button>
-                        </div>
                     </div>
                 ` : null}
             </div>

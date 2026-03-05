@@ -66,6 +66,7 @@ vi.mock('../../src/lib/camera/camera-manager', () => {
 const mockCreateDoc = vi.fn().mockResolvedValue({id: 'doc_123', title: 'Test Scan'});
 const mockAddNewPage = vi.fn().mockResolvedValue('page_123');
 const mockRecordSaveReminder = vi.fn().mockReturnValue(false);
+const mockShareFile = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('../../src/pages/scan/scan-repo', () => {
     return {
@@ -82,6 +83,10 @@ vi.mock('../../src/pages/scan/scan-repo', () => {
 
 vi.mock('../../src/services/backup-reminder', () => ({
     recordSuccessfulSaveAndShouldRemind: (...args: any[]) => mockRecordSaveReminder(...args)
+}));
+
+vi.mock('../../src/services/share', () => ({
+    shareFile: (...args: any[]) => mockShareFile(...args)
 }));
 
 // Mock Worker
@@ -225,5 +230,64 @@ describe('ScanPage Component', () => {
         expect(mockRecordSaveReminder).toHaveBeenCalled();
         expect(mockCreateDoc).toHaveBeenCalled();
         expect(mockAddNewPage).toHaveBeenCalled();
+    });
+
+    it('shares from editor without creating a document', async () => {
+        element = await mountPage(true);
+
+        (element as any).captured = new Blob(['mock'], {type: 'image/jpeg'});
+        (element as any).session.setStage('edit');
+        element.requestUpdate();
+        await element.updateComplete;
+
+        const editor = await waitForElement(element, 'page-editor');
+        editor.dispatchEvent(new CustomEvent('page-editor-share', {
+            detail: {
+                master: {
+                    bytes: new Uint8Array([1, 2, 3]),
+                    width: 1,
+                    height: 1
+                },
+                format: 'jpg'
+            },
+            bubbles: true,
+            composed: true
+        }));
+
+        await new Promise(r => setTimeout(r, 50));
+
+        expect(mockShareFile).toHaveBeenCalledTimes(1);
+        expect(mockCreateDoc).not.toHaveBeenCalled();
+        expect(mockAddNewPage).not.toHaveBeenCalled();
+    });
+
+    it('shares PDF when editor share format is pdf', async () => {
+        element = await mountPage(true);
+        (element as any).buildSinglePagePdf = vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3]));
+
+        (element as any).captured = new Blob(['mock'], {type: 'image/jpeg'});
+        (element as any).session.setStage('edit');
+        element.requestUpdate();
+        await element.updateComplete;
+
+        const editor = await waitForElement(element, 'page-editor');
+        editor.dispatchEvent(new CustomEvent('page-editor-share', {
+            detail: {
+                master: {
+                    bytes: new Uint8Array([1, 2, 3]),
+                    width: 1,
+                    height: 1
+                },
+                format: 'pdf'
+            },
+            bubbles: true,
+            composed: true
+        }));
+
+        await new Promise(r => setTimeout(r, 80));
+
+        expect(mockShareFile).toHaveBeenCalledTimes(1);
+        const filename = mockShareFile.mock.calls[0]?.[1] as string;
+        expect(filename.endsWith('.pdf')).toBe(true);
     });
 });

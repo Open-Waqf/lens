@@ -47,6 +47,9 @@ export const en = {
     'scan.discard_edits': 'Discard Edits?',
     'scan.discard_capture': 'Discard Capture?',
     'scan.discard_body': 'This action cannot be undone.',
+    'scan.save_scan': 'Save Scan',
+    'scan.share_format_jpg': 'JPG',
+    'scan.share_format_pdf': 'PDF',
 
     // Common
     'common.cancel': 'Cancel',
@@ -58,6 +61,7 @@ export const en = {
     'common.document': 'Document',
     'common.unsort': 'Unsort Documents',
     'common.share_now': 'Share Now',
+    'common.back': 'Back',
     'common.info': 'info',
     'common.success': 'success',
     'common.error': 'error',
@@ -131,8 +135,6 @@ export const en = {
     'doc.export_zip': 'Export Zip',
     'doc.add_pages': 'Add Pages',
     'doc.generating_pdf': 'Generating PDF',
-    'doc.share_decrypted_title': 'Share Decrypted Copy?',
-    'doc.share_decrypted_body': 'This will create an unencrypted copy outside the vault. Continue?',
     'doc.delete_page_title': 'Delete Page?',
     'doc.delete_page_body': 'This page will be permanently removed.',
     'doc.delete_doc_title': 'Delete Document?',
