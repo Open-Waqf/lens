@@ -101,6 +101,14 @@ npm run test:perf
 
 Performance gate details and PRD mapping are documented in [docs/perf.md](docs/perf.md).
 
+### 6. Security Network Gate
+
+```bash
+npm run test:security
+```
+
+Network gate policy, CI flow matrix, and allowlist rules are documented in [docs/security-network.md](docs/security-network.md).
+
 ---
 
 ## ⚠️ Disclaimers

@@ -16,6 +16,7 @@ jobs:
       CI: true
       MITM_CAPTURE_PATH: ${{ runner.temp }}/mitm-requests.jsonl
       E2E_PROXY_SERVER: http://127.0.0.1:8080
+      NETWORK_ALLOW_HOSTS: localhost,127.0.0.1
     steps:
       - name: Checkout Source
         uses: actions/checkout@v4
@@ -49,11 +50,11 @@ jobs:
           echo $! > "${{ runner.temp }}/mitm.pid"
           sleep 2
 
-      - name: Run Security E2E Flow
+      - name: Run Security E2E Flow Matrix
         run: npm run test:security
 
-      - name: Assert Network Policy
-        run: node scripts/network-assert.mjs "${{ runner.temp }}/mitm-requests.jsonl" --allow-hosts=localhost,127.0.0.1
+      - name: Assert Network Policy (Strict Allowlist)
+        run: node scripts/network-assert.mjs "${{ runner.temp }}/mitm-requests.jsonl" --allow-hosts="${NETWORK_ALLOW_HOSTS}"
 
       - name: Stop Mitmproxy
         if: always()
@@ -72,4 +73,3 @@ jobs:
             ${{ runner.temp }}/mitm-requests.jsonl
             playwright-report/
           retention-days: 14
-

@@ -65,6 +65,8 @@ Backups use a specific chunked-streaming protocol to allow multi-gigabyte export
   node scripts/network-assert.mjs /tmp/mitm-requests.jsonl --allow-hosts=localhost,127.0.0.1
   kill "$MITM_PID"
   ```
+  Policy reference: `docs/security-network.md`.
+  Keep default allowlist strict (`localhost`, `127.0.0.1`). Add external hosts only for explicit language-pack networking tests.
 * Run APK telemetry guard (must be clean):
   ```bash
   npm run test:no-telemetry -- android/app/build/outputs/apk/debug/app-debug.apk

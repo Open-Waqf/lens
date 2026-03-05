@@ -2,13 +2,6 @@
 
 This document defines the automated performance gates used for release checks.
 
-Linked PRD IDs:
-- `NFR-PERF-001`
-- `AC-1.1`
-- `AC-2.1`
-- `AC-6.1`
-- `TC-VAULT-008`
-
 ## Command
 
 ```bash
