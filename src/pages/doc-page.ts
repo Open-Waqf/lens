@@ -531,7 +531,7 @@ export class DocPage extends LitElement {
                             <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">${t('doc.folder_label')}</div>
                             <input class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 min-h-[44px]"
                                    list="folder-list"
-                                   placeholder="e.g. Finance"
+                                   placeholder=${t('doc.folder_placeholder')}
                                    .value=${live(this.doc.folder ?? '')}
                                    @change=${(e: Event) => this.saveMeta({folder: (e.target as HTMLInputElement).value || null})}/>
 
@@ -544,7 +544,7 @@ export class DocPage extends LitElement {
                             <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">${t('doc.tags_label')}</div>
                             <input class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 min-h-[44px]"
                                    list="tag-list"
-                                   placeholder="e.g. 2024, Paid"
+                                   placeholder=${t('doc.tags_placeholder')}
                                    .value=${live(this.doc.tags.join(', '))}
                                    @change=${(e: Event) => this.saveMeta({tags: (e.target as HTMLInputElement).value.split(',').map(s => s.trim()).filter(Boolean)})}/>
 

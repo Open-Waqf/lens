@@ -282,7 +282,7 @@ export class LibraryPage extends LitElement {
         const ok = await ConfirmModal.ask({
             title: t('library.merge_count_title', {count: ids.length}),
             description: t('library.merge_body'),
-            confirm: 'Merge'
+            confirm: t('library.merge_confirm')
         });
 
         if (!ok) return;
@@ -309,8 +309,8 @@ export class LibraryPage extends LitElement {
         const folderName = await ConfirmModal.prompt({
             title: t('library.move_to_folder'),
             description: t('library.enter_folder_name') + folderList,
-            placeholder: 'e.g. Taxes, Work...',
-            confirm: 'Move'
+            placeholder: t('library.move_to_folder_placeholder'),
+            confirm: t('library.move_confirm')
         });
 
         if (folderName === null) return;
@@ -380,7 +380,7 @@ export class LibraryPage extends LitElement {
                             this.visibleLimit = 20;
                             this.applyFilters();
                         }}>
-                    All
+                    ${t('library.all_tag')}
                 </button>
                 ${this.allTags.map(tag => html`
                     <div class="flex items-center rounded-full bg-slate-900 border border-slate-800 overflow-hidden">
@@ -577,14 +577,14 @@ export class LibraryPage extends LitElement {
             ` : html`
                 <button class="p-2 rounded-full ${this.groupByFolder ? 'text-emerald-400 bg-emerald-950/30' : 'text-slate-400'}"
                         @click=${() => this.groupByFolder = !this.groupByFolder}
-                        title="Group by Folder">
+                        title=${t('library.group_by_folder_title')}>
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                               d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
                     </svg>
                 </button>
                 <button class="p-2 rounded-full hover:bg-slate-800 text-slate-400" @click=${this.toggleSelectionMode}
-                        title="Select">
+                        title=${t('library.select_title')}>
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                               d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
@@ -593,7 +593,7 @@ export class LibraryPage extends LitElement {
             `}
 
             <button class="p-2 rounded-full hover:bg-slate-800 text-slate-400" @click=${this.toggleView}
-                    title=${isGallery ? 'List View' : 'Gallery View'}>
+                    title=${isGallery ? t('library.list_view') : t('library.gallery_view')}>
                 ${isGallery
                         ? html`
                             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -631,7 +631,7 @@ export class LibraryPage extends LitElement {
                         ${folderName !== t('library.unsorted') ? html`
                             <button @click=${() => this.onDeleteFolder(folderName)}
                                     class="p-1 hover:bg-slate-800 rounded transition-colors text-slate-600 hover:text-red-400"
-                                    title="Unsort Folder">
+                                    title=${t('library.unsort_folder_title')}>
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                           d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
