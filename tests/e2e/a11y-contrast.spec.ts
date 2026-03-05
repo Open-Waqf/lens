@@ -5,35 +5,6 @@ type ContrastProbe = {
     minRatio: number;
 };
 
-function parseRgb(input: string): [number, number, number, number] | null {
-    const nums = input.match(/[\d.]+/g);
-    if (!nums || nums.length < 3) return null;
-    const parts = nums.map(v => Number(v));
-    const r = Number.isFinite(parts[0]) ? parts[0] : 0;
-    const g = Number.isFinite(parts[1]) ? parts[1] : 0;
-    const b = Number.isFinite(parts[2]) ? parts[2] : 0;
-    const a = parts.length >= 4 && Number.isFinite(parts[3]) ? parts[3] : 1;
-    return [r, g, b, a];
-}
-
-function srgbToLinear(v: number): number {
-    const x = v / 255;
-    return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
-}
-
-function luminance(rgb: [number, number, number]): number {
-    const [r, g, b] = rgb;
-    return 0.2126 * srgbToLinear(r) + 0.7152 * srgbToLinear(g) + 0.0722 * srgbToLinear(b);
-}
-
-function contrastRatio(fg: [number, number, number], bg: [number, number, number]): number {
-    const l1 = luminance(fg);
-    const l2 = luminance(bg);
-    const lighter = Math.max(l1, l2);
-    const darker = Math.min(l1, l2);
-    return (lighter + 0.05) / (darker + 0.05);
-}
-
 test.beforeEach(async ({page}) => {
     await page.addInitScript(() => {
         window.localStorage.setItem('sahifah.welcomeSeen', '1');

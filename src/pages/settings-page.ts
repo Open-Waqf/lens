@@ -82,7 +82,7 @@ export class SettingsPage extends LitElement {
         // Usage: Type 'sahifahRepair()' in DevTools Console
         (window as any).sahifahRepair = () => {
             this.showRepairTool = true;
-            this.msg = "Maintenance Mode Enabled 🛠️";
+            this.msg = t('settings.maintenance_enabled');
             this.requestUpdate();
         };
     }
@@ -91,16 +91,16 @@ export class SettingsPage extends LitElement {
         this.busy = true;
         try {
             await this.runThumbnailRepairFlow();
-            this.msg = "Library repair complete.";
+            this.msg = t('settings.repair_complete');
         } catch (e) {
-            this.err = "Repair failed: " + String(e);
+            this.err = t('settings.repair_failed', {error: String(e)});
         } finally {
             this.busy = false;
         }
     }
 
     private async runThumbnailRepairFlow() {
-        this.repairProgress = 'Starting scan...';
+        this.repairProgress = t('settings.repair_starting');
         await repairLibrary((_curr, _total, msg) => {
             this.repairProgress = msg;
             this.requestUpdate();
@@ -109,34 +109,34 @@ export class SettingsPage extends LitElement {
 
     private async rebuildIndex() {
         const ok = await ConfirmModal.ask({
-            title: 'Rebuild Library Index?',
-            description: 'This recreates document metadata from files currently on disk. Existing metadata will be replaced.',
-            confirm: 'Rebuild',
+            title: t('settings.rebuild_index_title'),
+            description: t('settings.rebuild_index_desc'),
+            confirm: t('settings.rebuild_index_confirm'),
             destructive: true
         });
         if (!ok) return;
 
         this.busy = true;
-        this.msg = 'Rebuilding index from files...';
+        this.msg = t('settings.rebuild_index_running');
         this.err = null;
 
         try {
             const result = await rebuildLibraryIndexFromFiles();
             await this.refreshStorageRisk();
-            this.msg = `Recovery complete. Restored ${result.docsRecovered} documents and ${result.pagesRecovered} pages.`;
+            this.msg = t('settings.rebuild_index_done', {docs: result.docsRecovered, pages: result.pagesRecovered});
 
             const runRepairNow = await ConfirmModal.ask({
-                title: 'Run Thumbnail Repair?',
-                description: 'Recommended after recovery to regenerate any missing previews.',
-                confirm: 'Run Repair',
+                title: t('settings.repair_prompt_title'),
+                description: t('settings.repair_prompt_desc'),
+                confirm: t('settings.repair_prompt_confirm'),
             });
             if (runRepairNow) {
-                this.msg = 'Running thumbnail repair...';
+                this.msg = t('settings.repair_running');
                 await this.runThumbnailRepairFlow();
-                this.msg = "Recovery complete. Thumbnails repaired.";
+                this.msg = t('settings.repair_recovery_done');
             }
         } catch (e) {
-            this.err = 'Recovery failed: ' + String(e);
+            this.err = t('settings.rebuild_index_failed', {error: String(e)});
         } finally {
             this.busy = false;
         }
@@ -214,7 +214,7 @@ export class SettingsPage extends LitElement {
             if (!success) {
                 // Failed! Revert immediately
                 this.requireAuth = false;
-                this.msg = "Setup cancelled or biometrics not available.";
+                this.msg = t('settings.auth_setup_unavailable');
                 this.requestUpdate(); // Force UI re-render to uncheck box
                 return;
             }
@@ -297,8 +297,8 @@ export class SettingsPage extends LitElement {
             const pw = await ConfirmModal.prompt({
                 title: t('settings.encrypt_backup_title'),
                 description: t('settings.encrypt_backup_desc'),
-                placeholder: 'Password123',
-                confirm: 'Export'
+                placeholder: t('settings.backup_password_placeholder'),
+                confirm: t('settings.export_confirm')
             });
             if (pw === null) {
                 this.busy = false;
@@ -494,8 +494,8 @@ export class SettingsPage extends LitElement {
             const pw = await ConfirmModal.prompt({
                 title: t('settings.decrypt_backup_title'),
                 description: t('settings.decrypt_backup_desc'),
-                placeholder: 'Password',
-                confirm: 'Restore'
+                placeholder: t('settings.restore_password_placeholder'),
+                confirm: t('settings.restore_confirm')
             });
 
             if (pw === null) {
@@ -559,10 +559,10 @@ export class SettingsPage extends LitElement {
 
     private async askRestoreMode(count: number): Promise<RestoreMode | null> {
         const res = await ConfirmModal.prompt({
-            title: 'Restore Backup',
-            description: `Backup contains ${count} documents.\nType MERGE to add them.\nType ERASE to replace your library.`,
-            placeholder: 'MERGE or REPLACE',
-            confirm: 'Continue'
+            title: t('settings.restore_mode_title'),
+            description: t('settings.restore_mode_desc', {count}),
+            placeholder: t('settings.restore_mode_placeholder'),
+            confirm: t('settings.restore_mode_confirm')
         });
 
         if (!res) return null;
@@ -574,26 +574,26 @@ export class SettingsPage extends LitElement {
 
     private async nukeEverything() {
         if (this.deleteConfirmation !== 'DELETE') {
-            this.msg = 'Please type DELETE to confirm.';
+            this.msg = t('settings.delete_confirm_required');
             return;
         }
 
         const ok = await ConfirmModal.ask({
-            title: 'Final Warning',
-            description: 'This will wipe ALL documents and settings. This cannot be undone.',
-            confirm: 'Wipe Everything',
+            title: t('settings.nuke_final_title'),
+            description: t('settings.nuke_final_desc'),
+            confirm: t('settings.nuke_final_confirm'),
             destructive: true
         });
 
         if (!ok) return;
 
         this.busy = true;
-        this.msg = 'Wiping data...';
+        this.msg = t('settings.nuke_running');
         try {
             await resetAllStorage();
             location.reload();
         } catch (e) {
-            this.msg = `Failed to reset: ${e}`;
+            this.msg = t('settings.nuke_failed', {error: String(e)});
             this.busy = false;
         }
     }
@@ -606,14 +606,14 @@ export class SettingsPage extends LitElement {
             <div class="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
                 <div class="bg-slate-900 border border-slate-700 p-6 rounded-2xl w-full max-w-sm space-y-4 shadow-2xl">
                     <div class="flex items-center justify-between">
-                        <div class="font-bold text-slate-100">Creating Backup</div>
+                        <div class="font-bold text-slate-100">${t('settings.backup_creating')}</div>
                         <div class="text-sm text-emerald-400 font-mono">${pct}%</div>
                     </div>
                     <div class="h-2 bg-slate-800 rounded-full overflow-hidden">
                         <div class="h-full bg-emerald-500 transition-all duration-200" style="width: ${pct}%"></div>
                     </div>
                     <div class="text-xs text-slate-400 text-center">
-                        Processing item ${this.backupProgress} of ${this.backupTotal}
+                        ${t('settings.backup_processing_item', {current: this.backupProgress, total: this.backupTotal})}
                     </div>
                 </div>
             </div>
@@ -643,13 +643,13 @@ export class SettingsPage extends LitElement {
         return html`
             <div class="flex items-center justify-between pb-2">
                 <div class="flex items-center gap-3">
-                    <h1 class="text-2xl font-bold text-slate-100">Settings</h1>
+                    <h1 class="text-2xl font-bold text-slate-100">${t('settings.title')}</h1>
                     <div class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono mt-1">
                         v${pkg.version}
                     </div>
                 </div>
                 <button class="p-2 rounded-lg text-red-500/50 hover:text-red-500 hover:bg-red-500/10 transition-colors"
-                        title="Nuclear Reset"
+                        title=${t('settings.nuclear_reset_title')}
                         @click=${() => {
                             this.showDangerZone = true;
                             setTimeout(() => {
@@ -685,11 +685,10 @@ export class SettingsPage extends LitElement {
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                               d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
                     </svg>
-                    Privacy & Security
+                    ${t('settings.privacy_title')}
                 </div>
                 <p class="text-xs text-slate-300 leading-relaxed">
-                    This app is <strong>Offline Only</strong>. Your documents are stored locally and are never sent to
-                    any cloud server.
+                    ${t('settings.privacy_body')}
                 </p>
             </section>
         `;
@@ -703,13 +702,13 @@ export class SettingsPage extends LitElement {
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                               d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
                     </svg>
-                    Advanced Protection
+                    ${t('settings.advanced_protection')}
                 </div>
 
                 <div class="flex items-center justify-between">
                     <div>
-                        <div class="text-sm text-slate-200">App Lock</div>
-                        <div class="text-[10px] text-slate-500">Require Biometrics to open app</div>
+                        <div class="text-sm text-slate-200">${t('settings.app_lock')}</div>
+                        <div class="text-[10px] text-slate-500">${t('settings.app_lock_desc')}</div>
                     </div>
                     <button class="relative h-6 w-11 rounded-full transition-colors ${this.requireAuth ? 'bg-emerald-600' : 'bg-slate-700'}"
                             aria-label=${t('settings.app_lock')}
@@ -721,8 +720,8 @@ export class SettingsPage extends LitElement {
                 ${this.showAdvancedSecurity ? html`
                     <div class="flex items-center justify-between">
                         <div>
-                            <div class="text-sm text-slate-200">Vault Mode (Default)</div>
-                            <div class="text-[10px] text-slate-500">Encrypt image files at rest by default</div>
+                            <div class="text-sm text-slate-200">${t('settings.vault_mode_label')}</div>
+                            <div class="text-[10px] text-slate-500">${t('settings.vault_mode_desc')}</div>
                         </div>
                         <button class="relative h-6 w-11 rounded-full transition-colors ${this.defaultVault ? 'bg-emerald-600' : 'bg-slate-700'}"
                                 aria-label=${t('settings.vault_mode')}
@@ -741,13 +740,13 @@ export class SettingsPage extends LitElement {
 
         // Dynamic text based on platform
         const infoText = this.caps.isCapacitor
-            ? "Your documents are stored securely on this device's internal storage."
-            : "Managed by browser. The OS may clear this if storage is low.";
+            ? t('settings.storage_native_info')
+            : t('settings.storage_web_info');
 
         return html`
             <section class="space-y-2">
                 <div class="flex items-center justify-between text-xs text-slate-400 uppercase tracking-wider font-semibold">
-                    <span>Local Storage</span>
+                    <span>${t('settings.local_storage')}</span>
                     <span>${this.formatBytes(this.storageUsed)} ${this.storageQuota > 0 ? '/ ' + this.formatBytes(this.storageQuota) : ''}</span>
                 </div>
 
@@ -766,7 +765,7 @@ export class SettingsPage extends LitElement {
     private renderDataManagement() {
         return html`
             <section class="space-y-3">
-                <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">Data Management</h2>
+                <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">${t('settings.data_management')}</h2>
                 ${this.renderBackupStatus()}
                 <div class="grid gap-3">
 
@@ -780,8 +779,8 @@ export class SettingsPage extends LitElement {
                                 </svg>
                             </div>
                             <div class="text-left">
-                                <div class="text-slate-200 font-medium">Export Backup</div>
-                                <div class="text-xs text-slate-500">Save to device Documents folder</div>
+                                <div class="text-slate-200 font-medium">${t('settings.export_backup')}</div>
+                                <div class="text-xs text-slate-500">${t('settings.export_backup_desc')}</div>
                             </div>
                         </div>
                     </button>
@@ -795,8 +794,8 @@ export class SettingsPage extends LitElement {
                                 </svg>
                             </div>
                             <div class="text-left">
-                                <div class="text-slate-200 font-medium">Restore Backup</div>
-                                <div class="text-xs text-slate-500">Merge or replace library</div>
+                                <div class="text-slate-200 font-medium">${t('settings.restore_backup')}</div>
+                                <div class="text-xs text-slate-500">${t('settings.restore_backup_desc')}</div>
                             </div>
                         </div>
                         <input class="hidden" type="file"
@@ -810,7 +809,7 @@ export class SettingsPage extends LitElement {
                                        if (f.name.endsWith('.slbk') || f.name.endsWith('.zip') || f.type.includes('zip') || f.type.includes('octet')) {
                                            void this.importBackup(f);
                                        } else {
-                                           this.err = "Please select a .slbk or .zip file.";
+                                           this.err = t('settings.restore_select_valid_file');
                                        }
                                    }
                                    input.value = '';
@@ -828,8 +827,8 @@ export class SettingsPage extends LitElement {
                                     </svg>
                                 </div>
                                 <div class="text-left">
-                                    <div class="text-indigo-200 font-medium">Repair Thumbnails</div>
-                                    <div class="text-xs text-indigo-400">Regenerate missing preview images</div>
+                                    <div class="text-indigo-200 font-medium">${t('settings.repair_thumbnails')}</div>
+                                    <div class="text-xs text-indigo-400">${t('settings.repair_thumbnails_desc')}</div>
                                 </div>
                             </div>
                             ${this.repairProgress ? html`<span
@@ -848,8 +847,8 @@ export class SettingsPage extends LitElement {
                                     </svg>
                                 </div>
                                 <div class="text-left">
-                                    <div class="text-red-100 font-medium">Rebuild Library Index</div>
-                                    <div class="text-xs text-red-300/80">Recover documents from files if metadata was lost</div>
+                                    <div class="text-red-100 font-medium">${t('settings.rebuild_index_cta')}</div>
+                                    <div class="text-xs text-red-300/80">${t('settings.rebuild_index_cta_desc')}</div>
                                 </div>
                             </div>
                         </button>
@@ -896,13 +895,13 @@ export class SettingsPage extends LitElement {
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                               d="M13 10V3L4 14h7v7l9-11h-7z"></path>
                     </svg>
-                    Processing
+                    ${t('settings.processing')}
                 </div>
 
                 <div class="flex items-center justify-between">
                     <div>
-                        <div class="text-sm text-slate-200">Text Recognition (OCR)</div>
-                        <div class="text-[10px] text-slate-500">Extract text for search.</div>
+                        <div class="text-sm text-slate-200">${t('settings.ocr_label')}</div>
+                        <div class="text-[10px] text-slate-500">${t('settings.ocr_desc')}</div>
                     </div>
                     <button class="relative h-6 w-11 rounded-full transition-colors ${this.enableOcr ? 'bg-emerald-600' : 'bg-slate-700'}"
                             aria-label=${t('settings.ocr_toggle')}
@@ -935,10 +934,12 @@ export class SettingsPage extends LitElement {
     private renderSystemInfo() {
         return html`
             <div class="p-4 rounded-xl border border-slate-800 bg-slate-950/50 space-y-2">
-                <div class="text-xs font-mono text-slate-500">System Capabilities</div>
-                <div class="text-xs text-slate-600">Capacitor: ${this.caps.isCapacitor} • OPFS: ${this.caps.hasOPFS} •
-                    Share: ${this.caps.hasWebShare}
-                </div>
+                <div class="text-xs font-mono text-slate-500">${t('settings.system_capabilities')}</div>
+                <div class="text-xs text-slate-600">${t('settings.system_capabilities_values', {
+                    capacitor: String(this.caps.isCapacitor),
+                    opfs: String(this.caps.hasOPFS),
+                    share: String(this.caps.hasWebShare)
+                })}</div>
             </div>
         `;
     }
@@ -946,24 +947,24 @@ export class SettingsPage extends LitElement {
     private renderDangerZone() {
         return html`
             <section id="DangerZone" class="space-y-3 pt-6 border-t border-slate-800">
-                <h2 class="text-sm font-semibold text-red-400 uppercase tracking-wider">Danger Zone</h2>
+                <h2 class="text-sm font-semibold text-red-400 uppercase tracking-wider">${t('settings.danger_zone')}</h2>
 
                 ${!this.showDangerZone ? html`
                     <button class="w-full p-4 rounded-xl bg-slate-900 border border-red-900/30 text-red-400 hover:bg-red-950/20 transition-colors text-sm font-medium"
                             @click=${() => this.showDangerZone = true}>
-                        Show Destructive Options
+                        ${t('settings.show_destructive_options')}
                     </button>
                 ` : html`
                     <div class="p-4 rounded-xl bg-red-950/10 border border-red-900/50 space-y-4">
                         <div class="text-sm text-red-200">
-                            <p class="font-bold mb-1">Erase All Data</p>
-                            <p class="opacity-80">Permanently delete all documents and reset app.</p>
+                            <p class="font-bold mb-1">${t('settings.erase_all_title')}</p>
+                            <p class="opacity-80">${t('settings.erase_all_body')}</p>
                         </div>
                         <div class="space-y-2">
-                            <label class="text-xs text-red-400">Type "DELETE" to confirm</label>
+                            <label class="text-xs text-red-400">${t('settings.erase_all_confirm_label')}</label>
                             <input type="text"
                                    class="w-full bg-slate-950 border border-red-900/50 rounded-lg px-3 py-2 text-red-100 focus:outline-none"
-                                   placeholder="DELETE"
+                                   placeholder=${t('settings.delete_keyword')}
                                    .value=${this.deleteConfirmation}
                                    @input=${(e: Event) => this.deleteConfirmation = (e.target as HTMLInputElement).value}
                             />
@@ -971,7 +972,7 @@ export class SettingsPage extends LitElement {
                         <button class="w-full py-3 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold disabled:opacity-50"
                                 ?disabled=${this.deleteConfirmation !== 'DELETE' || this.busy}
                                 @click=${() => this.nukeEverything()}>
-                            ${this.busy ? 'Erasing...' : 'Erase Everything'}
+                            ${this.busy ? t('settings.erasing') : t('settings.erase_everything')}
                         </button>
                     </div>
                 `}
@@ -984,7 +985,7 @@ export class SettingsPage extends LitElement {
             return html`
                 <div class="p-3 rounded-lg bg-amber-950/20 border border-amber-900/50 flex items-center gap-3">
                     <div class="text-amber-500 font-bold text-lg">!</div>
-                    <div class="text-xs text-amber-200">Never backed up. Export a backup to prevent data loss.</div>
+                    <div class="text-xs text-amber-200">${t('settings.never_backed_up')}</div>
                 </div>
             `;
         }
@@ -992,8 +993,11 @@ export class SettingsPage extends LitElement {
         const isOverdue = daysSince > 30;
         return html`
             <div class="text-[10px] ${isOverdue ? 'text-amber-500 font-bold' : 'text-slate-500'}">
-                Last backup: ${new Date(this.lastBackupDate).toLocaleDateString()} (${daysSince} days ago)
-                ${isOverdue ? '— Backup Recommended' : ''}
+                ${t('settings.last_backup_line', {
+                    date: new Date(this.lastBackupDate).toLocaleDateString(),
+                    days: daysSince
+                })}
+                ${isOverdue ? t('settings.backup_recommended_suffix') : ''}
             </div>
         `;
     }
