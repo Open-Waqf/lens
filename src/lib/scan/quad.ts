@@ -43,3 +43,25 @@ export function lerpQuad(a: Quad, b: Quad, t: number): Quad {
     const mix = (p: Point, q: Point) => ({x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t});
     return [mix(a[0], b[0]), mix(a[1], b[1]), mix(a[2], b[2]), mix(a[3], b[3])];
 }
+
+export function isQuadConvex(q: Quad): boolean {
+    const crossProduct = (a: Point, b: Point, c: Point) => {
+        return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    };
+
+    const cp1 = crossProduct(q[0], q[1], q[2]);
+    const cp2 = crossProduct(q[1], q[2], q[3]);
+    const cp3 = crossProduct(q[2], q[3], q[0]);
+    const cp4 = crossProduct(q[3], q[0], q[1]);
+
+    // All cross products must have the same sign
+    const positive = cp1 > 0 && cp2 > 0 && cp3 > 0 && cp4 > 0;
+    const negative = cp1 < 0 && cp2 < 0 && cp3 < 0 && cp4 < 0;
+
+    if (!(positive || negative)) return false;
+
+    // Also ensure it's not too thin or collapsed
+    if (quadArea(q) < 500) return false;
+
+    return true;
+}

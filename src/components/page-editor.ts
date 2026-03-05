@@ -2,7 +2,7 @@ import {html, LitElement} from 'lit';
 import {customElement, property, query, state} from 'lit/decorators.js';
 import type {FilterMode} from '../domain/types';
 import type {Point, Quad} from '../lib/scan/quad';
-import {quadArea} from '../lib/scan/quad';
+import {quadArea, isQuadConvex} from '../lib/scan/quad';
 import {computeOutputSize} from '../lib/image/warp';
 import type {WorkerRequest, WorkerResponse} from '../lib/image/worker';
 import {haptics} from '../services/haptics';
@@ -26,6 +26,7 @@ export class PageEditor extends LitElement {
     @property({attribute: false}) blob!: Blob;
     @property({attribute: false}) filter: FilterMode = 'original';
     @property({type: Boolean}) disableAutoDetect = false;
+    @property({attribute: false}) initialQuad: Quad | null = null;
 
     @state() private rotation: 0 | 90 | 180 | 270 = 0;
     @state() private busy = false;
@@ -37,7 +38,7 @@ export class PageEditor extends LitElement {
 
     private baseW = 0;
     private baseH = 0;
-    @state() private quad: Quad | null = null;
+    @state() public quad: Quad | null = null; // Changed to public for test access
 
     private _previewTimer: number | null = null;
     private _previewToken = 0;
@@ -47,6 +48,11 @@ export class PageEditor extends LitElement {
     private dragIdx: number | null = null;
     @query('canvas[data-preview]') private previewEl!: HTMLCanvasElement;
     @query('canvas[data-magnify]') private magnifyEl!: HTMLCanvasElement;
+
+    private get isQuadValid(): boolean {
+        const valid = !!this.quad && isQuadConvex(this.quad);
+        return valid;
+    }
 
     private history: Array<{ quad: Quad; filter: FilterMode; rotation: 0 | 90 | 180 | 270 }> = [];
     @state() private showMagnify = false;
@@ -142,11 +148,11 @@ export class PageEditor extends LitElement {
             this.sourceBitmap = await createImageBitmap(this.blob);
             this.updateBaseCanvasFromSource();
 
-            this.quad = fullQuad(this.baseW, this.baseH);
+            this.quad = this.initialQuad ? [...this.initialQuad] as Quad : fullQuad(this.baseW, this.baseH);
             await this.updateComplete;
             this.drawEdges();
 
-            if (!this.disableAutoDetect) {
+            if (!this.disableAutoDetect && !this.initialQuad) {
                 void this.autoDetectEdges();
             } else {
                 this.queuePreview();
@@ -203,9 +209,12 @@ export class PageEditor extends LitElement {
         const q = this.quad;
         const sx = w / this.baseW;
         const sy = h / this.baseH;
+
+        const isValid = isQuadConvex(q);
         ctx.lineWidth = 3;
-        ctx.strokeStyle = 'rgba(16,185,129,0.95)';
-        ctx.fillStyle = 'rgba(16,185,129,0.95)';
+        ctx.strokeStyle = isValid ? 'rgba(16,185,129,0.95)' : 'rgba(239,68,68,0.95)';
+        ctx.fillStyle = isValid ? 'rgba(16,185,129,0.95)' : 'rgba(239,68,68,0.95)';
+
         ctx.beginPath();
         ctx.moveTo(q[0].x * sx, q[0].y * sy);
         ctx.lineTo(q[1].x * sx, q[1].y * sy);
@@ -220,6 +229,11 @@ export class PageEditor extends LitElement {
             ctx.fill();
             ctx.stroke();
         }
+
+        if (!isValid) {
+            ctx.fillStyle = 'rgba(239,68,68,0.2)';
+            ctx.fill();
+        }
     }
 
     private pickHandle(ev: PointerEvent): number | null {
@@ -231,7 +245,12 @@ export class PageEditor extends LitElement {
         const y = (ev.clientY - rect.top) * scaleY;
         const sx = this.edgesEl.width / this.baseW;
         const sy = this.edgesEl.height / this.baseH;
-        const hitRadius = 70 * Math.max(scaleX, scaleY);
+
+        // WCAG 2.5.5: 44x44px target (radius 22px).
+        // hitRadius is in canvas pixels. We ensure at least 22 CSS pixels of hit area.
+        const minHitRadius = 22 * Math.max(scaleX, scaleY);
+        const hitRadius = Math.max(minHitRadius, 32 * Math.max(scaleX, scaleY));
+
         let best: { i: number; d: number } | null = null;
         for (let i = 0; i < 4; i++) {
             const p = this.quad[i];
@@ -600,7 +619,7 @@ export class PageEditor extends LitElement {
                     <div class="relative w-full flex justify-center bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 min-h-[50vh]">
                         <canvas data-edges
                                 class="max-w-full max-h-[70vh] w-auto h-auto object-contain select-none z-10"
-                                style="touch-action: pan-y;"
+                                style="touch-action: none;"
                                 @pointerdown=${this.onPointerDown}
                                 @pointermove=${this.onPointerMove}
                                 @pointerup=${this.onPointerUp}
@@ -609,6 +628,15 @@ export class PageEditor extends LitElement {
                         <div class=${['absolute top-4 right-4 rounded-full overflow-hidden border-4 border-white shadow-2xl z-20 w-32 h-32 pointer-events-none transition-opacity duration-200', this.showMagnify ? 'opacity-100' : 'opacity-0'].join(' ')}>
                             <canvas data-magnify class="block w-full h-full bg-black"></canvas>
                         </div>
+
+                        ${!this.isQuadValid ? html`
+                            <div data-testid="invalid-warning" class="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 px-4 py-2 bg-red-600/90 text-white text-xs font-bold rounded-full shadow-lg backdrop-blur-sm flex items-center gap-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                                </svg>
+                                Invalid Selection
+                            </div>
+                        ` : null}
                     </div>
                 </div>
 
@@ -686,8 +714,9 @@ export class PageEditor extends LitElement {
                                 ?disabled=${this.busy} @click=${this.onCancel}>
                             Back
                         </button>
-                        <button class="flex-[2] px-6 py-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 active:scale-95 transition-all text-white font-bold tracking-wide shadow-lg shadow-emerald-900/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                                ?disabled=${this.busy} @click=${() => void this.onSave()}>
+                        <button aria-label="Save Scan"
+                                class="flex-[2] px-6 py-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 active:scale-95 transition-all text-white font-bold tracking-wide shadow-lg shadow-emerald-900/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                ?disabled=${this.busy || !this.isQuadValid} @click=${() => void this.onSave()}>
                             ${this.busy
                                     ? html`
                                         <div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> Saving...`
