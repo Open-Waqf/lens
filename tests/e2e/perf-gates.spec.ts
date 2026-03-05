@@ -399,7 +399,7 @@ test('PERF-RESET-001 nuclear reset 500-doc vault <= 3s', async ({page}) => {
     await seedVault(page, {docCount: 500, pagesPerDoc: 1, includeFiles: true});
     await page.reload();
 
-    await page.locator('button[title="Nuclear Reset"]').click();
+    await page.getByRole('button', {name: 'Show Destructive Options'}).click();
     await page.locator('input[placeholder="DELETE"]').fill('DELETE');
 
     const t0 = Date.now();

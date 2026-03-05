@@ -50,7 +50,7 @@ test('primary flow controls are discoverable by role/name', async ({page}) => {
 
     await page.goto('http://localhost:4173/#/settings');
     await expect(page.getByRole('heading', {name: 'Settings'})).toBeVisible();
-    await expect(page.getByRole('button', {name: 'Nuclear Reset'})).toBeVisible();
+    await expect(page.getByRole('button', {name: 'Show Destructive Options'})).toBeVisible();
 
     const settingsUnnamed = await page.evaluate(findUnnamedVisibleButtons);
     expect(settingsUnnamed).toEqual([]);

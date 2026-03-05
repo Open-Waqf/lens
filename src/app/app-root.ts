@@ -20,6 +20,10 @@ import {resetAllStorage} from '../services/reset-storage';
 import {showToast} from "../components/toast-notification";
 import {hasIndexLossRiskFlag, runStorageHealthProbe} from '../services/storage-health';
 import {t} from '../lib/i18n';
+import {
+    clearStorageCleanupPending,
+    hasStorageCleanupPending
+} from '../services/storage-cleanup-flag';
 
 type Route =
     | { name: 'library' }
@@ -56,6 +60,7 @@ export class AppRoot extends LitElement {
     @state() private persist: PersistenceStatus | null = null;
     @state() private resetting = false;
     @state() private hasStorageRisk = false;
+    @state() private hasStorageCleanupPending = false;
     @state() private hidePersistBanner = false;
 
     connectedCallback(): void {
@@ -90,6 +95,7 @@ export class AppRoot extends LitElement {
 
         if (!location.hash) location.hash = '#/library';
         this.hasStorageRisk = hasIndexLossRiskFlag();
+        this.hasStorageCleanupPending = hasStorageCleanupPending();
         this.hidePersistBanner = localStorage.getItem(STORAGE_BANNER_DISMISS_KEY) === '1';
 
         void (async () => {
@@ -105,6 +111,8 @@ export class AppRoot extends LitElement {
             try {
                 const cleaned = await garbageCollectOpfsDocs();
                 if (cleaned > 0) {
+                    clearStorageCleanupPending();
+                    this.hasStorageCleanupPending = false;
                     showToast(t('storage.audit.auto_cleaned', {count: cleaned}), 'info');
                 }
             } catch {
@@ -315,6 +323,20 @@ export class AppRoot extends LitElement {
         `;
     }
 
+    private renderStorageCleanupPendingBanner() {
+        if (!this.hasStorageCleanupPending) return null;
+        return html`
+            <div class="mb-4 p-3 rounded-xl border border-amber-900 bg-amber-950/40 text-amber-100 flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                    <div class="text-sm font-medium">${t('storage.cleanup_pending.title')}</div>
+                    <div class="text-xs text-amber-200/80">${t('storage.cleanup_pending.body')}</div>
+                </div>
+                <a class="shrink-0 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
+                   href="#/settings">${t('storage.cleanup_pending.action')}</a>
+            </div>
+        `;
+    }
+
     render() {
         if (this._isLoading) {
             return html`
@@ -348,6 +370,7 @@ export class AppRoot extends LitElement {
             <div class="min-h-dvh flex flex-col bg-slate-950">
                 <main class="flex-1 w-full max-w-7xl mx-auto px-4 pt-[env(safe-area-inset-top)] pb-28 relative">
                     ${this.renderStorageRiskBanner()}
+                    ${this.renderStorageCleanupPendingBanner()}
                     ${this.renderPersistenceBanner()}
                     ${r.name === 'library' ? html`
                         <library-page></library-page>` : null}

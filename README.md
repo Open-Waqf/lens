@@ -128,6 +128,8 @@ The workflow runs `scripts/android-smoke.ps1` on a self-hosted Windows Android r
 * **Native App (APK):** Binary files are stored in persistent app-internal storage. Metadata still depends on WebView IndexedDB.
 * **Web/PWA:** Managed by the browser. The OS may clear this if storage is low.
 * **Recommendation:** Always export an **Encrypted Backup** to secure your data permanently.
+* **Storage Cleanup Signal:** If file cleanup partially fails (for example due filesystem/browser restrictions), the app
+  surfaces a Storage Cleanup banner that directs you to run **Settings -> Storage Audit**.
 
 * **Vault Format:** `.slbk` header spec is documented in [VAULT_SPEC.md](VAULT_SPEC.md). You can inspect an exported
   backup without decrypting via:

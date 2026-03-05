@@ -8,11 +8,10 @@ test.beforeEach(async ({page}) => {
     await page.goto('http://localhost:4173/#/settings');
 });
 
-test('Vault Integrity: Fast Nuclear Reset shortcut works', async ({page}) => {
-    const shortcut = page.locator('button[title="Nuclear Reset"]');
-    await expect(shortcut).toBeVisible();
-
-    await shortcut.click();
+test('Vault Integrity: Danger Zone reveal works', async ({page}) => {
+    const revealButton = page.getByRole('button', {name: 'Show Destructive Options'});
+    await expect(revealButton).toBeVisible();
+    await revealButton.click();
 
     // Verify Danger Zone reveals
     const dangerZone = page.locator('#DangerZone');

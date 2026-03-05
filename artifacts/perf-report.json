@@ -1,0 +1,26 @@
+{
+  "generatedAt": "2026-03-05T13:00:05.904Z",
+  "environment": {
+    "browser": "Desktop Chrome (Playwright)",
+    "routeBase": "http://localhost:4173"
+  },
+  "thresholdsMs": {
+    "coldStartCameraReady": 2500,
+    "ocrSinglePage": 30000,
+    "search1000Docs": 500,
+    "export100Docs": 60000,
+    "reset500Docs": 3000
+  },
+  "metrics": [
+    {
+      "name": "reset_500_docs",
+      "thresholdMs": 3000,
+      "measuredMs": 439,
+      "p95Ms": 439,
+      "samples": [
+        439
+      ],
+      "pass": true
+    }
+  ]
+}

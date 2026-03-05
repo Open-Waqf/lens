@@ -101,7 +101,7 @@ test('core flow works offline and does not attempt external network', async ({pa
     if (!backupPath) throw new Error('Missing backup file path');
     const backupBuffer = fs.readFileSync(backupPath);
 
-    await page.locator('button[title="Nuclear Reset"]').click();
+    await page.getByRole('button', {name: 'Show Destructive Options'}).click();
     await page.locator('input[placeholder="DELETE"]').fill('DELETE');
     await page.getByRole('button', {name: 'Erase Everything'}).click();
     await page.getByRole('button', {name: 'Wipe Everything', exact: true}).click();

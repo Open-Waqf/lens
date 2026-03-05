@@ -8,6 +8,7 @@ import {getFileStore} from '../../services/filestore';
 import {bytesToBlob} from "../../lib/bytes";
 import {ocrQueue} from '../../services/ocr-queue';
 import {settings} from '../../services/settings';
+import {markStorageCleanupPending} from '../../services/storage-cleanup-flag';
 
 export type DocStripItem = { id: string; thumbBytes: Uint8Array };
 
@@ -229,10 +230,12 @@ export class ScanRepo {
             try {
                 await store.del(oldPage.imagePath);
             } catch {
+                markStorageCleanupPending();
             }
             try {
                 await store.del(oldPage.thumbPath);
             } catch {
+                markStorageCleanupPending();
             }
 
             // Since we cleared words, we should rebuild index immediately to remove old text
@@ -279,10 +282,12 @@ export class ScanRepo {
         try {
             await store.del(page.imagePath);
         } catch {
+            markStorageCleanupPending();
         }
         try {
             await store.del(page.thumbPath);
         } catch {
+            markStorageCleanupPending();
         }
 
         // 3. Rebuild Index (Removes text of deleted page)
@@ -305,16 +310,19 @@ export class ScanRepo {
             try {
                 await store.del(p.imagePath);
             } catch {
+                markStorageCleanupPending();
             }
             try {
                 await store.del(p.thumbPath);
             } catch {
+                markStorageCleanupPending();
             }
         }
         if (doc?.pdfPath) {
             try {
                 await store.del(doc.pdfPath);
             } catch {
+                markStorageCleanupPending();
             }
         }
     }
