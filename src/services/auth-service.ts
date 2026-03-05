@@ -8,10 +8,24 @@ export class AuthService {
     private static _isUnlocked = false;
 
     private static _promptInFlight: Promise<boolean> | null = null;
-    private static _ignoreNextResume = false;
+    private static _resumeBypassTokens: Array<{ expiresAt: number; reason: string }> = [];
+
+    private static readonly DEFAULT_BYPASS_TTL_MS = 30_000;
+
+    static ignoreNextResumeForExternalAction(reason = 'external-action', ttlMs = this.DEFAULT_BYPASS_TTL_MS) {
+        const safeTtl = Number.isFinite(ttlMs) ? Math.max(1000, Math.floor(ttlMs)) : this.DEFAULT_BYPASS_TTL_MS;
+        this._resumeBypassTokens.push({
+            expiresAt: Date.now() + safeTtl,
+            reason,
+        });
+    }
 
     static setIgnoreNextResume(val: boolean) {
-        this._ignoreNextResume = val;
+        if (val) {
+            this.ignoreNextResumeForExternalAction('legacy');
+            return;
+        }
+        this._resumeBypassTokens = [];
     }
 
     static get isPrompting() {
@@ -28,15 +42,13 @@ export class AuthService {
     static lock(): void {
         if (this.isPrompting) return;
 
-        // FIX: If we are ignoring resume (e.g. back from share sheet),
-        // we consume the flag and return WITHOUT locking.
-        if (this._ignoreNextResume) {
-            this._ignoreNextResume = false;
+        // Skip exactly one lock transition for known user-initiated external flows
+        // (share sheet, file picker, export intents). Token auto-expires to avoid leakage.
+        if (this._consumeResumeBypassToken()) {
             return;
         }
 
         this._isUnlocked = false;
-        this._ignoreNextResume = false;
     }
 
     static async promptAuth(): Promise<boolean> {
@@ -164,5 +176,13 @@ export class AuthService {
 
     private static _base64ToBuffer(base64: string): ArrayBuffer {
         return Uint8Array.from(atob(base64), c => c.charCodeAt(0)).buffer;
+    }
+
+    private static _consumeResumeBypassToken(): boolean {
+        const now = Date.now();
+        this._resumeBypassTokens = this._resumeBypassTokens.filter(t => t.expiresAt > now);
+        if (this._resumeBypassTokens.length === 0) return false;
+        this._resumeBypassTokens.shift();
+        return true;
     }
 }

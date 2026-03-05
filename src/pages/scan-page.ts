@@ -536,7 +536,7 @@ export class ScanPage extends LitElement {
 
     private async invokeNativeScanner(): Promise<void> {
         this.busy = true;
-        AuthService.setIgnoreNextResume(true);
+        AuthService.ignoreNextResumeForExternalAction('native-doc-scanner');
         try {
             const limit = this.replacePageId ? 1 : 24;
             const {scannedImages} = await DocumentScanner.scanDocument({pageLimit: limit});
@@ -553,7 +553,6 @@ export class ScanPage extends LitElement {
             }
         } catch (e) {
         } finally {
-            AuthService.setIgnoreNextResume(false);
             this.busy = false;
         }
     }
@@ -636,7 +635,7 @@ export class ScanPage extends LitElement {
         input.multiple = opts.multiple;
         input.value = ''; // Reset value to allow selecting same file twice
 
-        AuthService.setIgnoreNextResume(true);
+        AuthService.ignoreNextResumeForExternalAction('scan-file-picker');
         // We use a one-time promise wrapper for the change event
         return new Promise((resolve) => {
             const handler = async () => {

@@ -86,6 +86,7 @@ export class AppRoot extends LitElement {
         window.addEventListener('hashchange', this._onHash);
         window.addEventListener('error', this._onGlobalError);
         window.addEventListener('unhandledrejection', this._onUnhandled);
+        document.addEventListener('visibilitychange', this._onVisibilityChange);
 
         if (!location.hash) location.hash = '#/library';
         this.hasStorageRisk = hasIndexLossRiskFlag();
@@ -188,6 +189,7 @@ export class AppRoot extends LitElement {
         window.removeEventListener('hashchange', this._onHash);
         window.removeEventListener('error', this._onGlobalError);
         window.removeEventListener('unhandledrejection', this._onUnhandled);
+        document.removeEventListener('visibilitychange', this._onVisibilityChange);
         App.removeAllListeners();
         super.disconnectedCallback();
     }
@@ -217,6 +219,12 @@ export class AppRoot extends LitElement {
             message: (reason as Error)?.message ?? String(reason),
             detail: (reason as Error)?.stack
         };
+    };
+
+    private _onVisibilityChange = () => {
+        if (document.visibilityState === 'hidden') {
+            AuthService.lock();
+        }
     };
 
     private async resetAndReload(): Promise<void> {

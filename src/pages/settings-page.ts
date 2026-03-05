@@ -349,7 +349,7 @@ export class SettingsPage extends LitElement {
                 lastModified: Date.now()
             });
 
-            AuthService.setIgnoreNextResume(true);
+            AuthService.ignoreNextResumeForExternalAction('export-backup-share');
             await shareFile(namedFile, finalName);
 
             const now = Date.now();
@@ -800,7 +800,7 @@ export class SettingsPage extends LitElement {
                         <input class="hidden" type="file"
                                accept="*/*"
                                ?disabled=${this.busy}
-                               @click=${() => AuthService.setIgnoreNextResume(true)}
+                               @click=${() => AuthService.ignoreNextResumeForExternalAction('restore-file-picker')}
                                @change=${(e: Event) => {
                                    const input = e.target as HTMLInputElement;
                                    const f = input.files?.[0];
