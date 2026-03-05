@@ -8,7 +8,7 @@ let currentLang: string | null = null;
 
 const LANG_MANIFEST: Record<string, string> = {
     'eng': '7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2',
-    // 'ara': '...', // Arabic hash to be added when file is provided
+    'ara': 'e3206d3dc87fd50c24a0fb9f01838615911d25168f4e64415244b67d2bb3e729',
 };
 
 export const OCR_LANG_OPTIONS = [
