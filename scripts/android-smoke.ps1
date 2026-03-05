@@ -17,6 +17,7 @@ param(
     [object]$AssertSampleFlow = $false,
     [object]$AssembleApk = $true,
     [object]$InstallApk = $true,
+    [object]$CheckTelemetry = $true,
     [string]$JavaHome = ""
 )
 
@@ -365,6 +366,7 @@ $MaestroContinueOnFailure = To-Bool $MaestroContinueOnFailure
 $AssertSampleFlow = To-Bool $AssertSampleFlow
 $AssembleApk = To-Bool $AssembleApk
 $InstallApk = To-Bool $InstallApk
+$CheckTelemetry = To-Bool $CheckTelemetry
 
 if ($AssembleApk) {
     $resolvedJavaHome = Resolve-Java21Home $JavaHome
@@ -447,6 +449,25 @@ if ($apkCandidates -and $apkCandidates.Count -gt 0) {
     $apkPath = ($apkCandidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
 }
 
+$outDir = Join-Path $resolvedRoot "test-results\android-smoke"
+New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+
+if ($CheckTelemetry) {
+    if (-not (Test-Path $apkPath)) {
+        throw "APK not found at '$apkPath'. Build failed or output path changed. Checked '$apkDir'."
+    }
+    Step "Scanning APK for telemetry/analytics SDK signatures"
+    $telemetryReport = Join-Path $outDir "telemetry-report.txt"
+    $checkCmd = Resolve-Tool "node" "node"
+    if (-not $checkCmd) {
+        throw "node executable not found. Cannot run telemetry scan."
+    }
+    & $checkCmd (Join-Path $resolvedRoot "scripts\check-no-telemetry.mjs") $apkPath --report $telemetryReport
+    if ($LASTEXITCODE -ne 0) {
+        throw "Telemetry SDK scan failed. See $telemetryReport"
+    }
+}
+
 if ($InstallApk) {
     if (-not (Test-Path $apkPath)) {
         throw "APK not found at '$apkPath'. Build failed or output path changed. Checked '$apkDir'."
@@ -464,9 +485,6 @@ if ($InstallApk) {
         throw "APK install failed for '$installSource'. adb output: $installOut"
     }
 }
-
-$outDir = Join-Path $resolvedRoot "test-results\android-smoke"
-New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 
 Step "Checking app installation"
 Ensure-DeviceReady $adb $EmulatorSerial
@@ -763,4 +781,4 @@ if ($RunMaestro) {
     Write-Host "- Maestro summary saved in: $outDir\\maestro-output.txt" -ForegroundColor Green
 }
 Write-Host "- Total script runtime: $(Format-Duration $scriptElapsed)" -ForegroundColor Green
-Write-Host "- Share files from this folder so I can analyze failures/perf: logcat.txt, meminfo.txt, screenshot.png, window-dump.xml, window-flags.txt, window-windows.txt, maestro-output.txt" -ForegroundColor Green
+Write-Host "- Share files from this folder so I can analyze failures/perf: logcat.txt, meminfo.txt, screenshot.png, window-dump.xml, window-flags.txt, window-windows.txt, telemetry-report.txt, maestro-output.txt" -ForegroundColor Green

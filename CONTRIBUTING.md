@@ -65,6 +65,10 @@ Backups use a specific chunked-streaming protocol to allow multi-gigabyte export
   node scripts/network-assert.mjs /tmp/mitm-requests.jsonl --allow-hosts=localhost,127.0.0.1
   kill "$MITM_PID"
   ```
+* Run APK telemetry guard (must be clean):
+  ```bash
+  npm run test:no-telemetry -- android/app/build/outputs/apk/debug/app-debug.apk
+  ```
 
 
 4. **Linting:** Follow the existing style. We prefer **Lit** for UI components and standard **TypeScript** classes for
