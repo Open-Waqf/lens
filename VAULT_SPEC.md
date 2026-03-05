@@ -2,6 +2,14 @@
 
 This document defines the `.slbk` encrypted backup container used by Sahifah Lens.
 
+Public verification utility:
+
+```bash
+node scripts/slbk-verify.mjs ./lens-backup-YYYY-MM-DD.slbk
+```
+
+This command reads plaintext header metadata without password/decryption and is intended for auditors/recovery tooling.
+
 ## Goals
 
 - Auditable plaintext header (without password)

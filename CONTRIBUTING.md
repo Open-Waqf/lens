@@ -43,6 +43,15 @@ Backups use a specific chunked-streaming protocol to allow multi-gigabyte export
   `[Length][IV][Ciphertext]` chunk frame format.
 * **Web Crypto API:** Only use the native `crypto.subtle` API. Avoid third-party JS crypto libraries for core
   encryption.
+* **Test Vector Procedure:** For any crypto/header change, run:
+  ```bash
+  npm run test:unit -- tests/unit/crypto.test.ts tests/unit/restore-error.test.ts
+  ```
+  Then export a backup and verify plaintext header values:
+  ```bash
+  node scripts/slbk-verify.mjs ./lens-backup-YYYY-MM-DD.slbk
+  ```
+  Confirm at minimum: magic `SLBK`, version, PBKDF2 iterations (`>=600000`), salt length (`16`), IV length (`12`).
 
 ### 4. Localization
 

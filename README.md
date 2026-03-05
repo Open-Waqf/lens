@@ -56,6 +56,17 @@ control. Read our [Local Privacy Policy](PRIVACY_POLICY.md).
 
 ---
 
+## 📱 Minimum Platform Targets
+
+* **Android:** API 26+ (8.0), reference performance target tested on mid-range Android class devices (3GB RAM).
+* **Web/PWA:** Chrome 86+, Firefox 111+, Safari 15.2+.
+* **iOS (Capacitor):** iOS 15+ recommended baseline.
+
+These are product support targets for release validation (performance and compatibility gates), not a guarantee of
+identical performance on all hardware tiers.
+
+---
+
 ## 🛠️ Developer Setup
 
 ### 1. Prerequisites

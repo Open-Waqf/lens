@@ -1,6 +1,6 @@
 # Privacy Policy for Sahifah Lens (العدسة)
 
-**Last Updated: February 2026**
+**Last Updated: March 2026**
 
 ## 1. Our Commitment
 
@@ -13,6 +13,9 @@ is simple: **We do not collect, see, or store your data.**
   No image or text data is ever sent to our servers.
 * **On-Device Storage:** Your documents are stored in the **Origin Private File System (OPFS)** and **IndexedDB**. This
   data is physically isolated from other websites.
+* **Web/PWA Storage Risk:** In browser contexts, OPFS/IndexedDB remain browser-managed. Sahifah Lens requests persistent
+  storage where supported, but browser/OS eviction under storage pressure can still occur. The app surfaces in-app
+  backup reminders and storage warnings for this case.
 * **Multitasking Privacy:** On native platforms, the app requires biometric re-authentication immediately when returning
   from the background to prevent document exposure in the OS task switcher.
 
@@ -20,13 +23,17 @@ is simple: **We do not collect, see, or store your data.**
 
 * **No Accounts:** You do not need an email or identity to use Sahifah Lens.
 * **No Tracking:** We do not use analytics, trackers, or cookies. Your usage patterns are your own business.
+* **No Telemetry SDKs:** Production builds do not include analytics/crash-reporting SDKs (for example Firebase
+  Analytics, Mixpanel, Amplitude, Sentry).
 
 ## 4. Third-Party Services
 
 Sahifah Lens uses local-only libraries:
 
-* **Tesseract.js:** For local OCR.
+* **Tesseract.js:** For local OCR using bundled language packs stored with the app.
 * **Capacitor:** To interface with native hardware (Camera, Biometrics, Haptics).
+
+Sahifah Lens does not run a cloud OCR service and does not require account-linked remote APIs for document processing.
 
 ## 5. Security of Data
 
