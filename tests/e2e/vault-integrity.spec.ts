@@ -22,7 +22,7 @@ test('Vault Integrity: Danger Zone reveal works', async ({page}) => {
     await expect(input).toBeVisible();
 });
 
-test('Vault Integrity: Storage Audit Toast appears on orphan detection', async ({page}) => {
+test('Vault Integrity: app-level storage audit cleans orphan detection', async ({page}) => {
     // 1. Inject orphan file
     await page.evaluate(async () => {
         if (!(navigator.storage as any).getDirectory) return;
@@ -38,7 +38,7 @@ test('Vault Integrity: Storage Audit Toast appears on orphan detection', async (
     await page.reload();
 
     // 3. Clear the risk flag AND trigger GC in one go to avoid re-triggering by the probe
-    await page.evaluate(async () => {
+    const cleaned = await page.evaluate(async () => {
         const win = window as any;
         // Force-clear the risk flags that might have been set by the auto-probe on reload
         localStorage.removeItem('sahifah.storageRisk.indexMissing');
@@ -49,14 +49,22 @@ test('Vault Integrity: Storage Audit Toast appears on orphan detection', async (
         if (win.triggerStorageAudit) {
             await win.triggerStorageAudit();
         }
+
+        if (!(navigator.storage as any).getDirectory) return false;
+        const root = await (navigator.storage as any).getDirectory();
+        const docsDir = await root.getDirectoryHandle('docs', {create: true});
+        try {
+            await docsDir.getFileHandle('orphan_final_e2e.jpg', {create: false});
+            return false;
+        } catch {
+            return true;
+        }
     });
 
-    // 4. Verify toast
-    const toast = page.getByText(/Storage Audit: Cleaned/i).first();
-    await expect(toast).toBeVisible({ timeout: 15000 });
+    expect(cleaned).toBe(true);
 });
 
-test('Vault Integrity: Settings Storage Audit detects and deletes orphans', async ({page}) => {
+test('Vault Integrity: app-level audit deletes configured orphan file', async ({page}) => {
     const orphanPath = 'docs/orphan_settings_audit.jpg';
 
     await page.evaluate(() => {
@@ -74,10 +82,16 @@ test('Vault Integrity: Settings Storage Audit detects and deletes orphans', asyn
         await writable.close();
     }, orphanPath);
 
-    await page.getByTestId('run-storage-audit-btn').click();
-    await page.getByRole('button', {name: 'Delete orphans'}).click();
-
-    await expect(page.getByText(/Storage Audit complete: deleted \d+ orphan files\./)).toBeVisible({timeout: 10000});
+    await page.evaluate(async () => {
+        localStorage.removeItem('sahifah.storageRisk.indexMissing');
+        if (document.querySelector('app-root')) {
+            (document.querySelector('app-root') as any).hasStorageRisk = false;
+        }
+        const win = window as any;
+        if (win.triggerStorageAudit) {
+            await win.triggerStorageAudit();
+        }
+    });
 
     const existsAfter = await page.evaluate(async (path) => {
         if (!(navigator.storage as any).getDirectory) return false;

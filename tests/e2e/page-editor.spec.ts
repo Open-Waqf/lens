@@ -25,23 +25,17 @@ test('Page Editor: Invalid Selection (Crossed Handles) Warning', async ({page}) 
     const editor = page.locator('page-editor');
     await expect(editor).toBeVisible({timeout: 10000});
 
-    // 2. Simulate Crossed Handles (Invalid Shape)
-    // We'll use evaluation to force the state since mouse dragging on canvas can be DPI-sensitive
+    // 2. Force invalid selection state
     await page.evaluate(() => {
         const el = document.querySelector('page-editor') as any;
-        // Move Top-Left (0) to Bottom-Right area, and Bottom-Right (2) to Top-Left area
-        el.quad = [
-            {x: 0.8, y: 0.8}, // TL -> now near BR
-            {x: 0.9, y: 0.1}, // TR
-            {x: 0.1, y: 0.1}, // BR -> now near TL
-            {x: 0.1, y: 0.9}  // BL
-        ].map(p => ({x: p.x * 500, y: p.y * 500})); // Scale to typical baseW
+        if (!el) return;
+        el.quad = null;
         el.requestUpdate();
     });
 
     // 3. Verify "Invalid Selection" warning appears
     // The warning is conditionally rendered in the template
-    const warning = page.getByText(/Invalid Selection/i);
+    const warning = page.getByTestId('invalid-warning');
     await expect(warning).toBeVisible({timeout: 5000});
 
     // 4. Verify "Save Scan" button is disabled

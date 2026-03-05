@@ -39,8 +39,20 @@ test('Disaster Recovery Flow: Import -> Encrypt -> Wipe -> Restore', async ({pag
 
     // 3. EDITOR & SAVE
     await expect(page.locator('page-editor')).toBeVisible({timeout: 15000});
-    // Using a broad text search for the Save button inside the editor
-    await page.locator('button').filter({hasText: /Save/i}).click();
+    await page.evaluate(() => {
+        const el = document.querySelector('page-editor') as any;
+        if (!el) return;
+        el.quad = [
+            {x: 10, y: 10},
+            {x: 490, y: 10},
+            {x: 490, y: 490},
+            {x: 10, y: 490}
+        ];
+        el.requestUpdate();
+    });
+    const saveButton = page.getByRole('button', {name: /Save Scan/i});
+    await expect(saveButton).toBeEnabled({timeout: 10000});
+    await saveButton.click();
 
     await expect(page.locator('page-editor')).not.toBeVisible({timeout: 15000});
 

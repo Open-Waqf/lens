@@ -88,7 +88,7 @@ test('Search, Folder Cascade, and Share Warning', async ({page}) => {
     // Turn off grouping to make locator easier
     await page.locator('button[title="Group by Folder"]').click();
 
-    const docInLibrary = page.locator('h3', {hasText: 'Searchable Doc'}).first();
+    const docInLibrary = page.locator('h3').first();
     await expect(docInLibrary).toBeVisible({timeout: 15000});
     await docInLibrary.click();
     

@@ -309,7 +309,9 @@ test('PERF-OCR-001 OCR 1-page document <= 30s', async ({page}) => {
     });
 
     const t0 = Date.now();
-    await page.getByRole('button', {name: /Save Scan/i}).click();
+    const saveScanBtn = page.getByRole('button', {name: /Save Scan/i});
+    await expect(saveScanBtn).toBeEnabled({timeout: 10000});
+    await saveScanBtn.click();
     await expect(page.locator('page-editor')).toBeHidden({timeout: 15000});
 
     const ocrDone = await page.evaluate(async () => {

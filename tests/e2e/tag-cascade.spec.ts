@@ -3,6 +3,24 @@ import {expect, test} from '@playwright/test';
 const MOCK_IMAGE_BASE64 =
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
+async function readDocTags(page: import('@playwright/test').Page, docId: string): Promise<string[]> {
+    return await page.evaluate(async (id) => {
+        const req = indexedDB.open('sahifah-lens');
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+            req.onerror = () => reject(req.error ?? new Error('DB open failed'));
+            req.onsuccess = () => resolve(req.result);
+        });
+        const tags = await new Promise<string[]>((resolve, reject) => {
+            const tx = db.transaction(['docs'], 'readonly');
+            const r = tx.objectStore('docs').get(id);
+            r.onsuccess = () => resolve((r.result?.tags ?? []) as string[]);
+            r.onerror = () => reject(r.error ?? new Error('Doc read failed'));
+        });
+        db.close();
+        return tags;
+    }, docId);
+}
+
 test.beforeEach(async ({page}) => {
     await page.addInitScript(() => {
         window.localStorage.setItem('sahifah.welcomeSeen', '1');
@@ -45,8 +63,13 @@ test('tag delete cascades across document metadata (AC-6.3)', async ({page}) => 
     await page.waitForURL('**/#/doc/**');
 
     const tagsInput = page.locator('input[list="tag-list"]');
-    await tagsInput.fill('amanah,qa');
-    await tagsInput.dispatchEvent('change');
+    await tagsInput.evaluate((el) => {
+        const input = el as HTMLInputElement;
+        input.value = 'amanah,qa';
+        input.dispatchEvent(new Event('change', {bubbles: true, composed: true}));
+    });
+    const docId = page.url().split('/doc/')[1];
+    await expect.poll(async () => await readDocTags(page, docId)).toContain('amanah');
     await page.reload();
     await page.waitForURL('**/#/doc/**');
     await expect(page.locator('input[list="tag-list"]')).toHaveValue(/amanah/);

@@ -32,6 +32,12 @@ test.beforeEach(async ({context, page}) => {
         (window as any).__offlineExternalAttempts = 0;
         (window as any).Capacitor = {isNativePlatform: () => false, platform: 'web'};
         (window as any).navigator.mediaDevices.getUserMedia = async () => new MediaStream();
+        // Force deterministic download fallback instead of Web Share behavior.
+        try {
+            Object.defineProperty(navigator, 'share', {value: undefined, configurable: true});
+            Object.defineProperty(navigator, 'canShare', {value: undefined, configurable: true});
+        } catch {
+        }
     });
 
     await page.exposeFunction('recordExternalAttempt', () => {
