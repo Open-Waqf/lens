@@ -12,7 +12,7 @@
     "test:unit:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:security": "playwright test tests/e2e/privacy-network.spec.ts --project=\"Desktop Chrome\" --reporter=list",
+    "test:security": "playwright test tests/e2e/privacy-network.spec.ts tests/e2e/offline-core.spec.ts --project=\"Desktop Chrome\" --reporter=list",
     "test:no-telemetry": "node scripts/check-no-telemetry.mjs",
     "test:full": "npm run build && npm run test:unit && npm run test:e2e",
     "vault:verify": "node scripts/slbk-verify.mjs",
