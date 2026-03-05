@@ -4,30 +4,28 @@ console.warn('%c[Worker] 🚀 WORKER STARTED', 'color: lime; background: black; 
 
 type Req = { type: 'detect'; width: number; height: number; rgba: Uint8ClampedArray };
 
+let frameCount = 0;
+
 self.onmessage = (ev: MessageEvent<Req>) => {
     const msg = ev.data;
+    frameCount++;
 
-    // 1. Debug log: Did we get a message?
-    if (msg.type === 'detect') {
-        console.log(`[Worker] 📥 Received frame ${msg.width}x${msg.height}`);
-    } else {
+    if (msg.type !== 'detect') {
         console.warn('[Worker] ❓ Unknown message type:', msg);
         return;
     }
 
     const t0 = performance.now();
-
-    // Run detection
     const r = detectQuadFromRgba(msg.rgba, msg.width, msg.height);
-
     const tMs = performance.now() - t0;
 
-    // 2. Debug log: Did we finish?
-    if (r.confidence > 0) {
-        console.log(`[Worker] ✅ Found quad (Conf: ${r.confidence.toFixed(2)}) in ${tMs.toFixed(0)}ms`);
-    } else {
-        // Even if we found nothing, say so!
-        console.log(`[Worker] ❌ No quad found (${tMs.toFixed(0)}ms)`);
+    // Log every 30 frames to keep signal high without spamming
+    if (frameCount % 30 === 0) {
+        if (r.confidence > 0) {
+            console.log(`[Worker] ✅ Found quad (Conf: ${r.confidence.toFixed(2)}) in ${tMs.toFixed(0)}ms`);
+        } else {
+            console.log(`[Worker] ❌ No quad found (${tMs.toFixed(0)}ms)`);
+        }
     }
 
     const out = {

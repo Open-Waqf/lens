@@ -18,6 +18,7 @@ import {garbageCollectOpfsDocs} from '../services/opfs-gc';
 import {AuthService} from '../services/auth-service';
 import {resetAllStorage} from '../services/reset-storage';
 import {showToast} from "../components/toast-notification";
+import {hasIndexLossRiskFlag, runStorageHealthProbe} from '../services/storage-health';
 
 type Route =
     | { name: 'library' }
@@ -52,6 +53,7 @@ export class AppRoot extends LitElement {
     @state() private fatal: Fatal | null = null;
     @state() private persist: PersistenceStatus | null = null;
     @state() private resetting = false;
+    @state() private hasStorageRisk = false;
 
     connectedCallback(): void {
         super.connectedCallback();
@@ -83,12 +85,9 @@ export class AppRoot extends LitElement {
         window.addEventListener('unhandledrejection', this._onUnhandled);
 
         if (!location.hash) location.hash = '#/library';
+        this.hasStorageRisk = hasIndexLossRiskFlag();
 
         void (async () => {
-            if (Capacitor.isNativePlatform()) {
-                this.persist = {supported: true, persisted: true, grantedThisCall: false};
-                return;
-            }
             try {
                 this.persist = await getPersistenceStatus();
             } catch {
@@ -97,6 +96,7 @@ export class AppRoot extends LitElement {
         })();
 
         const runGC = async () => {
+            if (this.hasStorageRisk || hasIndexLossRiskFlag()) return;
             try {
                 await garbageCollectOpfsDocs();
             } catch {
@@ -114,13 +114,23 @@ export class AppRoot extends LitElement {
             }
         };
 
+        const runHealthProbe = async () => {
+            try {
+                const report = await runStorageHealthProbe();
+                this.hasStorageRisk = report.possibleIndexLoss;
+            } catch {
+            }
+        };
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const ric = (window as any).requestIdleCallback;
         if (typeof ric === 'function') {
-            ric(() => void runGC(), {timeout: 2500});
+            ric(() => void runHealthProbe(), {timeout: 2000});
+            ric(() => void runGC(), {timeout: 4500});
             ric(() => void runWarmup(), {timeout: 10000});
         } else {
-            setTimeout(() => void runGC(), 800);
+            setTimeout(() => void runHealthProbe(), 800);
+            setTimeout(() => void runGC(), 1200);
             setTimeout(() => void runWarmup(), 3000);
         }
     }
@@ -261,6 +271,20 @@ export class AppRoot extends LitElement {
         `;
     }
 
+    private renderStorageRiskBanner() {
+        if (!this.hasStorageRisk) return null;
+        return html`
+            <div class="mb-4 p-3 rounded-xl border border-red-900 bg-red-950/40 text-red-100 flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                    <div class="text-sm font-medium">Possible metadata loss detected</div>
+                    <div class="text-xs text-red-200/80">Files exist but index is missing. Open Settings to recover.</div>
+                </div>
+                <a class="shrink-0 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
+                   href="#/settings?repair=1">Recover</a>
+            </div>
+        `;
+    }
+
     render() {
         if (this._isLoading) {
             return html`
@@ -293,6 +317,7 @@ export class AppRoot extends LitElement {
         return html`
             <div class="min-h-dvh flex flex-col bg-slate-950">
                 <main class="flex-1 w-full max-w-7xl mx-auto px-4 pt-[env(safe-area-inset-top)] pb-28 relative">
+                    ${this.renderStorageRiskBanner()}
                     ${this.renderPersistenceBanner()}
                     ${r.name === 'library' ? html`
                         <library-page></library-page>` : null}

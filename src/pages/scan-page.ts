@@ -25,6 +25,7 @@ import {ScanRepo} from './scan/scan-repo';
 import {ocrQueue} from '../services/ocr-queue';
 import {AuthService} from "../services/auth-service";
 import {App} from "@capacitor/app";
+import {t} from '../lib/i18n';
 
 const APPEND_DOC_KEY = 'sahifah.appendToDocId';
 const AUTO_KEY = 'sahifah.autoCapture';
@@ -129,6 +130,17 @@ export class ScanPage extends LitElement {
                     location.hash = '#/library';
                 }
             });
+
+            // PAUSE CV ON BACKGROUND
+            App.addListener('appStateChange', (state) => {
+                if (!state.isActive) {
+                    console.log('[ScanPage] App backgrounded, pausing detector');
+                    this.stopDetector();
+                } else if (this.session.stage === 'camera') {
+                    console.log('[ScanPage] App resumed, restarting detector');
+                    this.startDetector();
+                }
+            });
         }
     }
 
@@ -137,9 +149,9 @@ export class ScanPage extends LitElement {
 
         // Optional: Confirm before deleting to prevent accidents
         const ok = await ConfirmModal.ask({
-            title: 'Delete Scan?',
-            description: 'This page will be discarded.',
-            confirm: 'Delete',
+            title: t('scan.delete_scan'),
+            description: t('scan.delete_body'),
+            confirm: t('common.delete'),
             destructive: true
         });
         if (!ok) return;
@@ -241,8 +253,8 @@ export class ScanPage extends LitElement {
 
         if (appendId) {
             const doc = await this.repo.getDoc(appendId);
-            this.targetDocTitle = doc?.title ?? 'Document';
-            this.docTitle = doc?.title ?? 'Document';
+            this.targetDocTitle = doc?.title ?? t('common.document');
+            this.docTitle = doc?.title ?? t('common.document');
             this.session.markCommitted();
             await this.refreshDocInfo();
         } else {
@@ -284,9 +296,9 @@ export class ScanPage extends LitElement {
 
         if (decision.kind === 'confirm-discard') {
             const ok = await ConfirmModal.ask({
-                title: 'Discard Scan?',
+                title: t('scan.discard_scan'),
                 description: decision.message,
-                confirm: 'Discard',
+                confirm: t('common.discard'),
                 destructive: true
             });
             if (!ok) return;
@@ -365,9 +377,9 @@ export class ScanPage extends LitElement {
         if (this.importReviewQueue.length > 0) {
             const remaining = this.importReviewQueue.length;
             const ok = await ConfirmModal.ask({
-                title: 'Stop Reviewing?',
-                description: `You have ${remaining} unedited page(s) remaining. They will be saved as is.`,
-                confirm: 'Stop Reviewing',
+                title: t('scan.stop_review'),
+                description: t('scan.stop_review_body', {count: remaining}),
+                confirm: t('common.stop'),
                 destructive: true
             });
             if (!ok) return;
@@ -375,9 +387,9 @@ export class ScanPage extends LitElement {
         } else if (this.captured) {
             const isEdit = !!this.editingPageId;
             const ok = await ConfirmModal.ask({
-                title: isEdit ? 'Discard Edits?' : 'Discard Capture?',
-                description: 'This action cannot be undone.',
-                confirm: 'Discard',
+                title: isEdit ? t('scan.discard_edits') : t('scan.discard_capture'),
+                description: t('scan.discard_body'),
+                confirm: t('common.discard'),
                 destructive: true
             });
             if (!ok) return;
@@ -457,7 +469,7 @@ export class ScanPage extends LitElement {
         const now = new Date();
         const dateStr = now.toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
         const timeStr = now.toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'});
-        const title = `Scan ${dateStr} ${timeStr}`;
+        const title = `${t('scan.title')} ${dateStr} ${timeStr}`;
 
         const doc = await this.repo.createDoc(title);
         this.docTitle = doc.title;
@@ -589,7 +601,7 @@ export class ScanPage extends LitElement {
             }
 
             const blob: Blob = await new Promise((resolve, reject) =>
-                canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Capture failed'))), 'image/jpeg', 0.95),
+                canvas.toBlob((b) => (b ? resolve(b) : reject(new Error(t('scan.capture_failed')))), 'image/jpeg', 0.95),
             );
 
             await this.openNewBlobInEditor(blob, detectedQuadForEditor);
@@ -607,7 +619,7 @@ export class ScanPage extends LitElement {
         const input = this.renderRoot.querySelector('#import-input') as HTMLInputElement;
 
         if (!input) {
-            this.error = "Import unavailable";
+            this.error = t('scan.import_unavailable');
             return;
         }
 
@@ -697,11 +709,11 @@ export class ScanPage extends LitElement {
             if (det.quad && det.confidence >= 0.35) {
                 const q = det.quad as Quad;
                 this.smoothedQuad = this.smoothedQuad ? lerpQuad(this.smoothedQuad, q, 0.35) : q;
-                this.guidance = det.confidence < 0.65 ? 'Hold steady' : null;
+                this.guidance = det.confidence < 0.65 ? t('scan.guide_hold_steady') : null;
             } else {
                 this.smoothedQuad = null;
                 this.stableSince = 0;
-                this.guidance = det.confidence > 0.1 ? 'Move closer' : null;
+                this.guidance = det.confidence > 0.1 ? t('scan.guide_move_closer') : null;
             }
             this.maybeAutoCapture();
         };
@@ -755,7 +767,8 @@ export class ScanPage extends LitElement {
         this.offCtx.drawImage(v, 0, 0, w, h);
         const img = this.offCtx.getImageData(0, 0, w, h);
         this.detecting = true;
-        this.worker.postMessage({type: 'detect', width: img.width, height: img.height, rgba: img.data});
+        // Optimization: Zero-Copy Transferable
+        this.worker.postMessage({type: 'detect', width: img.width, height: img.height, rgba: img.data}, [img.data.buffer]);
     }
 
     private quadStabilityScore(q: Quad, det: DetectedQuad): number {
@@ -820,30 +833,30 @@ export class ScanPage extends LitElement {
             return html`
                 <div class="p-3 rounded-xl border border-amber-900 bg-amber-950 flex items-center justify-between gap-3">
                     <div class="min-w-0">
-                        <div class="text-sm font-bold text-amber-100">Retake Mode</div>
-                        <div class="text-xs text-amber-200/70">Capture will replace the selected page</div>
+                        <div class="text-sm font-bold text-amber-100">${t('scan.retake_mode')}</div>
+                        <div class="text-xs text-amber-200/70">${t('scan.retake_body')}</div>
                     </div>
                     <button class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
                             @click=${() => void this.exitScan()}>
-                        Cancel
+                        ${t('common.cancel')}
                     </button>
                 </div>
             `;
         }
 
         if (this.session.isAppend) {
-            const title = this.docTitle ?? this.targetDocTitle ?? 'Document';
+            const title = this.docTitle ?? this.targetDocTitle ?? t('common.document');
             return html`
                 <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 flex items-center justify-between gap-3">
                     <div class="min-w-0">
-                        <div class="text-xs text-slate-400">Adding pages to</div>
+                        <div class="text-xs text-slate-400">${t('scan.adding_to')}</div>
                         <div class="text-sm text-slate-100 truncate">${title}</div>
                         <div class="text-xs text-slate-500">${this.session.pageCount} page(s)</div>
                     </div>
                     <div class="flex gap-2">
                         <button class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
                                 ?disabled=${this.session.pageCount === 0} @click=${() => this.openDocument()}>
-                            Open
+                            ${t('common.open')}
                         </button>
                         <button class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
                                 @click=${() => void this.exitScan()}>
@@ -854,18 +867,18 @@ export class ScanPage extends LitElement {
             `;
         }
         if (!this.session.hasPages) return null;
-        const title = this.docTitle ?? 'Document';
+        const title = this.docTitle ?? t('common.document');
         return html`
             <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 flex items-center justify-between gap-3">
                 <div class="min-w-0">
-                    <div class="text-xs text-slate-400">Building document</div>
+                    <div class="text-xs text-slate-400">${t('scan.building_doc')}</div>
                     <div class="text-sm text-slate-100 truncate">${title}</div>
                     <div class="text-xs text-slate-500">${this.session.pageCount} page(s)</div>
                 </div>
                 <div class="flex gap-2">
                     <button class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
                             ?disabled=${this.session.pageCount === 0} @click=${() => this.openDocument()}>
-                        Open
+                        ${t('common.open')}
                     </button>
                     <button class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
                             @click=${() => void this.exitScan()}>
@@ -898,7 +911,7 @@ export class ScanPage extends LitElement {
                             </div>
 
                             ${it.isNew ? html`
-                                <span class="absolute top-1 left-1 text-[8px] px-1.5 py-0.5 rounded bg-emerald-600 text-white font-bold shadow-sm">NEW</span>
+                                <span class="absolute top-1 left-1 text-[8px] px-1.5 py-0.5 rounded bg-emerald-600 text-white font-bold shadow-sm">${t('common.new')}</span>
                             ` : null}
                         </button>
 
@@ -927,9 +940,9 @@ export class ScanPage extends LitElement {
                                   d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path>
                         </svg>
                     </div>
-                    <h1 class="text-3xl font-bold text-slate-100">Welcome to Lens</h1>
+                    <h1 class="text-3xl font-bold text-slate-100">${t('scan.welcome_title')}</h1>
                     <p class="text-slate-400 max-w-xs mx-auto text-lg">
-                        Private, offline document scanning.
+                        ${t('scan.welcome_body')}
                     </p>
                 </div>
 
@@ -940,12 +953,12 @@ export class ScanPage extends LitElement {
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                   d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
                         </svg>
-                        <span>Your documents are stored <strong>only on this device</strong>. No clouds, no accounts.</span>
+                        <span .innerHTML=${t('scan.welcome_security')}></span>
                     </div>
 
                     <button class="w-full py-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-lg shadow-lg shadow-emerald-900/20"
                             @click=${() => this.finishWelcome()}>
-                        Start Scanning
+                        ${t('scan.start_scanning')}
                     </button>
                 </div>
             </div>
@@ -963,22 +976,22 @@ export class ScanPage extends LitElement {
                 </div>
 
                 <div class="space-y-2">
-                    <h2 class="text-2xl font-bold text-slate-100">Camera Access Blocked</h2>
+                    <h2 class="text-2xl font-bold text-slate-100">${t('scan.permission_title')}</h2>
                     <p class="text-slate-400 text-sm leading-relaxed">
-                        To scan documents, enable camera access in Settings. You can still import files.
+                        ${t('scan.permission_body')}
                     </p>
                 </div>
 
                 <div class="flex flex-col gap-3 w-full max-w-xs">
                     <button class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold transition-all"
                             @click=${() => this.beginCameraFromGesture(true)}>
-                        Try Again
+                        ${t('scan.try_again')}
                     </button>
 
                     <button class="w-full py-3 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded-xl font-bold transition-all"
                             ?disabled=${this.busy}
                             @click=${() => this.pickFiles({multiple: !this.replacePageId})}>
-                        Import from Files
+                        ${t('scan.import_files')}
                     </button>
 
                     <button class="w-full py-3 text-slate-500 hover:text-slate-300 font-medium transition-all"
@@ -986,7 +999,7 @@ export class ScanPage extends LitElement {
                                 this.showPermissionError = false;
                                 this.session.setStage('idle');
                             }}>
-                        Go Back
+                        ${t('scan.go_back')}
                     </button>
                 </div>
             </div>
@@ -1009,11 +1022,11 @@ export class ScanPage extends LitElement {
             <div class="space-y-4 pt-6">
                 <div class="flex items-center justify-between px-1">
                     <div class="text-2xl font-bold tracking-tight">
-                        ${this.replacePageId ? 'Retake' : (this.session.isAppend ? 'Add pages' : 'Scan')}
+                        ${this.replacePageId ? t('scan.retake') : (this.session.isAppend ? t('scan.add_pages') : t('scan.title'))}
                     </div>
                     ${!this.caps.isCapacitor ? html`
                         <div class="flex items-center gap-3 bg-slate-900/80 px-4 py-1.5 rounded-full border border-slate-800">
-                            <span class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Auto Capture</span>
+                            <span class="text-[10px] font-bold uppercase tracking-widest text-slate-500">${t('scan.auto_capture')}</span>
                             <button class="relative h-5 w-10 rounded-full transition-colors ${this.autoCapture ? 'bg-emerald-600' : 'bg-slate-700'}"
                                     @click=${() => {
                                         this.autoCapture = !this.autoCapture;
@@ -1022,7 +1035,7 @@ export class ScanPage extends LitElement {
                                         } catch {
                                         }
                                     }}>
-                                <span class="sr-only">Auto Capture</span>
+                                <span class="sr-only">${t('scan.auto_capture')}</span>
                                 <span class="absolute top-0.5 left-0.5 ${this.autoCapture ? 'translate-x-5' : 'translate-x-0'} inline-block h-4 w-4 bg-white rounded-full transition duration-200"></span>
                             </button>
                         </div>
@@ -1046,12 +1059,12 @@ export class ScanPage extends LitElement {
                         <div class="w-full space-y-3">
                             <button class="w-full py-5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 rounded-[1.5rem] font-bold text-xl shadow-lg shadow-emerald-900/20 transition-all active:scale-95"
                                     @click=${() => this.beginCameraFromGesture(true)}>
-                                ${this.caps.isCapacitor ? 'Start Scanner' : 'Open Camera'}
+                                ${this.caps.isCapacitor ? t('scan.start_scanner') : t('scan.open_camera')}
                             </button>
                             <button class="w-full py-4 text-slate-400 font-semibold hover:text-white transition-colors"
                                     ?disabled=${this.busy}
                                     @click=${() => this.pickFiles({multiple: !this.replacePageId})}>
-                                Import Documents
+                                ${t('scan.import_docs')}
                             </button>
                         </div>
                     </div>
@@ -1127,10 +1140,12 @@ export class ScanPage extends LitElement {
                     <div class="space-y-3 pb-24">
                         ${this.importReviewTotal > 0 ? html`
                             <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 text-slate-200 flex items-center justify-between gap-3">
-                                <div class="text-sm">Reviewing imported pages <span
-                                        class="text-slate-400">${this.importReviewIndex}
-                                    /${this.importReviewTotal}</span></div>
-                                <div class="text-xs text-slate-400">Save to continue</div>
+                                <div class="text-sm">${t('scan.review_title')} <span
+                                        class="text-slate-400">${t('scan.review_pages', {
+                                            current: this.importReviewIndex,
+                                            total: this.importReviewTotal
+                                        })}</span></div>
+                                <div class="text-xs text-slate-400">${t('scan.review_save_continue')}</div>
                             </div>` : null}
                         ${keyed(this.editorKey, html`
                             <page-editor
