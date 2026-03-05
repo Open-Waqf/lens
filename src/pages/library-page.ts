@@ -383,18 +383,55 @@ export class LibraryPage extends LitElement {
                     All
                 </button>
                 ${this.allTags.map(tag => html`
-                    <button
-                            class="px-3 py-1 rounded-full text-xs font-medium transition-colors ${this.selectedTag === tag ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'}"
-                            @click=${() => {
-                                this.selectedTag = tag;
-                                this.visibleLimit = 20;
-                                this.applyFilters();
-                            }}>
-                        ${tag}
-                    </button>
+                    <div class="flex items-center rounded-full bg-slate-900 border border-slate-800 overflow-hidden">
+                        <button
+                                class="px-3 py-1 text-xs font-medium transition-colors ${this.selectedTag === tag ? 'bg-emerald-600 text-white' : 'text-slate-300 hover:bg-slate-800'}"
+                                @click=${() => {
+                                    this.selectedTag = tag;
+                                    this.visibleLimit = 20;
+                                    this.applyFilters();
+                                }}>
+                            ${tag}
+                        </button>
+                        <button
+                                class="px-2 py-1 text-slate-500 hover:text-red-300 hover:bg-red-950/30 transition-colors"
+                                aria-label=${t('library.delete_tag_aria', {tag})}
+                                title=${t('library.delete_tag_aria', {tag})}
+                                @click=${(e: Event) => {
+                                    e.stopPropagation();
+                                    void this.onDeleteTag(tag);
+                                }}>
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    </div>
                 `)}
             </div>
         `;
+    }
+
+    private async onDeleteTag(tag: string) {
+        const ok = await ConfirmModal.ask({
+            title: t('library.delete_tag_title', {tag}),
+            description: t('library.delete_tag_body', {tag}),
+            confirm: t('library.delete_tag_confirm'),
+            destructive: true
+        });
+        if (!ok) return;
+
+        await db.transaction('rw', db.docs, async () => {
+            const docsWithTag = await db.docs.where('tags').equals(tag).toArray();
+            for (const doc of docsWithTag) {
+                const nextTags = doc.tags.filter(tg => tg !== tag);
+                await db.docs.update(doc.id, {tags: nextTags, updatedAt: Date.now()});
+            }
+            showToast(t('library.tag_removed', {tag, count: docsWithTag.length}), 'info');
+        });
+
+        if (this.selectedTag === tag) this.selectedTag = null;
+        await this.loadDocs();
     }
 
     private renderSkeleton() {
