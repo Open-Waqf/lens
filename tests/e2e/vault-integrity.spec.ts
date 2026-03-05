@@ -53,6 +53,43 @@ test('Vault Integrity: Storage Audit Toast appears on orphan detection', async (
     });
 
     // 4. Verify toast
-    const toast = page.getByText(/Storage Audit: Cleaned/i);
+    const toast = page.getByText(/Storage Audit: Cleaned/i).first();
     await expect(toast).toBeVisible({ timeout: 15000 });
+});
+
+test('Vault Integrity: Settings Storage Audit detects and deletes orphans', async ({page}) => {
+    const orphanPath = 'docs/orphan_settings_audit.jpg';
+
+    await page.evaluate(() => {
+        localStorage.setItem('sahifah.storageRisk.indexMissing', '1');
+    });
+    await page.reload();
+
+    await page.evaluate(async (path) => {
+        if (!(navigator.storage as any).getDirectory) return;
+        const root = await (navigator.storage as any).getDirectory();
+        const docsDir = await root.getDirectoryHandle('docs', {create: true});
+        const fileHandle = await docsDir.getFileHandle(path.replace('docs/', ''), {create: true});
+        const writable = await (fileHandle as any).createWritable();
+        await writable.write(new Uint8Array([9, 8, 7, 6]));
+        await writable.close();
+    }, orphanPath);
+
+    await page.getByTestId('run-storage-audit-btn').click();
+    await page.getByRole('button', {name: 'Delete orphans'}).click();
+
+    await expect(page.getByText(/Storage Audit complete: deleted \d+ orphan files\./)).toBeVisible({timeout: 10000});
+
+    const existsAfter = await page.evaluate(async (path) => {
+        if (!(navigator.storage as any).getDirectory) return false;
+        const root = await (navigator.storage as any).getDirectory();
+        const docsDir = await root.getDirectoryHandle('docs', {create: true});
+        try {
+            await docsDir.getFileHandle(path.replace('docs/', ''), {create: false});
+            return true;
+        } catch {
+            return false;
+        }
+    }, orphanPath);
+    expect(existsAfter).toBe(false);
 });

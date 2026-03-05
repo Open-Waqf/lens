@@ -19,6 +19,7 @@ import {OPFSStreamWriter} from '../services/filestore/opfs-store';
 import {t} from '../lib/i18n';
 import {toUserErrorMessage} from '../lib/user-error';
 import {mapRestoreError} from '../lib/restore-error';
+import {deleteOrphanStorageFiles, findOrphanStorageFiles} from '../services/storage-audit';
 
 import {repairLibrary} from '../services/repair';
 import {CapacitorFileStore} from "../services/filestore/capacitor-store";
@@ -60,6 +61,9 @@ export class SettingsPage extends LitElement {
 
     @state() private enableOcr = true;
     @state() private hasIndexRisk = false;
+    @state() private storageAuditBusy = false;
+    @state() private storageAuditFound = 0;
+    @state() private storageAuditDeleted = 0;
 
     async connectedCallback() {
         super.connectedCallback();
@@ -436,6 +440,38 @@ export class SettingsPage extends LitElement {
         this.msg = t('settings.restore_complete_processed', {count: this.backupProgress});
     }
 
+    private async runStorageAudit() {
+        this.storageAuditBusy = true;
+        this.err = null;
+        this.msg = null;
+        try {
+            const orphans = await findOrphanStorageFiles();
+            this.storageAuditFound = orphans.length;
+            this.storageAuditDeleted = 0;
+            if (orphans.length === 0) {
+                this.msg = t('settings.storage_audit_no_orphans');
+                return;
+            }
+
+            const ok = await ConfirmModal.ask({
+                title: t('settings.storage_audit_title'),
+                description: t('settings.storage_audit_found_body', {count: orphans.length}),
+                confirm: t('settings.storage_audit_delete'),
+                destructive: true
+            });
+            if (!ok) return;
+
+            const deleted = await deleteOrphanStorageFiles(orphans);
+            this.storageAuditDeleted = deleted;
+            this.msg = t('settings.storage_audit_deleted', {count: deleted});
+            await this.loadStorageStats();
+        } catch (e) {
+            this.err = t('settings.storage_audit_failed', {error: toUserErrorMessage(e)});
+        } finally {
+            this.storageAuditBusy = false;
+        }
+    }
+
     private async importBackup(file: File): Promise<void> {
         this.busy = true;
         this.msg = null;
@@ -807,6 +843,33 @@ export class SettingsPage extends LitElement {
                             </div>
                         </button>
                     ` : null}
+
+                    <button class="flex items-center justify-between p-4 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors"
+                            data-testid="run-storage-audit-btn"
+                            ?disabled=${this.busy || this.storageAuditBusy}
+                            @click=${() => this.runStorageAudit()}>
+                        <div class="flex items-center gap-3">
+                            <div class="p-2 rounded-lg bg-amber-900/30 text-amber-300">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                                </svg>
+                            </div>
+                            <div class="text-left">
+                                <div class="text-slate-200 font-medium">${t('settings.storage_audit_title')}</div>
+                                <div class="text-xs text-slate-500">${t('settings.storage_audit_desc')}</div>
+                            </div>
+                        </div>
+                        <div class="text-xs text-slate-400" data-testid="storage-audit-summary">
+                            ${this.storageAuditBusy
+                                    ? t('settings.storage_audit_running')
+                                    : this.storageAuditDeleted > 0
+                                            ? t('settings.storage_audit_deleted_short', {count: this.storageAuditDeleted})
+                                            : this.storageAuditFound > 0
+                                                    ? t('settings.storage_audit_found_short', {count: this.storageAuditFound})
+                                                    : t('settings.storage_audit_idle')}
+                        </div>
+                    </button>
 
                 </div>
             </section>
