@@ -93,6 +93,14 @@ npx cap open ios
 
 ```
 
+### 5. Performance Gates (Release)
+
+```bash
+npm run test:perf
+```
+
+Performance gate details and PRD mapping are documented in [docs/perf.md](docs/perf.md).
+
 ---
 
 ## ⚠️ Disclaimers

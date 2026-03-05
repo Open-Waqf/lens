@@ -69,6 +69,12 @@ Backups use a specific chunked-streaming protocol to allow multi-gigabyte export
   ```bash
   npm run test:no-telemetry -- android/app/build/outputs/apk/debug/app-debug.apk
   ```
+* Run performance gates before merging performance-sensitive changes:
+  ```bash
+  npm run test:perf
+  ```
+  Artifacts are written to `artifacts/perf-report.json` and `artifacts/perf-summary.md`.
+  Full gate definitions: `docs/perf.md`.
 
 
 4. **Linting:** Follow the existing style. We prefer **Lit** for UI components and standard **TypeScript** classes for
