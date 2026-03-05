@@ -20,7 +20,7 @@ import type {PageEditorSaveDetail} from '../components/page-editor';
 import {ConfirmModal} from '../components/confirm-modal';
 
 import {CameraManager} from '../lib/camera/camera-manager';
-import {ScanSessionState} from './scan/scan-session-state';
+import {ScanSessionState, MAX_PAGES_PER_BATCH} from './scan/scan-session-state';
 import {ScanRepo} from './scan/scan-repo';
 import {ocrQueue} from '../services/ocr-queue';
 import {AuthService} from "../services/auth-service";
@@ -558,6 +558,10 @@ export class ScanPage extends LitElement {
 
     private async capturePhoto(): Promise<void> {
         this.error = null;
+        if (!this.session.canAddPage && !this.replacePageId) {
+            this.error = t('scan.max_pages_reached', {max: MAX_PAGES_PER_BATCH});
+            return;
+        }
         if (this.captureInFlight) return;
 
         this.flashActive = true;
@@ -665,13 +669,25 @@ export class ScanPage extends LitElement {
                 return;
             }
 
+            const currentCount = this.session.pageCount;
+            const remaining = MAX_PAGES_PER_BATCH - currentCount;
+            if (remaining <= 0) {
+                throw new Error(t('scan.max_pages_reached', {max: MAX_PAGES_PER_BATCH}));
+            }
+
+            const filesToImport = files.slice(0, remaining);
             const importedPageIds: string[] = [];
-            for (const file of files) {
+            for (const file of filesToImport) {
                 const {master, thumb} = await processPhoto({blob: file, rotation: 0, filter: 'original'} as any);
                 const pageId = await this.repo.addNewPage(docId, master, thumb);
                 importedPageIds.push(pageId);
                 this.newPageIds.add(pageId);
             }
+
+            if (files.length > remaining) {
+                this.error = t('scan.max_pages_reached', {max: MAX_PAGES_PER_BATCH});
+            }
+
             await this.refreshDocInfo();
             if (importedPageIds.length > 0) {
                 this.importReviewQueue = importedPageIds.slice();

@@ -1,92 +1,109 @@
 import {createWorker, PSM, type Worker} from 'tesseract.js';
 import type {OcrWord} from '../domain/types';
+import {sha256Hex} from './hash';
 
-let workerPromise: Promise<Worker> | null = null;
+let currentWorker: Worker | null = null;
+let currentLang: string | null = null;
 
-async function getWorker(): Promise<Worker> {
-    if (!workerPromise) {
-        workerPromise = (async () => {
-            // 1. Get the base URL (handles localhost and production subpaths automatically)
-            // In Vite, files in 'public/tesseract' are available at '/tesseract'
-            const base = import.meta.env.BASE_URL || '/';
-            const tessPath = `${base}tesseract/`.replace('//', '/'); // Ensure no double slashes
+const LANG_MANIFEST: Record<string, string> = {
+    'eng': '7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2',
+    // 'ara': '...', // Arabic hash to be added when file is provided
+};
 
-            console.log(`OCR: Loading Tesseract assets from ${tessPath}`);
-
-            const w = await createWorker('eng', 1, {
-                // 2. Point directly to where the browser serves the file
-                workerPath: `${tessPath}worker.min.js`,
-                corePath: `${tessPath}tesseract-core.wasm.js`,
-                langPath: `${tessPath}`, // Must end in a slash /
-                gzip: false,
-                logger: m => {
-                    if (m.status === 'loading tesseract core') console.log('OCR: Loading Core...');
-                    if (m.status === 'loading language traineddata') console.log('OCR: Loading Language...');
-                }
-            });
-
-            await w.setParameters({
-                tessedit_pageseg_mode: PSM.AUTO,
-                tessedit_create_tsv: '1',
-                user_defined_dpi: '300',
-            });
-            return w;
-        })();
+async function getWorker(lang = 'eng'): Promise<Worker> {
+    if (currentWorker && currentLang === lang) {
+        return currentWorker;
     }
-    return workerPromise;
+
+    if (currentWorker) {
+        await currentWorker.terminate();
+        currentWorker = null;
+    }
+
+    const base = import.meta.env.BASE_URL || '/';
+    const tessPath = `${base}tesseract/`.replace('//', '/');
+
+    // 1. Verify Integrity
+    if (LANG_MANIFEST[lang]) {
+        console.log(`OCR: Verifying integrity for ${lang}...`);
+        try {
+            const res = await fetch(`${tessPath}${lang}.traineddata`);
+            if (!res.ok) throw new Error(`Failed to fetch language pack: ${res.statusText}`);
+            const buffer = await res.arrayBuffer();
+            const hash = await sha256Hex(new Uint8Array(buffer));
+            
+            if (hash !== LANG_MANIFEST[lang]) {
+                console.error(`OCR Integrity Mismatch! Expected ${LANG_MANIFEST[lang]}, got ${hash}`);
+                throw new Error("OCR Data corrupted or modified. Initialization blocked for security.");
+            }
+            console.log(`OCR: ${lang} integrity verified.`);
+        } catch (e) {
+            console.error("OCR Integrity Check Failed", e);
+            throw e;
+        }
+    } else {
+        console.warn(`OCR: No integrity hash for ${lang}. Proceeding without verification.`);
+    }
+
+    console.log(`OCR: Initializing Tesseract (${lang})...`);
+
+    const w = await createWorker(lang, 1, {
+        workerPath: `${tessPath}worker.min.js`,
+        corePath: `${tessPath}tesseract-core.wasm.js`,
+        langPath: tessPath,
+        gzip: false,
+        logger: m => {
+            if (m.status === 'loading tesseract core') console.log('OCR: Loading Core...');
+            if (m.status === 'loading language traineddata') console.log('OCR: Loading Language...');
+        }
+    });
+
+    await w.setParameters({
+        tessedit_pageseg_mode: PSM.AUTO,
+        tessedit_create_tsv: '1',
+        user_defined_dpi: '300',
+    });
+
+    currentWorker = w;
+    currentLang = lang;
+    return w;
 }
 
 export async function recognizeText(
     imageBlob: Blob,
     width: number,
-    height: number
+    height: number,
+    lang = 'eng'
 ): Promise<OcrWord[]> {
     let url: string | null = null;
     try {
-        const w = await getWorker();
+        const w = await getWorker(lang);
         url = URL.createObjectURL(imageBlob);
 
-        console.log(`OCR: Recognizing... (${width}x${height})`);
+        console.log(`OCR: Recognizing... (${width}x${height}) [${lang}]`);
         const ret = await w.recognize(url);
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const data = ret.data as any;
         const words: OcrWord[] = [];
 
-        // STRATEGY: Parse TSV (Tab Separated Values)
         if (data.tsv) {
-            const tsvRaw = data.tsv as string;
-            // DEBUG: See the first 200 chars to confirm format
-            // console.log('OCR TSV Preview:', tsvRaw.substring(0, 200).replace(/\n/g, '\\n'));
-
-            // Handle both \n and \r\n
-            const lines = tsvRaw.split(/\r?\n/);
-
+            const lines = (data.tsv as string).split(/\r?\n/);
             for (let i = 0; i < lines.length; i++) {
                 const row = lines[i].split('\t');
-                // TSV Standard: level|page_num|block_num|par_num|line_num|word_num|left|top|width|height|conf|text
-                if (row.length < 12) continue;
-
-                // We want level 5 (Word)
-                if (row[0] !== '5') continue;
+                if (row.length < 12 || row[0] !== '5') continue;
 
                 const conf = parseFloat(row[10]);
                 const text = row[11].trim();
 
-                // Relaxed confidence check (some words might be 0 but valid)
                 if (text.length > 0) {
-                    const x = parseInt(row[6]);
-                    const y = parseInt(row[7]);
-                    const w = parseInt(row[8]);
-                    const h = parseInt(row[9]);
-
                     words.push({
                         text: text,
                         box: [
-                            x / width,
-                            y / height,
-                            w / width,
-                            h / height
+                            parseInt(row[6]) / width,
+                            parseInt(row[7]) / height,
+                            parseInt(row[8]) / width,
+                            parseInt(row[9]) / height
                         ],
                         confidence: conf
                     });
@@ -94,25 +111,18 @@ export async function recognizeText(
             }
         }
 
-        // EMERGENCY FALLBACK:
-        if (words.length === 0 && data.text && data.text.length > 0) {
-            console.warn('OCR: Coordinate parsing failed. Falling back to full-page text.');
+        if (words.length === 0 && data.text?.length > 0) {
             words.push({
                 text: data.text,
-                box: [0, 0, 1, 1], // The whole page
+                box: [0, 0, 1, 1],
                 confidence: 100
             });
         }
 
-        console.log(`OCR Final: Extracted ${words.length} words.`);
         return words;
-
     } catch (e) {
         console.error('OCR Failed', e);
-        // Reset the worker promise so we can try to re-initialize on next attempt if it was a transient error
-        if (workerPromise) {
-            workerPromise = null;
-        }
+        terminateOcr();
         return [];
     } finally {
         if (url) URL.revokeObjectURL(url);
@@ -120,13 +130,13 @@ export async function recognizeText(
 }
 
 export function terminateOcr() {
-    if (workerPromise) {
-        workerPromise.then(w => w.terminate());
-        workerPromise = null;
+    if (currentWorker) {
+        void currentWorker.terminate();
+        currentWorker = null;
+        currentLang = null;
     }
 }
 
-export async function warmupOcr() {
-    // This triggers getWorker(), which downloads the files if not cached
-    await getWorker();
+export async function warmupOcr(lang = 'eng') {
+    await getWorker(lang);
 }

@@ -5,6 +5,8 @@ export type ExitDecision =
     | { kind: 'nav-doc'; docId: string }
     | { kind: 'confirm-discard'; docId: string; message: string };
 
+export const MAX_PAGES_PER_BATCH = 50;
+
 export class ScanSessionState {
     // mode
     stage: ScanStage = 'idle';
@@ -21,6 +23,10 @@ export class ScanSessionState {
     }
 
     // ----- derived -----
+
+    get canAddPage(): boolean {
+        return this.pageCount < MAX_PAGES_PER_BATCH;
+    }
 
     get isAppend(): boolean {
         return !!this.appendToDocId;

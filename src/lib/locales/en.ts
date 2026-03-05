@@ -8,6 +8,7 @@ export const en = {
     'scan.auto_capture': 'Auto Capture',
     'scan.import_unavailable': 'Import unavailable',
     'scan.capture_failed': 'Capture failed',
+    'scan.max_pages_reached': 'Maximum page limit reached ({{max}}). Please save this document before adding more.',
     'scan.permission_title': 'Camera Access Blocked',
     'scan.permission_body': 'To scan documents, enable camera access in Settings. You can still import files.',
     'scan.try_again': 'Try Again',

@@ -2,6 +2,7 @@ import {PDFDocument, rgb} from 'pdf-lib';
 import type {OcrWord, PageRecord} from '../domain/types';
 import type {FileStore} from '../services/filestore/opfs-store';
 import {bytesToBlob} from './bytes';
+import fontkit from '@pdf-lib/fontkit';
 
 export type PdfQuality = 'original' | 'email';
 
@@ -10,14 +11,29 @@ export interface PdfOptions {
     onProgress?: (curr: number, total: number) => void;
 }
 
+const UNICODE_FONT_URL = '/fonts/noto-arabic.ttf'; // Expected location for Arabic/Unicode support
+
 export async function buildPdfForDoc(
     store: FileStore,
     pages: PageRecord[],
     opts: PdfOptions = {quality: 'original'}
 ): Promise<Uint8Array> {
-    // Limit removed to support large documents.
-    // Memory is managed by processing pages one-by-one and grouping text lines.
     const pdf = await PDFDocument.create();
+    pdf.registerFontkit(fontkit);
+
+    // Try to load custom font for Unicode support (Arabic/RTL)
+    let customFont: any = null;
+    try {
+        const fontRes = await fetch(UNICODE_FONT_URL);
+        if (fontRes.ok) {
+            const fontBytes = await fontRes.arrayBuffer();
+            customFont = await pdf.embedFont(fontBytes);
+            console.log("PDF: Custom Unicode font embedded.");
+        }
+    } catch (e) {
+        console.warn("PDF: Custom font not found, falling back to standard font (may break Arabic).");
+    }
+
     const total = pages.length;
 
     for (let i = 0; i < total; i++) {
@@ -33,38 +49,41 @@ export async function buildPdfForDoc(
             }
 
             const img = await pdf.embedJpg(jpgBytes);
-            jpgBytes = null; // Immediate memory release
+            jpgBytes = null;
 
             const page = pdf.addPage([img.width, img.height]);
             const h = img.height;
             const w = img.width;
 
-            // 1. Draw Visual Layer
             page.drawImage(img, {x: 0, y: 0, width: w, height: h});
 
-            // 2. Draw Optimized Search Layer (Grouped by lines)
             if (p.words && p.words.length > 0) {
                 const lines = groupWordsIntoLines(p.words);
 
                 for (const line of lines) {
-                    // Use the average height of words in the line for font size
                     const avgHeight = line.words.reduce((sum, w) => sum + w.box[3], 0) / line.words.length;
-                    const fontSize = avgHeight * h;
+                    const fontSize = Math.max(2, avgHeight * h);
 
-                    // PDF Coordinate System is Bottom-Left.
-                    // Y = PageHeight - (TopOffset + LineHeight)
                     const firstWord = line.words[0];
                     const px = firstWord.box[0] * w;
                     const py = firstWord.box[1] * h;
                     const ph = firstWord.box[3] * h;
 
-                    page.drawText(line.text, {
-                        x: px,
-                        y: h - (py + ph),
-                        size: fontSize,
-                        opacity: 0, // Keep invisible
-                        color: rgb(0, 0, 0),
-                    });
+                    try {
+                        page.drawText(line.text, {
+                            x: px,
+                            y: h - (py + ph),
+                            size: fontSize,
+                            font: customFont || undefined, // Fallback to Helvetica
+                            opacity: 0, 
+                            color: rgb(0, 0, 0),
+                        });
+                    } catch (fontErr) {
+                        // If custom font fails for some chars, fallback to standard
+                        page.drawText(line.text, {
+                            x: px, y: h - (py + ph), size: fontSize, opacity: 0, color: rgb(0, 0, 0)
+                        });
+                    }
                 }
             }
 
@@ -77,25 +96,16 @@ export async function buildPdfForDoc(
     return await pdf.save();
 }
 
-/**
- * Groups individual OCR words into lines to reduce PDF object count.
- * This significantly shrinks the file size for text-heavy documents.
- */
 function groupWordsIntoLines(words: OcrWord[]): Array<{ text: string, words: OcrWord[] }> {
     const lines: Array<{ text: string, words: OcrWord[] }> = [];
     if (words.length === 0) return lines;
 
-    // Sort words: Top-to-Bottom, then Left-to-Right
     const sorted = [...words].sort((a, b) => a.box[1] - b.box[1] || a.box[0] - b.box[0]);
-
     let currentLine: OcrWord[] = [sorted[0]];
 
     for (let i = 1; i < sorted.length; i++) {
         const prev = sorted[i - 1];
         const curr = sorted[i];
-
-        // If the vertical start of the current word is within the height of the previous word,
-        // they likely belong to the same visual line.
         const verticalOverlap = Math.abs(curr.box[1] - prev.box[1]) < (prev.box[3] * 0.5);
 
         if (verticalOverlap) {
@@ -108,30 +118,24 @@ function groupWordsIntoLines(words: OcrWord[]): Array<{ text: string, words: Ocr
             currentLine = [curr];
         }
     }
-
-    // Push last line
     lines.push({
         text: currentLine.map(w => w.text).join(' '),
         words: currentLine
     });
-
     return lines;
 }
 
 async function compressForEmail(originalBytes: Uint8Array): Promise<Uint8Array> {
     const blob = bytesToBlob(originalBytes, 'image/jpeg');
     const bitmap = await createImageBitmap(blob);
-
     const maxDim = 1200;
     const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
     const w = Math.round(bitmap.width * scale);
     const h = Math.round(bitmap.height * scale);
-
     const canvas = new OffscreenCanvas(w, h);
     const ctx = canvas.getContext('2d')!;
     ctx.drawImage(bitmap, 0, 0, w, h);
     bitmap.close();
-
     const blobOut = await canvas.convertToBlob({type: 'image/jpeg', quality: 0.6});
     return new Uint8Array(await blobOut.arrayBuffer());
 }
