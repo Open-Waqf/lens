@@ -1,6 +1,7 @@
 import {createWorker, PSM, type Worker} from 'tesseract.js';
 import type {OcrWord} from '../domain/types';
 import {sha256Hex} from './hash';
+import type {LocaleKey} from './i18n';
 
 let currentWorker: Worker | null = null;
 let currentLang: string | null = null;
@@ -9,6 +10,19 @@ const LANG_MANIFEST: Record<string, string> = {
     'eng': '7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2',
     // 'ara': '...', // Arabic hash to be added when file is provided
 };
+
+export const OCR_LANG_OPTIONS = [
+    {code: 'ara+eng', labelKey: 'settings.ocr_lang_ara_eng'},
+    {code: 'ara', labelKey: 'settings.ocr_lang_ara'},
+    {code: 'eng', labelKey: 'settings.ocr_lang_eng'},
+] as const satisfies ReadonlyArray<{ code: string; labelKey: LocaleKey }>;
+
+function splitLangCodes(lang: string): string[] {
+    return lang
+        .split('+')
+        .map(v => v.trim())
+        .filter(Boolean);
+}
 
 async function getWorker(lang = 'eng'): Promise<Worker> {
     if (currentWorker && currentLang === lang) {
@@ -23,26 +37,28 @@ async function getWorker(lang = 'eng'): Promise<Worker> {
     const base = import.meta.env.BASE_URL || '/';
     const tessPath = `${base}tesseract/`.replace('//', '/');
 
-    // 1. Verify Integrity
-    if (LANG_MANIFEST[lang]) {
-        console.log(`OCR: Verifying integrity for ${lang}...`);
-        try {
-            const res = await fetch(`${tessPath}${lang}.traineddata`);
-            if (!res.ok) throw new Error(`Failed to fetch language pack: ${res.statusText}`);
-            const buffer = await res.arrayBuffer();
-            const hash = await sha256Hex(new Uint8Array(buffer));
-            
-            if (hash !== LANG_MANIFEST[lang]) {
-                console.error(`OCR Integrity Mismatch! Expected ${LANG_MANIFEST[lang]}, got ${hash}`);
-                throw new Error("OCR Data corrupted or modified. Initialization blocked for security.");
+    // 1. Verify Integrity per language pack
+    for (const code of splitLangCodes(lang)) {
+        if (LANG_MANIFEST[code]) {
+            console.log(`OCR: Verifying integrity for ${code}...`);
+            try {
+                const res = await fetch(`${tessPath}${code}.traineddata`);
+                if (!res.ok) throw new Error(`Failed to fetch language pack: ${res.statusText}`);
+                const buffer = await res.arrayBuffer();
+                const hash = await sha256Hex(new Uint8Array(buffer));
+
+                if (hash !== LANG_MANIFEST[code]) {
+                    console.error(`OCR Integrity Mismatch! Expected ${LANG_MANIFEST[code]}, got ${hash}`);
+                    throw new Error("OCR Data corrupted or modified. Initialization blocked for security.");
+                }
+                console.log(`OCR: ${code} integrity verified.`);
+            } catch (e) {
+                console.error("OCR Integrity Check Failed", e);
+                throw e;
             }
-            console.log(`OCR: ${lang} integrity verified.`);
-        } catch (e) {
-            console.error("OCR Integrity Check Failed", e);
-            throw e;
+        } else {
+            console.warn(`OCR: No integrity hash for ${code}. Proceeding without verification.`);
         }
-    } else {
-        console.warn(`OCR: No integrity hash for ${lang}. Proceeding without verification.`);
     }
 
     console.log(`OCR: Initializing Tesseract (${lang})...`);

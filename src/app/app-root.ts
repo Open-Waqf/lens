@@ -119,7 +119,7 @@ export class AppRoot extends LitElement {
             if (!prefs.enableOcr) return;
             try {
                 const {warmupOcr} = await import('../lib/ocr');
-                await warmupOcr();
+                await warmupOcr(prefs.ocrLang || 'ara+eng');
             } catch (e) {
             }
         };

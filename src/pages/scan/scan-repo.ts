@@ -7,6 +7,7 @@ import {db} from '../../services/db';
 import {getFileStore} from '../../services/filestore';
 import {bytesToBlob} from "../../lib/bytes";
 import {ocrQueue} from '../../services/ocr-queue';
+import {settings} from '../../services/settings';
 
 export type DocStripItem = { id: string; thumbBytes: Uint8Array };
 
@@ -377,9 +378,11 @@ export class ScanRepo {
             const blob = bytesToBlob(bytes, 'image/jpeg');
 
             const {recognizeText} = await import('../../lib/ocr');
+            const prefs = await settings.get();
+            const ocrLang = prefs.ocrLang || 'ara+eng';
 
             // 1. Run Intelligence
-            const words = await recognizeText(blob, w, h);
+            const words = await recognizeText(blob, w, h, ocrLang);
 
             // 2. Commit to Memory (DB)
             await db.transaction('rw', db.pages, db.docs, async () => {

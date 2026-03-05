@@ -10,6 +10,7 @@ import {getFileStore} from '../services/filestore';
 import {shareFile} from '../services/share';
 import {jsonFile, type ZipFileEntry, zipFilesToStream} from '../lib/zip';
 import {decryptStream, encryptStream} from '../lib/crypto/pbe';
+import {OCR_LANG_OPTIONS} from '../lib/ocr';
 import {resetAllStorage} from '../services/reset-storage';
 import {ConfirmModal} from '../components/confirm-modal';
 import pkg from '../../package.json'
@@ -60,6 +61,7 @@ export class SettingsPage extends LitElement {
     @state() private repairProgress = '';
 
     @state() private enableOcr = true;
+    @state() private ocrLang = 'ara+eng';
     @state() private hasIndexRisk = false;
     @state() private storageAuditBusy = false;
     @state() private storageAuditFound = 0;
@@ -145,6 +147,7 @@ export class SettingsPage extends LitElement {
         this.requireAuth = s.requireAuth;
         this.defaultVault = s.defaultVault;
         this.enableOcr = s.enableOcr;
+        this.ocrLang = s.ocrLang || 'ara+eng';
     }
 
     private async refreshStorageRisk() {
@@ -190,6 +193,12 @@ export class SettingsPage extends LitElement {
         void haptics.selection();
         this.enableOcr = !this.enableOcr;
         settings.setOcr(this.enableOcr);
+    }
+
+    private setOcrLang(lang: string) {
+        if (!lang) return;
+        this.ocrLang = lang;
+        settings.setOcrLang(lang);
     }
 
     private async toggleAuth() {
@@ -877,6 +886,7 @@ export class SettingsPage extends LitElement {
     }
 
     private renderProcessingSection() {
+        const arabicSelected = this.ocrLang.split('+').includes('ara');
         return html`
             <section class="p-4 rounded-xl border border-slate-700 bg-slate-800/50 space-y-4">
                 <div class="flex items-center gap-2 text-emerald-400 font-semibold text-sm">
@@ -897,6 +907,24 @@ export class SettingsPage extends LitElement {
                         <span class="absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${this.enableOcr ? 'translate-x-5' : ''}"></span>
                     </button>
                 </div>
+
+                <div class="space-y-2">
+                    <label class="text-[10px] text-slate-500 uppercase tracking-wider">${t('settings.ocr_language')}</label>
+                    <select
+                            class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100"
+                            .value=${this.ocrLang}
+                            @change=${(e: Event) => this.setOcrLang((e.target as HTMLSelectElement).value)}>
+                        ${OCR_LANG_OPTIONS.map(opt => html`
+                            <option value=${opt.code}>${t(opt.labelKey)}</option>
+                        `)}
+                    </select>
+                </div>
+
+                ${arabicSelected ? html`
+                    <div class="p-3 rounded-lg bg-amber-950/20 border border-amber-900/50 text-xs text-amber-200">
+                        ${t('settings.ocr_arabic_disclaimer')}
+                    </div>
+                ` : null}
             </section>
         `;
     }

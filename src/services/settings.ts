@@ -2,6 +2,7 @@ export interface AppSettings {
     requireAuth: boolean;
     defaultVault: boolean;
     enableOcr: boolean;
+    ocrLang: string;
 }
 
 // Internal "Secrets" - Changing these invalidates existing settings
@@ -14,6 +15,7 @@ const KEYS = {
     LOCK_INTEGRITY: 'sahifah.integrity_check',
     DEFAULT_VAULT: 'sahifah.defaultVault',
     ENABLE_OCR: 'sahifah.enableOcr',
+    OCR_LANG: 'sahifah.ocrLang',
 };
 
 class SettingsService {
@@ -35,6 +37,7 @@ class SettingsService {
         // Default OCR to TRUE if not set
         const ocrRaw = localStorage.getItem(KEYS.ENABLE_OCR);
         const ocrEnabled = ocrRaw === null ? true : (ocrRaw === '1');
+        const ocrLang = localStorage.getItem(KEYS.OCR_LANG) || 'ara+eng';
 
         const storedHash = localStorage.getItem(KEYS.LOCK_INTEGRITY);
         const isLocked = storedHash === this._enabledHash;
@@ -43,11 +46,17 @@ class SettingsService {
             requireAuth: isLocked,
             defaultVault: localStorage.getItem(KEYS.DEFAULT_VAULT) === '1',
             enableOcr: ocrEnabled,
+            ocrLang,
         };
     }
 
     setOcr(enable: boolean) {
         localStorage.setItem(KEYS.ENABLE_OCR, enable ? '1' : '0');
+        this._notify();
+    }
+
+    setOcrLang(lang: string) {
+        localStorage.setItem(KEYS.OCR_LANG, lang);
         this._notify();
     }
 
