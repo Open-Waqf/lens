@@ -26,6 +26,9 @@ import {ocrQueue} from '../services/ocr-queue';
 import {AuthService} from "../services/auth-service";
 import {App} from "@capacitor/app";
 import {t} from '../lib/i18n';
+import {recordSuccessfulSaveAndShouldRemind} from '../services/backup-reminder';
+import {showToast} from '../components/toast-notification';
+import {toUserErrorMessage} from '../lib/user-error';
 
 const APPEND_DOC_KEY = 'sahifah.appendToDocId';
 const AUTO_KEY = 'sahifah.autoCapture';
@@ -369,7 +372,7 @@ export class ScanPage extends LitElement {
             this.session.setStage('edit');
             this.editorKey++;
         } catch (e) {
-            this.error = (e as Error).message ?? String(e);
+            this.error = toUserErrorMessage(e);
         }
     }
 
@@ -431,6 +434,9 @@ export class ScanPage extends LitElement {
 
             this.session.markCommitted();
             await this.refreshDocInfo();
+            if (recordSuccessfulSaveAndShouldRemind()) {
+                showToast(t('storage.reminder.backup'), 'info');
+            }
 
             if (this.editingPageId && this.importReviewQueue.length > 0 && this.importReviewQueue[0] === this.editingPageId) {
                 this.importReviewQueue.shift(); // Remove the one we just saved
@@ -452,7 +458,7 @@ export class ScanPage extends LitElement {
                 this.session.setStage('idle');
             }
         } catch (e) {
-            this.error = (e as Error).message ?? String(e);
+            this.error = toUserErrorMessage(e);
         } finally {
             this.busy = false;
         }
@@ -517,7 +523,7 @@ export class ScanPage extends LitElement {
                 // If user clicked the button (explicit), show the blocking error.
                 // If app tried to auto-start (implicit), just go to dashboard.
                 if (explicit) {
-                    this.error = (e as Error).message ?? String(e);
+                    this.error = toUserErrorMessage(e);
                     this.showPermissionError = true;
                     this.session.setStage('idle');
                 } else {
@@ -610,7 +616,7 @@ export class ScanPage extends LitElement {
 
             await this.openNewBlobInEditor(blob, detectedQuadForEditor);
         } catch (e) {
-            this.error = (e as Error).message ?? String(e);
+            this.error = toUserErrorMessage(e);
         } finally {
             this.captureInFlight = false;
         }
@@ -698,7 +704,7 @@ export class ScanPage extends LitElement {
                 this.session.setStage(this.camera.isRunning ? 'camera' : 'idle');
             }
         } catch (e) {
-            this.error = (e as Error).message ?? String(e);
+            this.error = toUserErrorMessage(e);
         } finally {
             this.busy = false;
         }

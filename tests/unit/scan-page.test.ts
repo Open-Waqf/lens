@@ -65,6 +65,7 @@ vi.mock('../../src/lib/camera/camera-manager', () => {
 
 const mockCreateDoc = vi.fn().mockResolvedValue({id: 'doc_123', title: 'Test Scan'});
 const mockAddNewPage = vi.fn().mockResolvedValue('page_123');
+const mockRecordSaveReminder = vi.fn().mockReturnValue(false);
 
 vi.mock('../../src/pages/scan/scan-repo', () => {
     return {
@@ -78,6 +79,10 @@ vi.mock('../../src/pages/scan/scan-repo', () => {
         }
     };
 });
+
+vi.mock('../../src/services/backup-reminder', () => ({
+    recordSuccessfulSaveAndShouldRemind: (...args: any[]) => mockRecordSaveReminder(...args)
+}));
 
 // Mock Worker
 class MockWorker {
@@ -120,6 +125,7 @@ describe('ScanPage Component', () => {
         vi.clearAllMocks();
         localStorage.clear();
         document.body.innerHTML = ''; // Clean DOM
+        mockRecordSaveReminder.mockReturnValue(false);
 
         vi.mock('../../src/services/pending-import', () => ({
             takePendingImport: () => []
@@ -216,6 +222,7 @@ describe('ScanPage Component', () => {
         // Wait for mock call
         await new Promise(r => setTimeout(r, 50));
 
+        expect(mockRecordSaveReminder).toHaveBeenCalled();
         expect(mockCreateDoc).toHaveBeenCalled();
         expect(mockAddNewPage).toHaveBeenCalled();
     });

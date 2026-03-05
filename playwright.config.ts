@@ -1,5 +1,14 @@
 import {defineConfig, devices} from '@playwright/test';
 
+const proxyServer = process.env.E2E_PROXY_SERVER;
+const networkQuietArgs = [
+    '--disable-background-networking',
+    '--disable-component-update',
+    '--disable-domain-reliability',
+    '--disable-sync',
+    '--metrics-recording-only',
+];
+
 export default defineConfig({
     testDir: './tests/e2e',
     fullyParallel: true,
@@ -11,6 +20,7 @@ export default defineConfig({
     use: {
         baseURL: 'http://localhost:4173',
         trace: 'on-first-retry',
+        proxy: proxyServer ? {server: proxyServer} : undefined,
         // Permissions needed for clipboard and file system
         permissions: ['clipboard-read', 'clipboard-write'],
     },
@@ -22,6 +32,7 @@ export default defineConfig({
                 ...devices['Desktop Chrome'],
                 launchOptions: {
                     args: [
+                        ...networkQuietArgs,
                         '--enable-features=FileSystemAccess', // Enable OPFS
                         '--disable-web-security'
                     ]
@@ -30,7 +41,12 @@ export default defineConfig({
         },
         {
             name: 'Mobile Chrome',
-            use: {...devices['Pixel 5']},
+            use: {
+                ...devices['Pixel 5'],
+                launchOptions: {
+                    args: [...networkQuietArgs]
+                }
+            },
         },
     ],
 

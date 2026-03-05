@@ -1,0 +1,75 @@
+name: Security Network Gate
+
+on:
+  push:
+    branches:
+      - develop
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  zero-outbound-network:
+    runs-on: ubuntu-latest
+    env:
+      CI: true
+      MITM_CAPTURE_PATH: ${{ runner.temp }}/mitm-requests.jsonl
+      E2E_PROXY_SERVER: http://127.0.0.1:8080
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Install Mitmproxy
+        run: python -m pip install --upgrade pip mitmproxy
+
+      - name: Build Project
+        run: npm run build
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Start Mitmproxy Capture
+        run: |
+          nohup mitmdump --listen-host 127.0.0.1 --listen-port 8080 -q -s scripts/mitm_capture.py >"${{ runner.temp }}/mitm.log" 2>&1 &
+          echo $! > "${{ runner.temp }}/mitm.pid"
+          sleep 2
+
+      - name: Run Security E2E Flow
+        run: npm run test:security
+
+      - name: Assert Network Policy
+        run: node scripts/network-assert.mjs "${{ runner.temp }}/mitm-requests.jsonl" --allow-hosts=localhost,127.0.0.1
+
+      - name: Stop Mitmproxy
+        if: always()
+        run: |
+          if [ -f "${{ runner.temp }}/mitm.pid" ]; then
+            kill "$(cat "${{ runner.temp }}/mitm.pid")" || true
+          fi
+
+      - name: Upload Network Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: network-gate-logs
+          path: |
+            ${{ runner.temp }}/mitm.log
+            ${{ runner.temp }}/mitm-requests.jsonl
+            playwright-report/
+          retention-days: 14
+

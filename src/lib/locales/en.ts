@@ -135,4 +135,15 @@ export const en = {
     'settings.restore_complete_processed': 'Restore complete. Processed {{count}} files.',
     'settings.restore_complete': 'Restore complete! You can return to the Library.',
     'settings.restore_failed': 'Restore failed: {{error}}',
+
+    // Storage / backup reminders
+    'storage.banner.title': 'Storage is not persistent',
+    'storage.banner.body': 'OS may clear storage. Export backup to be safe.',
+    'storage.banner.settings': 'Settings',
+    'storage.banner.dismiss': 'Dismiss',
+    'storage.risk.title': 'Possible metadata loss detected',
+    'storage.risk.body': 'Files exist but index is missing. Open Settings to recover.',
+    'storage.risk.recover': 'Recover',
+    'storage.reminder.backup': 'Backup reminder: export an encrypted backup from Settings.',
+    'errors.opfs_security': 'Local secure storage is blocked in this browser mode. Exit private mode and try again.',
 };

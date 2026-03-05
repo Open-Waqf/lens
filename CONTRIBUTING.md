@@ -54,6 +54,17 @@ Backups use a specific chunked-streaming protocol to allow multi-gigabyte export
 
 * Test image processing on both Desktop (high RAM) and Mobile (low RAM).
 * Verify that the "Offline" mode still works (DevTools -> Network -> Offline).
+* Run the privacy network gate for local-first verification:
+  ```bash
+  export MITM_CAPTURE_PATH=/tmp/mitm-requests.jsonl
+  export E2E_PROXY_SERVER=http://127.0.0.1:8080
+  nohup mitmdump --listen-host 127.0.0.1 --listen-port 8080 -q -s scripts/mitm_capture.py >/tmp/mitm.log 2>&1 &
+  MITM_PID=$!
+  npm run build
+  npm run test:security
+  node scripts/network-assert.mjs /tmp/mitm-requests.jsonl --allow-hosts=localhost,127.0.0.1
+  kill "$MITM_PID"
+  ```
 
 
 4. **Linting:** Follow the existing style. We prefer **Lit** for UI components and standard **TypeScript** classes for

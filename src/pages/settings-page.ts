@@ -17,6 +17,7 @@ import {settings} from '../services/settings';
 import {AuthService} from '../services/auth-service';
 import {OPFSStreamWriter} from '../services/filestore/opfs-store';
 import {t} from '../lib/i18n';
+import {toUserErrorMessage} from '../lib/user-error';
 
 import {repairLibrary} from '../services/repair';
 import {CapacitorFileStore} from "../services/filestore/capacitor-store";
@@ -343,7 +344,7 @@ export class SettingsPage extends LitElement {
             this.msg = t('settings.backup_exported');
 
         } catch (e) {
-            this.err = (e as Error).message;
+            this.err = toUserErrorMessage(e);
             console.error(e);
         } finally {
             try {
@@ -497,7 +498,7 @@ export class SettingsPage extends LitElement {
 
         } catch (e) {
             console.error(e);
-            this.err = t('settings.restore_failed', {error: (e as Error).message});
+            this.err = t('settings.restore_failed', {error: toUserErrorMessage(e)});
         } finally {
             try {
                 await writer.close();

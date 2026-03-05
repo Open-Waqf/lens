@@ -19,6 +19,7 @@ import {AuthService} from '../services/auth-service';
 import {resetAllStorage} from '../services/reset-storage';
 import {showToast} from "../components/toast-notification";
 import {hasIndexLossRiskFlag, runStorageHealthProbe} from '../services/storage-health';
+import {t} from '../lib/i18n';
 
 type Route =
     | { name: 'library' }
@@ -39,6 +40,7 @@ function parseHash(): Route {
 }
 
 type Fatal = { message: string; detail?: string };
+const STORAGE_BANNER_DISMISS_KEY = 'sahifah.storageBanner.dismissed';
 
 @customElement('app-root')
 export class AppRoot extends LitElement {
@@ -54,6 +56,7 @@ export class AppRoot extends LitElement {
     @state() private persist: PersistenceStatus | null = null;
     @state() private resetting = false;
     @state() private hasStorageRisk = false;
+    @state() private hidePersistBanner = false;
 
     connectedCallback(): void {
         super.connectedCallback();
@@ -86,6 +89,7 @@ export class AppRoot extends LitElement {
 
         if (!location.hash) location.hash = '#/library';
         this.hasStorageRisk = hasIndexLossRiskFlag();
+        this.hidePersistBanner = localStorage.getItem(STORAGE_BANNER_DISMISS_KEY) === '1';
 
         void (async () => {
             try {
@@ -263,16 +267,28 @@ export class AppRoot extends LitElement {
     }
 
     private renderPersistenceBanner() {
+        if (Capacitor.isNativePlatform()) return null;
+        if (this.hidePersistBanner) return null;
         const p = this.persist;
         if (!p || !p.supported || p.persisted) return null;
         return html`
             <div class="mb-4 p-3 rounded-xl border border-amber-900 bg-amber-950/40 text-amber-100 flex items-start justify-between gap-3">
                 <div class="min-w-0">
-                    <div class="text-sm font-medium">Storage is not persistent</div>
-                    <div class="text-xs text-amber-200/80">OS may clear storage. Export backup to be safe.</div>
+                    <div class="text-sm font-medium">${t('storage.banner.title')}</div>
+                    <div class="text-xs text-amber-200/80">${t('storage.banner.body')}</div>
                 </div>
-                <a class="shrink-0 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
-                   href="#/settings">Settings</a>
+                <div class="shrink-0 flex items-center gap-2">
+                    <a class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
+                       href="#/settings">${t('storage.banner.settings')}</a>
+                    <button class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
+                            data-testid="dismiss-storage-banner"
+                            @click=${() => {
+                                this.hidePersistBanner = true;
+                                localStorage.setItem(STORAGE_BANNER_DISMISS_KEY, '1');
+                            }}>
+                        ${t('storage.banner.dismiss')}
+                    </button>
+                </div>
             </div>
         `;
     }
@@ -282,11 +298,11 @@ export class AppRoot extends LitElement {
         return html`
             <div class="mb-4 p-3 rounded-xl border border-red-900 bg-red-950/40 text-red-100 flex items-start justify-between gap-3">
                 <div class="min-w-0">
-                    <div class="text-sm font-medium">Possible metadata loss detected</div>
-                    <div class="text-xs text-red-200/80">Files exist but index is missing. Open Settings to recover.</div>
+                    <div class="text-sm font-medium">${t('storage.risk.title')}</div>
+                    <div class="text-xs text-red-200/80">${t('storage.risk.body')}</div>
                 </div>
                 <a class="shrink-0 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
-                   href="#/settings?repair=1">Recover</a>
+                   href="#/settings?repair=1">${t('storage.risk.recover')}</a>
             </div>
         `;
     }
