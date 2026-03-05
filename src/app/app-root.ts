@@ -98,10 +98,16 @@ export class AppRoot extends LitElement {
         const runGC = async () => {
             if (this.hasStorageRisk || hasIndexLossRiskFlag()) return;
             try {
-                await garbageCollectOpfsDocs();
+                const cleaned = await garbageCollectOpfsDocs();
+                if (cleaned > 0) {
+                    showToast(`Storage Audit: Cleaned ${cleaned} orphaned files.`, 'info');
+                }
             } catch {
             }
         };
+
+        // EXPOSE FOR E2E TESTING
+        (window as any).triggerStorageAudit = () => runGC();
 
         const runWarmup = async () => {
             if (location.hash.includes('scan')) return;

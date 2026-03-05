@@ -573,11 +573,28 @@ export class SettingsPage extends LitElement {
 
     private renderHeader() {
         return html`
-            <div class="flex items-center gap-3 pb-2">
-                <h1 class="text-2xl font-bold text-slate-100">Settings</h1>
-                <div class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono mt-1">
+            <div class="flex items-center justify-between pb-2">
+                <div class="flex items-center gap-3">
+                    <h1 class="text-2xl font-bold text-slate-100">Settings</h1>
+                    <div class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400 font-mono mt-1">
                         v${pkg.version}
+                    </div>
                 </div>
+                <button class="p-2 rounded-lg text-red-500/50 hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                        title="Nuclear Reset"
+                        @click=${() => {
+                            this.showDangerZone = true;
+                            setTimeout(() => {
+                                const input = this.querySelector('input');
+                                input?.focus();
+                                input?.scrollIntoView({behavior: 'smooth', block: 'center'});
+                            }, 150);
+                        }}>
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                    </svg>
+                </button>
             </div>
         `;
     }
@@ -811,7 +828,7 @@ export class SettingsPage extends LitElement {
 
     private renderDangerZone() {
         return html`
-            <section class="space-y-3 pt-6 border-t border-slate-800">
+            <section id="DangerZone" class="space-y-3 pt-6 border-t border-slate-800">
                 <h2 class="text-sm font-semibold text-red-400 uppercase tracking-wider">Danger Zone</h2>
 
                 ${!this.showDangerZone ? html`
