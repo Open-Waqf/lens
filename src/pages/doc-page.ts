@@ -65,6 +65,8 @@ export class DocPage extends LitElement {
     // Search State
     @state() private searchQuery = '';
     @state() private showExtractedText = false;
+    @state() private editingCorrectedText = false;
+    @state() private correctedTextDraft = '';
 
     @state() private draggingId: string | null = null;
     @state() private dropTargetId: string | null = null;
@@ -275,11 +277,17 @@ export class DocPage extends LitElement {
         this.thumbs = thumbs;
     }
 
-    private getExtractedTextContent(): string {
+    private getRawExtractedTextContent(): string {
         return this.pages
             .map((p) => p.words?.map(w => w.text).join(' ').trim() || '')
             .filter(Boolean)
             .join('\n\n');
+    }
+
+    private getExtractedTextContent(): string {
+        const corrected = this.doc?.correctedOcrText?.trim();
+        if (corrected) return corrected;
+        return this.getRawExtractedTextContent();
     }
 
     private async copyExtractedText(): Promise<void> {
@@ -294,6 +302,29 @@ export class DocPage extends LitElement {
         } catch {
             showToast(t('doc.copy_failed'), 'error');
         }
+    }
+
+    private async saveCorrectedOcrText(): Promise<void> {
+        if (!this.doc) return;
+        const next = this.correctedTextDraft.trim();
+        const patch: Partial<DocRecord> = {
+            correctedOcrText: next || undefined,
+            searchIndex: next || this.getRawExtractedTextContent()
+        };
+        await this.saveMeta(patch);
+        this.editingCorrectedText = false;
+        showToast(t('doc.ocr_text_saved'), 'success');
+    }
+
+    private async resetCorrectedOcrText(): Promise<void> {
+        if (!this.doc) return;
+        await this.saveMeta({
+            correctedOcrText: undefined,
+            searchIndex: this.getRawExtractedTextContent()
+        });
+        this.correctedTextDraft = this.getRawExtractedTextContent();
+        this.editingCorrectedText = false;
+        showToast(t('doc.ocr_text_reset'), 'info');
     }
 
     private async editPage(page: PageRecord): Promise<void> {
@@ -690,14 +721,51 @@ export class DocPage extends LitElement {
                             ${this.showExtractedText ? t('doc.hide_text') : t('doc.show_text')}
                         </button>
                         ${this.showExtractedText ? html`
-                            <button class="mt-2 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs min-h-[44px]"
-                                    @click=${() => this.copyExtractedText()}>
-                                ${t('doc.copy_text')}
-                            </button>
+                            <div class="mt-2 flex flex-wrap gap-2">
+                                <button class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs min-h-[44px]"
+                                        @click=${() => this.copyExtractedText()}>
+                                    ${t('doc.copy_text')}
+                                </button>
+                                <button class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs min-h-[44px]"
+                                        @click=${() => {
+                                            this.correctedTextDraft = this.getExtractedTextContent();
+                                            this.editingCorrectedText = !this.editingCorrectedText;
+                                        }}>
+                                    ${t('doc.edit_ocr_text')}
+                                </button>
+                            </div>
+                        ` : null}
+                        ${this.showExtractedText && this.editingCorrectedText ? html`
+                            <div class="mt-3 p-3 rounded-lg border border-slate-800 bg-black/40 space-y-2">
+                                <div class="text-[10px] text-slate-500">${t('doc.edit_ocr_help')}</div>
+                                <textarea
+                                        class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors min-h-[120px] resize-y"
+                                        placeholder=${t('doc.ocr_text_placeholder')}
+                                        .value=${this.correctedTextDraft}
+                                        @input=${(e: Event) => this.correctedTextDraft = (e.target as HTMLTextAreaElement).value}
+                                ></textarea>
+                                <div class="flex gap-2">
+                                    <button class="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs min-h-[44px]"
+                                            @click=${() => this.saveCorrectedOcrText()}>
+                                        ${t('doc.save_ocr_text')}
+                                    </button>
+                                    <button class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs min-h-[44px]"
+                                            @click=${() => this.resetCorrectedOcrText()}>
+                                        ${t('doc.reset_ocr_text')}
+                                    </button>
+                                </div>
+                            </div>
                         ` : null}
                         ${this.showExtractedText ? html`
                             <div class="mt-3 space-y-4 max-h-[40vh] overflow-y-auto pr-2 custom-scrollbar">
-                                ${this.pages.map((p, i) => {
+                                ${this.doc?.correctedOcrText?.trim() ? html`
+                                    <div class="space-y-1">
+                                        <div class="text-xs text-slate-500 font-bold uppercase tracking-wider">${t('doc.edit_ocr_text')}</div>
+                                        <div class="text-sm text-slate-300 whitespace-pre-wrap select-text bg-black/50 p-3 rounded-lg border border-slate-800/50">
+                                            ${this.doc.correctedOcrText}
+                                        </div>
+                                    </div>
+                                ` : this.pages.map((p, i) => {
                                     const text = p.words?.map(w => w.text).join(' ').trim();
                                     if (!text) return null;
                                     return html`
@@ -710,7 +778,7 @@ export class DocPage extends LitElement {
                                         </div>
                                     `;
                                 })}
-                                ${!this.pages.some(p => p.words?.length) ? html`
+                                ${!this.doc?.correctedOcrText?.trim() && !this.pages.some(p => p.words?.length) ? html`
                                     <div class="text-sm text-slate-500 italic">${t('doc.no_text')}
                                     </div>
                                 ` : null}

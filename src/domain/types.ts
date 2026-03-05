@@ -18,6 +18,7 @@ export interface DocRecord {
     pageIds: string[];
     pdfPath?: string;
     searchIndex?: string;
+    correctedOcrText?: string;
     vaultEnabled?: boolean;
 }
 
