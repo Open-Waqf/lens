@@ -1,10 +1,12 @@
 import {Capacitor} from '@capacitor/core';
 import {Directory, Filesystem} from '@capacitor/filesystem';
 import {db} from './db';
-import {opfsRemoveTree} from './filestore/opfs-store';
+import {secureOverwriteAndRemoveOpfsTree} from './filestore/opfs-store';
 
 /**
+ * MANDATE FR-VAULT-004: Nuclear Reset kill-switch.
  * Best-effort "factory reset" for Sahifah Lens:
+ * - overwrites OPFS file contents with zeros (on web)
  * - deletes IndexedDB database
  * - deletes OPFS folders (docs/, exports/)
  * - clears Sahifah-related localStorage keys
@@ -25,9 +27,10 @@ export async function resetAllStorage(): Promise<void> {
         }
     }
 
-    // 2) OPFS (best effort)
+    // 2) OPFS (MANDATED SECURE WIPE)
     if (Capacitor.isNativePlatform()) {
         // CAPACITOR: Wipes native files from Directory.Data
+        // (Note: secure native erase would ideally use a custom plugin)
         try {
             await Filesystem.rmdir({
                 path: 'docs',
@@ -35,7 +38,7 @@ export async function resetAllStorage(): Promise<void> {
                 recursive: true
             });
             await Filesystem.rmdir({
-                path: 'exports', // if you use this folder
+                path: 'exports',
                 directory: Directory.Data,
                 recursive: true
             });
@@ -43,13 +46,13 @@ export async function resetAllStorage(): Promise<void> {
             // Ignore error if folder doesn't exist
         }
     } else {
-        // WEB: Wipes OPFS
+        // WEB: Wipes OPFS with zero-overwrite
         try {
-            await opfsRemoveTree('docs');
+            await secureOverwriteAndRemoveOpfsTree('docs');
         } catch {
         }
         try {
-            await opfsRemoveTree('exports');
+            await secureOverwriteAndRemoveOpfsTree('exports');
         } catch {
         }
     }

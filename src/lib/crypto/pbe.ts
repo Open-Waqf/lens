@@ -1,14 +1,15 @@
-const PBKDF2_ITERATIONS = 100000;
+const PBKDF2_ITERATIONS_DEFAULT = 600000;
 const SALT_SIZE = 16;
 const IV_SIZE = 12;
 const TAG_LENGTH_BITS = 128;
 const HEADER_MAGIC = new Uint8Array([83, 76, 66, 75]); // "SLBK"
+const CURRENT_VERSION = 2;
 
 // ----------------------------------------------------------------------
 // 1. Key Derivation
 // ----------------------------------------------------------------------
 
-async function deriveAesKey(password: string, salt: Uint8Array): Promise<CryptoKey> {
+async function deriveAesKey(password: string, salt: Uint8Array, iterations: number): Promise<CryptoKey> {
     const enc = new TextEncoder();
     const keyMaterial = await crypto.subtle.importKey(
         'raw',
@@ -23,7 +24,7 @@ async function deriveAesKey(password: string, salt: Uint8Array): Promise<CryptoK
             name: 'PBKDF2',
             // FORCE CAST: Tell TS this is a safe buffer
             salt: salt as unknown as BufferSource,
-            iterations: PBKDF2_ITERATIONS,
+            iterations: iterations,
             hash: 'SHA-256'
         },
         keyMaterial,
@@ -43,11 +44,21 @@ export async function* encryptStream(
 ): AsyncGenerator<Uint8Array> {
     const salt = crypto.getRandomValues(new Uint8Array(SALT_SIZE));
 
-    // Write Header
+    // Write Header (V2)
+    // [Magic (4)] + [Version (2)] + [Iterations (4)] + [Salt (16)]
     yield HEADER_MAGIC;
+    
+    const versionBytes = new Uint8Array(2);
+    new DataView(versionBytes.buffer).setUint16(0, CURRENT_VERSION, true);
+    yield versionBytes;
+
+    const iterationsBytes = new Uint8Array(4);
+    new DataView(iterationsBytes.buffer).setUint32(0, PBKDF2_ITERATIONS_DEFAULT, true);
+    yield iterationsBytes;
+
     yield salt;
 
-    const key = await deriveAesKey(password, salt);
+    const key = await deriveAesKey(password, salt, PBKDF2_ITERATIONS_DEFAULT);
 
     const iterator = (stream instanceof ReadableStream)
         ? stream.getReader()
@@ -127,6 +138,11 @@ class ChunkReader {
         return res;
     }
 
+    async readUint16(): Promise<number> {
+        const b = await this.readExactly(2);
+        return new DataView(b.buffer, b.byteOffset, b.byteLength).getUint16(0, true);
+    }
+
     async readUint32(): Promise<number> {
         const b = await this.readExactly(4);
         return new DataView(b.buffer, b.byteOffset, b.byteLength).getUint32(0, true);
@@ -144,18 +160,42 @@ export async function* decryptStream(
     const reader = new ChunkReader(stream);
 
     try {
-        try {
-            const magic = await reader.readExactly(4);
-            const magicStr = new TextDecoder().decode(magic);
-            if (magicStr !== 'SLBK') {
-                throw new Error('Invalid file format: Not a SLBK backup');
-            }
-        } catch (e) {
-            throw new Error('Invalid backup file or wrong password');
+        const magic = await reader.readExactly(4);
+        const magicStr = new TextDecoder().decode(magic);
+        if (magicStr !== 'SLBK') {
+            throw new Error('Invalid file format: Not a SLBK backup');
         }
 
-        const salt = await reader.readExactly(SALT_SIZE);
-        const key = await deriveAesKey(password, salt);
+        let iterations = 100000; // Old default
+
+        // Peak ahead or just try to read version if we suspect it's V2+
+        // Version 1 had Salt (16 bytes) immediately after Magic.
+        // Version 2 starts with version (2 bytes) then iterations (4 bytes).
+        // Since Salt is random, we can't easily peak. 
+        // We'll use a simple heuristic: if the next 2 bytes are a small number (version), it's likely V2.
+        // Actually, let's just use the version byte. To keep V1 compatibility, 
+        // we might have to be careful. If V1 is "Magic + 16 bytes salt", 
+        // and V2 is "Magic + 0x02 0x00 (version) + ...", 
+        // we check if the first 2 bytes after magic are 0x02 0x00.
+        
+        const nextTwo = await reader.readExactly(2);
+        const potentialVersion = new DataView(nextTwo.buffer, nextTwo.byteOffset, nextTwo.byteLength).getUint16(0, true);
+        
+        let salt: Uint8Array;
+
+        if (potentialVersion === 2) {
+            iterations = await reader.readUint32();
+            salt = await reader.readExactly(SALT_SIZE);
+        } else {
+            // It's V1. The 'nextTwo' were actually the start of the 16-byte salt.
+            iterations = 100000;
+            const remainingSalt = await reader.readExactly(SALT_SIZE - 2);
+            salt = new Uint8Array(SALT_SIZE);
+            salt.set(nextTwo);
+            salt.set(remainingSalt, 2);
+        }
+
+        const key = await deriveAesKey(password, salt, iterations);
 
         while (true) {
             let chunkLen: number;

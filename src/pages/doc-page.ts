@@ -18,6 +18,7 @@ import {haptics} from '../services/haptics';
 import {ImpactStyle} from '@capacitor/haptics';
 import {shareFile, shareFiles} from "../services/share";
 import {AuthService} from "../services/auth-service";
+import {t} from '../lib/i18n';
 
 @customElement('doc-page')
 export class DocPage extends LitElement {
@@ -76,8 +77,19 @@ export class DocPage extends LitElement {
         super.disconnectedCallback();
     }
 
+    private async confirmDecryptedShare(): Promise<boolean> {
+        return await ConfirmModal.ask({
+            title: t('doc.share_decrypted_title'),
+            description: t('doc.share_decrypted_body'),
+            confirm: t('common.share_now'),
+            destructive: false
+        });
+    }
+
     private async exportSingleImage(pageId: string): Promise<void> {
         if (!this.doc) return;
+        if (!(await this.confirmDecryptedShare())) return;
+        
         this.busy = true;
         try {
             const store = getFileStore();
@@ -101,6 +113,8 @@ export class DocPage extends LitElement {
     // 3. UPDATE: Batch Images (Share Images) with limited fallback
     private async exportImagesJpeg(): Promise<void> {
         if (!this.doc || this.pages.length === 0) return;
+        if (!(await this.confirmDecryptedShare())) return;
+
         this.busy = true;
         try {
             const store = getFileStore();
@@ -318,6 +332,8 @@ export class DocPage extends LitElement {
 
     private async exportPdf(): Promise<void> {
         if (!this.doc) return;
+        if (!(await this.confirmDecryptedShare())) return;
+
         this.busy = true;
         this.exportProgress = 0;
         this.exportTotal = this.pages.length;
@@ -355,6 +371,8 @@ export class DocPage extends LitElement {
 
     private async exportImagesZip(): Promise<void> {
         if (!this.doc) return;
+        if (!(await this.confirmDecryptedShare())) return;
+
         this.busy = true;
         try {
             const store = getFileStore();
@@ -386,9 +404,9 @@ export class DocPage extends LitElement {
 
     private async deletePage(pageId: string): Promise<void> {
         const ok = await ConfirmModal.ask({
-            title: 'Delete Page?',
-            description: 'This page will be permanently removed.',
-            confirm: 'Delete',
+            title: t('doc.delete_page_title'),
+            description: t('doc.delete_page_body'),
+            confirm: t('common.delete'),
             destructive: true
         });
         if (!ok) return;
@@ -410,9 +428,9 @@ export class DocPage extends LitElement {
     private async deleteDoc(): Promise<void> {
         if (!this.doc) return;
         const ok = await ConfirmModal.ask({
-            title: 'Delete Document?',
-            description: `Permanently delete "${this.doc.title}" and all ${this.pages.length} pages?`,
-            confirm: 'Delete Document',
+            title: t('doc.delete_doc_title'),
+            description: t('doc.delete_doc_body', {title: this.doc.title, count: this.pages.length}),
+            confirm: t('doc.delete_doc_confirm'),
             destructive: true
         });
         if (!ok) return;
@@ -443,7 +461,7 @@ export class DocPage extends LitElement {
             <div class="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
                 <div class="bg-slate-900 border border-slate-700 p-6 rounded-2xl w-full max-w-sm space-y-4 shadow-2xl">
                     <div class="flex items-center justify-between">
-                        <div class="font-bold text-slate-100">Generating PDF</div>
+                        <div class="font-bold text-slate-100">${t('doc.generating_pdf')}</div>
                         <div class="text-sm text-emerald-400 font-mono">${pct}%</div>
                     </div>
                     <div class="h-2 bg-slate-800 rounded-full overflow-hidden">
@@ -490,7 +508,7 @@ export class DocPage extends LitElement {
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                   d="M15 19l-7-7 7-7"></path>
                         </svg>
-                        Library
+                        ${t('doc.library_back')}
                     </a>
                 </div>
 
@@ -502,7 +520,7 @@ export class DocPage extends LitElement {
 
                 <div class="p-4 rounded-xl border border-slate-800 bg-slate-950 space-y-3">
                     <div class="space-y-1">
-                        <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Title</div>
+                        <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">${t('doc.title_label')}</div>
                         <input class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 min-h-[44px]"
                                .value=${live(this.doc.title)}
                                @change=${(e: Event) => this.saveMeta({title: (e.target as HTMLInputElement).value})}/>
@@ -510,7 +528,7 @@ export class DocPage extends LitElement {
 
                     <div class="grid grid-cols-2 gap-3">
                         <div class="space-y-1">
-                            <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Folder</div>
+                            <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">${t('doc.folder_label')}</div>
                             <input class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 min-h-[44px]"
                                    list="folder-list"
                                    placeholder="e.g. Finance"
@@ -523,7 +541,7 @@ export class DocPage extends LitElement {
                             </datalist>
                         </div>
                         <div class="space-y-1">
-                            <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Tags</div>
+                            <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">${t('doc.tags_label')}</div>
                             <input class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 min-h-[44px]"
                                    list="tag-list"
                                    placeholder="e.g. 2024, Paid"
@@ -538,21 +556,21 @@ export class DocPage extends LitElement {
                     </div>
 
                     <div class="space-y-1 pt-2">
-                        <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Notes & Context</div>
+                        <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">${t('doc.notes_label')}</div>
                         <textarea
                                 class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors min-h-[80px] resize-none"
-                                placeholder="Add details like 'Warranty ends Jan 2027' or 'Sent to Tax Office'..."
+                                placeholder="${t('doc.notes_placeholder')}"
                                 .value=${live(this.doc.notes ?? '')}
                                 @change=${(e: Event) => this.saveMeta({notes: (e.target as HTMLTextAreaElement).value})}
                         ></textarea>
                     </div>
 
                     <div class="space-y-1">
-                        <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">Find in document
+                        <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold">${t('doc.find_label')}
                         </div>
                         <div class="relative">
                             <input class="w-full bg-slate-900 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-emerald-500 transition-colors"
-                                   placeholder="Search text..."
+                                   placeholder="${t('doc.find_placeholder')}"
                                    .value=${live(this.searchQuery)}
                                    @input=${(e: InputEvent) => this.searchQuery = (e.target as HTMLInputElement).value}/>
                             <svg class="w-4 h-4 text-slate-500 absolute left-3 top-2.5" fill="none"
@@ -582,7 +600,7 @@ export class DocPage extends LitElement {
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                       d="M9 5l7 7-7 7"></path>
                             </svg>
-                            ${this.showExtractedText ? 'Hide Extracted Text' : 'Show Extracted Text'}
+                            ${this.showExtractedText ? t('doc.hide_text') : t('doc.show_text')}
                         </button>
                         ${this.showExtractedText ? html`
                             <div class="mt-3 space-y-4 max-h-[40vh] overflow-y-auto pr-2 custom-scrollbar">
@@ -591,8 +609,7 @@ export class DocPage extends LitElement {
                                     if (!text) return null;
                                     return html`
                                         <div class="space-y-1">
-                                            <div class="text-xs text-slate-500 font-bold uppercase tracking-wider">Page
-                                                ${i + 1}
+                                            <div class="text-xs text-slate-500 font-bold uppercase tracking-wider">${t('doc.page_label', {count: i + 1})}
                                             </div>
                                             <div class="text-sm text-slate-300 whitespace-pre-wrap select-text bg-black/50 p-3 rounded-lg border border-slate-800/50">
                                                 ${text}
@@ -601,7 +618,7 @@ export class DocPage extends LitElement {
                                     `;
                                 })}
                                 ${!this.pages.some(p => p.words?.length) ? html`
-                                    <div class="text-sm text-slate-500 italic">No text detected in this document yet.
+                                    <div class="text-sm text-slate-500 italic">${t('doc.no_text')}
                                     </div>
                                 ` : null}
                             </div>
@@ -616,36 +633,36 @@ export class DocPage extends LitElement {
                                @change=${(e: Event) => this.pdfQuality = (e.target as HTMLInputElement).checked ? 'email' : 'original'}
                                class="w-5 h-5 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-slate-900">
                         <div class="flex-1">
-                            <div class="text-sm font-medium text-slate-200">Compress for Email</div>
-                            <div class="text-xs text-slate-500">Smaller file size, lower quality</div>
+                            <div class="text-sm font-medium text-slate-200">${t('doc.compress_email')}</div>
+                            <div class="text-xs text-slate-500">${t('doc.compress_body')}</div>
                         </div>
                     </label>
 
                     <div class="flex flex-wrap gap-2 pt-2">
                         <button class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-lg shadow-emerald-900/20 min-h-[44px]"
                                 ?disabled=${this.busy || this.pages.length === 0} @click=${this.exportPdf}>
-                            ${this.busy ? 'Working...' : 'Export PDF'}
+                            ${this.busy ? '...' : t('doc.export_pdf')}
                         </button>
                         <button class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm min-h-[44px]"
                                 ?disabled=${this.busy || this.pages.length === 0}
                                 @click=${() => this.exportImagesJpeg()}>
-                            Share Images
+                            ${t('doc.share_images')}
                         </button>
                         <button class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm min-h-[44px]"
                                 ?disabled=${this.busy || this.pages.length === 0} @click=${this.exportImagesZip}>
-                            Export Zip
+                            ${t('doc.export_zip')}
                         </button>
                         <button class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm min-h-[44px]"
                                 @click=${() => {
                                     localStorage.setItem('sahifah.appendToDocId', this.doc!.id);
                                     location.hash = '#/scan';
                                 }}>
-                            Add Pages
+                            ${t('doc.add_pages')}
                         </button>
                         <div class="flex-1"></div>
                         <button class="px-3 py-2 rounded-lg border border-red-900/30 text-red-400 hover:bg-red-950/20 text-sm min-h-[44px]"
                                 @click=${this.deleteDoc}>
-                            Delete
+                            ${t('common.delete')}
                         </button>
                     </div>
                 </div>
@@ -730,12 +747,12 @@ export class DocPage extends LitElement {
                          @click=${(e: Event) => e.target === e.currentTarget && (this.viewerOpen = false)}>
 
                         <div class="px-4 py-3 flex items-center justify-between bg-black/50 border-b border-white/10 z-50 shrink-0">
-                            <div class="text-sm font-medium text-slate-200">Page ${this.viewerIndex + 1}</div>
+                            <div class="text-sm font-medium text-slate-200">${t('doc.page_label', {count: this.viewerIndex + 1})}</div>
                             <div class="flex items-center gap-4">
                                 <label class="flex items-center gap-2 cursor-pointer select-none">
                                     <input type="checkbox" .checked=${this.showOcrOverlay}
                                            @change=${(e: Event) => this.showOcrOverlay = (e.target as HTMLInputElement).checked}>
-                                    <span class="text-xs text-emerald-400 font-medium">Show OCR</span>
+                                    <span class="text-xs text-emerald-400 font-medium">${t('doc.show_ocr')}</span>
                                 </label>
                                 <button class="p-2 hover:bg-white/10 rounded-full"
                                         @click=${() => this.viewerOpen = false}>
@@ -801,7 +818,7 @@ export class DocPage extends LitElement {
                         </div>
 
                         <div class="px-4 py-3 bg-black/50 text-center text-xs text-slate-500 shrink-0">
-                            Swipe to flip • Double tap to zoom
+                            ${t('doc.viewer_hint')}
                         </div>
                     </div>
                 ` : null}

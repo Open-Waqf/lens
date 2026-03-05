@@ -2,9 +2,10 @@ import {Capacitor} from '@capacitor/core';
 import {Directory, Filesystem} from '@capacitor/filesystem';
 import {Share} from "@capacitor/share";
 import {showToast} from "../components/toast-notification";
+import {t} from '../lib/i18n';
 
 // 1. Support function to write a file to temp storage (Native only)
-async function writeTempFile(file: File): Promise<string> {
+async function writeTempFile(file: File): Promise<{ uri: string, path: string }> {
     const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
     const tempPath = `share_${Date.now()}_${cleanName}`;
 
@@ -40,18 +41,20 @@ async function writeTempFile(file: File): Promise<string> {
         directory: Directory.Cache
     });
 
-    return result.uri;
+    return {uri: result.uri, path: tempPath};
 }
 
 // 2. Main function for Batch Sharing (Multiple Files)
 export async function shareFiles(files: File[], title: string = 'Share'): Promise<void> {
+    const tempPaths: string[] = [];
     if (Capacitor.isNativePlatform()) {
         try {
             const uris: string[] = [];
             // Write all files to temp storage first
             for (const f of files) {
-                const uri = await writeTempFile(f);
+                const {uri, path} = await writeTempFile(f);
                 uris.push(uri);
+                tempPaths.push(path);
             }
 
             // Share all URIs at once
@@ -64,7 +67,19 @@ export async function shareFiles(files: File[], title: string = 'Share'): Promis
         } catch (e) {
             console.error('Native sharing failed', e);
             if (files.length === 1) downloadFileFallback(files[0], files[0].name);
-            else showToast("Sharing failed. Please try exporting as Zip.", 'error');
+            else showToast(t('doc.share_failed_zip'), 'error');
+        } finally {
+            // CRITICAL: Securely delete unencrypted temp files immediately
+            for (const path of tempPaths) {
+                try {
+                    await Filesystem.deleteFile({
+                        path,
+                        directory: Directory.Cache
+                    });
+                } catch (err) {
+                    console.warn('Failed to delete temp share file', path, err);
+                }
+            }
         }
     } else {
         // Web Fallback
@@ -79,7 +94,7 @@ export async function shareFiles(files: File[], title: string = 'Share'): Promis
             }
         } else {
             if (files.length === 1) downloadFileFallback(files[0], files[0].name);
-            else showToast("Browser cannot share multiple files. Use 'Export Zip'.", 'info');
+            else showToast(t('doc.browser_share_zip'), 'info');
         }
     }
 }

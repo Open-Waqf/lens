@@ -161,6 +161,15 @@ export class ScanRepo {
         return Array.from(new Set(tags)).sort();
     }
 
+    async deleteFolder(folderName: string): Promise<void> {
+        await db.transaction('rw', db.docs, async () => {
+            await db.docs.where('folder').equals(folderName).modify({
+                folder: null,
+                updatedAt: Date.now()
+            });
+        });
+    }
+
     async updateExistingPage(
         pageId: string,
         master: PageEditorSaveDetail['master'],

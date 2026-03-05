@@ -13,6 +13,7 @@ import {ocrQueue} from '../services/ocr-queue';
 import {haptics} from "../services/haptics";
 import {ImpactStyle} from "@capacitor/haptics";
 import {showToast} from "../components/toast-notification";
+import {t} from '../lib/i18n';
 
 type ViewMode = 'list' | 'gallery';
 
@@ -203,9 +204,9 @@ export class LibraryPage extends LitElement {
         if (count === 0) return;
 
         const ok = await ConfirmModal.ask({
-            title: `Delete ${count} Document${count > 1 ? 's' : ''}?`,
-            description: 'This action cannot be undone.',
-            confirm: 'Delete',
+            title: t('library.delete_count_title', {count, suffix: count > 1 ? 's' : ''}),
+            description: t('library.delete_body'),
+            confirm: t('common.delete'),
             destructive: true
         });
 
@@ -214,7 +215,7 @@ export class LibraryPage extends LitElement {
         for (const id of this.selectedIds) {
             await this.repo.deleteDocCompletely(id);
         }
-        showToast(`Deleted ${count} documents`, 'info');
+        showToast(t('library.deleted_count', {count}), 'info');
         this.selectedIds = new Set();
         this.selectionMode = false;
         await this.loadDocs();
@@ -222,11 +223,11 @@ export class LibraryPage extends LitElement {
 
     private get groupedDocs() {
         const flatList = this.visibleDocs;
-        if (!this.groupByFolder) return {'All Documents': flatList};
+        if (!this.groupByFolder) return {[t('library.all_docs')]: flatList};
 
         const groups: Record<string, DocRecord[]> = {};
         for (const doc of flatList) {
-            const folder = doc.folder || 'Unsorted';
+            const folder = doc.folder || t('library.unsorted');
             if (!groups[folder]) groups[folder] = [];
             groups[folder].push(doc);
         }
@@ -238,29 +239,49 @@ export class LibraryPage extends LitElement {
     private getSearchSnippet(fullText: string | undefined, query: string): string | null {
         if (!fullText || !query) return null;
 
+        const q = query.trim().toLowerCase();
+        if (!q) return null;
+
         const lowerText = fullText.toLowerCase();
-        const lowerQuery = query.toLowerCase();
-        const idx = lowerText.indexOf(lowerQuery);
+        const idx = lowerText.indexOf(q);
 
         if (idx === -1) return null;
 
-        const start = Math.max(0, idx - 20);
-        const end = Math.min(fullText.length, idx + query.length + 20);
+        // Aim for ~80 chars total context (40 before, 40 after)
+        const contextLen = 40;
+        let start = Math.max(0, idx - contextLen);
+        let end = Math.min(fullText.length, idx + q.length + contextLen);
 
-        let snippet = fullText.substring(start, end);
+        // Try to snap to word boundaries
+        if (start > 0) {
+            const firstSpace = fullText.indexOf(' ', start);
+            if (firstSpace !== -1 && firstSpace < idx) {
+                start = firstSpace + 1;
+            }
+        }
+        if (end < fullText.length) {
+            const lastSpace = fullText.lastIndexOf(' ', end);
+            if (lastSpace !== -1 && lastSpace > idx + q.length) {
+                end = lastSpace;
+            }
+        }
+
+        let snippet = fullText.substring(start, end).trim();
         if (start > 0) snippet = '...' + snippet;
         if (end < fullText.length) snippet = snippet + '...';
 
         // Highlight match case-insensitively
-        const regex = new RegExp(`(${query})`, 'gi');
+        // Escape regex special chars in query
+        const escapedQuery = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`(${escapedQuery})`, 'gi');
         return snippet.replace(regex, '<b class="text-emerald-400 bg-emerald-950/50 px-0.5 rounded">$1</b>');
     }
 
     private async mergeSelected() {
         const ids = Array.from(this.selectedIds);
         const ok = await ConfirmModal.ask({
-            title: `Merge ${ids.length} Documents?`,
-            description: 'All pages will be combined into the oldest document. This cannot be undone.',
+            title: t('library.merge_count_title', {count: ids.length}),
+            description: t('library.merge_body'),
             confirm: 'Merge'
         });
 
@@ -273,9 +294,9 @@ export class LibraryPage extends LitElement {
             this.highlightDocId = masterId;
             await this.loadDocs();
             void haptics.impact(ImpactStyle.Medium);
-            showToast(`Merged ${ids.length} documents successfully`, 'success');
+            showToast(t('library.merged_success', {count: ids.length}), 'success');
         } catch (e) {
-            showToast('Merge failed: ' + String(e), 'error')
+            showToast(t('library.merge_failed', {error: String(e)}), 'error')
         } finally {
         }
     }
@@ -283,11 +304,11 @@ export class LibraryPage extends LitElement {
     private async moveSelectedToFolder() {
         // FIX: Instead of 'suggestions', we list folders in the description
         const folders = Array.from(new Set(this.allDocsSource.map(d => d.folder).filter(Boolean))) as string[];
-        const folderList = folders.length > 0 ? `\n\nExisting: ${folders.join(', ')}` : '';
+        const folderList = folders.length > 0 ? `\n\n${t('library.existing_folders', {folders: folders.join(', ')})}` : '';
 
         const folderName = await ConfirmModal.prompt({
-            title: 'Move to Folder',
-            description: 'Enter a folder name or leave blank to unsort.' + folderList,
+            title: t('library.move_to_folder'),
+            description: t('library.enter_folder_name') + folderList,
             placeholder: 'e.g. Taxes, Work...',
             confirm: 'Move'
         });
@@ -304,7 +325,25 @@ export class LibraryPage extends LitElement {
         this.selectedIds = new Set();
         await this.loadDocs();
         void haptics.impact(ImpactStyle.Light);
-        showToast(`Moved to "${finalFolder || 'Unsorted'}"`, 'success');
+        showToast(t('library.moved_to', {folder: finalFolder || t('library.unsorted')}), 'success');
+    }
+
+    private async onDeleteFolder(folderName: string) {
+        if (folderName === t('library.unsorted')) return;
+
+        const ok = await ConfirmModal.ask({
+            title: t('library.delete_folder_title'),
+            description: t('library.delete_folder_body', {folder: folderName}),
+            confirm: t('common.unsort'),
+            destructive: false
+        });
+
+        if (!ok) return;
+
+        await this.repo.deleteFolder(folderName);
+        await this.loadDocs();
+        void haptics.impact(ImpactStyle.Medium);
+        showToast(t('library.folder_removed', {folder: folderName}), 'info');
     }
 
     private renderSafetyPrompt() {
@@ -318,16 +357,14 @@ export class LibraryPage extends LitElement {
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                               d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
                     </svg>
-                    Protect Your Data
+                    ${t('library.protect_data')}
                 </div>
                 <p class="text-xs text-slate-300">
-                    You have ${this.allDocsSource.length} documents stored locally. If you lose your device or clear
-                    browser
-                    data, these will be lost forever.
+                    ${t('library.protect_body', {count: this.allDocsSource.length})}
                 </p>
                 <button @click=${() => location.hash = '#/settings'}
                         class="text-xs font-bold text-amber-400 hover:underline">
-                    Create an Encrypted Backup now →
+                    ${t('library.create_backup')}
                 </button>
             </div>
         `;
@@ -417,14 +454,14 @@ export class LibraryPage extends LitElement {
                               d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
                     </svg>
                 </div>
-                <div class="text-slate-400">No documents match "<b>${this.query}</b>"</div>
+                <div class="text-slate-400">${unsafeHTML(t('library.no_results', {query: `<b>${this.query}</b>`}))}</div>
                 <button class="text-emerald-400 text-sm font-bold hover:underline"
                         @click=${() => {
                             this.query = '';
                             this.selectedTag = null;
                             this.applyFilters();
                         }}>
-                    Clear Filters
+                    ${t('library.clear_filters')}
                 </button>
             </div>
         `;
@@ -438,14 +475,14 @@ export class LibraryPage extends LitElement {
             <div class="sticky top-0 bg-slate-950/90 backdrop-blur-md pt-4 pb-2 z-10 space-y-3">
                 <div class="flex items-center justify-between gap-3">
                     <div class="flex items-center gap-3">
-                        <h1 class="text-2xl font-bold text-slate-100">Library</h1>
+                        <h1 class="text-2xl font-bold text-slate-100">${t('library.title')}</h1>
                         ${this.ocrActiveCount > 0 ? html`
                             <div class="flex items-center gap-2 px-2 py-1 rounded-lg bg-emerald-950/40 border border-emerald-900/30 max-w-[180px]">
                                 <div class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0"></div>
                                 <div class="flex flex-col min-w-0">
-                                    <span class="text-[9px] font-bold text-emerald-500 uppercase leading-none">Analyzing</span>
+                                    <span class="text-[9px] font-bold text-emerald-500 uppercase leading-none">${t('library.analyzing')}</span>
                                     <span class="text-[10px] text-emerald-200 truncate font-medium">
-                                        ${currentTask || 'Documents...'}
+                                        ${currentTask || t('library.analyzing_docs')}
                                     </span>
                                 </div>
                             </div>
@@ -460,7 +497,7 @@ export class LibraryPage extends LitElement {
                     <input
                             type="text"
                             class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-600 transition-colors"
-                            placeholder="Search docs & content..."
+                            placeholder="${t('library.search_placeholder')}"
                             .value=${live(this.query)}
                             @input=${this.onSearchInput}
                     >
@@ -498,7 +535,7 @@ export class LibraryPage extends LitElement {
                     Delete (${this.selectedIds.size})
                 </button>
                 <button class="p-2 rounded-full hover:bg-slate-800 text-slate-400" @click=${this.toggleSelectionMode}>
-                    Cancel
+                    ${t('common.cancel')}
                 </button>
             ` : html`
                 <button class="p-2 rounded-full ${this.groupByFolder ? 'text-emerald-400 bg-emerald-950/30' : 'text-slate-400'}"
@@ -545,12 +582,25 @@ export class LibraryPage extends LitElement {
         return html`
             <div class="space-y-3">
                 ${this.groupByFolder ? html`
-                    <h2 class="text-xs font-bold text-slate-500 uppercase tracking-widest px-1 flex items-center gap-2">
-                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                  d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
-                        </svg>
-                        ${folderName} (${docs.length})
+                    <h2 class="text-xs font-bold text-slate-500 uppercase tracking-widest px-1 flex items-center justify-between gap-2">
+                        <div class="flex items-center gap-2">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
+                            </svg>
+                            ${folderName} (${docs.length})
+                        </div>
+                        
+                        ${folderName !== t('library.unsorted') ? html`
+                            <button @click=${() => this.onDeleteFolder(folderName)}
+                                    class="p-1 hover:bg-slate-800 rounded transition-colors text-slate-600 hover:text-red-400"
+                                    title="Unsort Folder">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                </svg>
+                            </button>
+                        ` : null}
                     </h2>
                 ` : null}
 
@@ -575,9 +625,9 @@ export class LibraryPage extends LitElement {
                 </div>
 
                 <div>
-                    <h2 class="text-xl font-bold text-slate-200">No scans yet</h2>
+                    <h2 class="text-xl font-bold text-slate-200">${t('library.no_scans')}</h2>
                     <p class="text-sm text-slate-500 max-w-xs mx-auto mt-2">
-                        Tap the camera button below to digitize your first document securely.
+                        ${t('library.no_scans_body')}
                     </p>
                 </div>
 
@@ -657,7 +707,7 @@ export class LibraryPage extends LitElement {
                     }
                     ${isGallery && snippet ? html`
                         <div class="absolute bottom-2 right-2 bg-emerald-600 text-white text-[10px] px-1.5 py-0.5 rounded shadow">
-                            Match
+                            ${t('library.match')}
                         </div>
                     ` : null}
                 </div>
@@ -666,7 +716,7 @@ export class LibraryPage extends LitElement {
                     <h3 class="text-slate-200 font-medium truncate leading-tight text-sm">${doc.title}</h3>
 
                     <div class="flex items-center gap-2 text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
-                        <span>${doc.pageIds.length} page${doc.pageIds.length === 1 ? '' : 's'}</span>
+                        <span>${t('library.page_suffix', {count: doc.pageIds.length, suffix: doc.pageIds.length === 1 ? '' : 's'})}</span>
                         ${!isGallery ? html`<span>•</span><span>${date}</span>` : null}
                     </div>
 

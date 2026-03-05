@@ -162,6 +162,71 @@ export async function opfsRemoveTree(prefixDir: string): Promise<void> {
     await opfsRemoveEntry(prefixDir, {recursive: true});
 }
 
+/**
+ * MANDATE FR-VAULT-004: Securely wipe OPFS tree by overwriting file contents 
+ * with zeros before removing them.
+ */
+export async function secureOverwriteAndRemoveOpfsTree(prefixDir: string): Promise<void> {
+    const root = await getRootDir();
+    const parts = splitPath(prefixDir);
+    let dir: FileSystemDirectoryHandle;
+    try {
+        dir = await ensureDir(root, parts, false);
+    } catch (e) {
+        if (isNotFound(e)) return;
+        throw e;
+    }
+
+    await secureWipeRecursive(dir);
+    
+    // After wiping contents, remove the tree
+    const name = parts.pop();
+    if (name) {
+        const parent = await ensureDir(root, parts, false);
+        await parent.removeEntry(name, {recursive: true});
+    } else {
+        // We are at root, remove everything inside
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        for await (const [name, handle] of (dir as any).entries()) {
+            await dir.removeEntry(name, {recursive: handle.kind === 'directory'});
+        }
+    }
+}
+
+async function secureWipeRecursive(dir: FileSystemDirectoryHandle): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for await (const [name, handle] of (dir as any).entries()) {
+        if (handle.kind === 'file') {
+            const fileHandle = handle as FileSystemFileHandle;
+            try {
+                const file = await fileHandle.getFile();
+                const size = file.size;
+                if (size > 0) {
+                    const writable = await fileHandle.createWritable();
+                    // Overwrite with zeros
+                    const zeros = new Uint8Array(Math.min(size, 1024 * 1024)); // Chunked if very large
+                    zeros.fill(0);
+                    let written = 0;
+                    while (written < size) {
+                        const toWrite = Math.min(zeros.length, size - written);
+                        await writable.write({
+                            type: 'write',
+                            position: written,
+                            data: toWrite === zeros.length ? zeros.buffer : zeros.slice(0, toWrite).buffer
+                        });
+                        written += toWrite;
+                    }
+                    await writable.close();
+                }
+            } catch (e) {
+                console.warn(`Failed to securely wipe ${name}`, e);
+            }
+        } else if (handle.kind === 'directory') {
+            await secureWipeRecursive(handle as FileSystemDirectoryHandle);
+        }
+    }
+}
+
 async function listFilesRecursive(dir: FileSystemDirectoryHandle, prefix: string, out: string[]): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     for await (const [name, handle] of (dir as any).entries()) {
