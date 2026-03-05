@@ -62,6 +62,7 @@ export class SettingsPage extends LitElement {
 
     @state() private enableOcr = true;
     @state() private ocrLang = 'ara+eng';
+    @state() private clearClipboardAfter60s = false;
     @state() private hasIndexRisk = false;
     @state() private storageAuditBusy = false;
     @state() private storageAuditFound = 0;
@@ -148,6 +149,7 @@ export class SettingsPage extends LitElement {
         this.defaultVault = s.defaultVault;
         this.enableOcr = s.enableOcr;
         this.ocrLang = s.ocrLang || 'ara+eng';
+        this.clearClipboardAfter60s = s.clearClipboardAfter60s;
     }
 
     private async refreshStorageRisk() {
@@ -199,6 +201,11 @@ export class SettingsPage extends LitElement {
         if (!lang) return;
         this.ocrLang = lang;
         settings.setOcrLang(lang);
+    }
+
+    private toggleClipboardAutoClear() {
+        this.clearClipboardAfter60s = !this.clearClipboardAfter60s;
+        settings.setClipboardAutoClear(this.clearClipboardAfter60s);
     }
 
     private async toggleAuth() {
@@ -912,6 +919,18 @@ export class SettingsPage extends LitElement {
                         ${t('settings.ocr_arabic_disclaimer')}
                     </div>
                 ` : null}
+
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="text-sm text-slate-200">${t('settings.clipboard_auto_clear')}</div>
+                        <div class="text-[10px] text-slate-500">${t('settings.clipboard_auto_clear_desc')}</div>
+                    </div>
+                    <button class="relative h-6 w-11 rounded-full transition-colors ${this.clearClipboardAfter60s ? 'bg-emerald-600' : 'bg-slate-700'}"
+                            aria-label=${t('settings.clipboard_auto_clear')}
+                            @click=${() => this.toggleClipboardAutoClear()}>
+                        <span class="absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${this.clearClipboardAfter60s ? 'translate-x-5' : ''}"></span>
+                    </button>
+                </div>
             </section>
         `;
     }

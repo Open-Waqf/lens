@@ -16,5 +16,15 @@ describe('settings OCR language', () => {
         const s = await settings.get();
         expect(s.ocrLang).toBe('eng');
     });
-});
 
+    it('defaults clipboard auto-clear to disabled', async () => {
+        const s = await settings.get();
+        expect(s.clearClipboardAfter60s).toBe(false);
+    });
+
+    it('persists clipboard auto-clear setting', async () => {
+        settings.setClipboardAutoClear(true);
+        const s = await settings.get();
+        expect(s.clearClipboardAfter60s).toBe(true);
+    });
+});

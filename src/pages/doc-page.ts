@@ -19,6 +19,8 @@ import {ImpactStyle} from '@capacitor/haptics';
 import {shareFile, shareFiles} from "../services/share";
 import {AuthService} from "../services/auth-service";
 import {t} from '../lib/i18n';
+import {writeClipboardWithAutoClear} from '../services/clipboard';
+import {showToast} from '../components/toast-notification';
 
 @customElement('doc-page')
 export class DocPage extends LitElement {
@@ -230,6 +232,27 @@ export class DocPage extends LitElement {
             }
         }
         this.thumbs = thumbs;
+    }
+
+    private getExtractedTextContent(): string {
+        return this.pages
+            .map((p) => p.words?.map(w => w.text).join(' ').trim() || '')
+            .filter(Boolean)
+            .join('\n\n');
+    }
+
+    private async copyExtractedText(): Promise<void> {
+        const text = this.getExtractedTextContent();
+        if (!text) {
+            showToast(t('doc.no_text'), 'info');
+            return;
+        }
+        try {
+            await writeClipboardWithAutoClear(text);
+            showToast(t('doc.copied_text'), 'success');
+        } catch {
+            showToast(t('doc.copy_failed'), 'error');
+        }
     }
 
     private async editPage(page: PageRecord): Promise<void> {
@@ -602,6 +625,12 @@ export class DocPage extends LitElement {
                             </svg>
                             ${this.showExtractedText ? t('doc.hide_text') : t('doc.show_text')}
                         </button>
+                        ${this.showExtractedText ? html`
+                            <button class="mt-2 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs min-h-[44px]"
+                                    @click=${() => this.copyExtractedText()}>
+                                ${t('doc.copy_text')}
+                            </button>
+                        ` : null}
                         ${this.showExtractedText ? html`
                             <div class="mt-3 space-y-4 max-h-[40vh] overflow-y-auto pr-2 custom-scrollbar">
                                 ${this.pages.map((p, i) => {

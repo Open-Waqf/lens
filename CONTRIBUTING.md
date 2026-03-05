@@ -48,6 +48,7 @@ Backups use a specific chunked-streaming protocol to allow multi-gigabyte export
 
 * **No hardcoded UI text:** User-facing strings must use translation keys from `src/lib/locales/en.ts` via `t(...)`.
 * **App shell included:** Navigation labels, fatal/recovery prompts, and toast messages in `app-root` follow the same rule.
+* **Clipboard privacy:** Copy actions must route through `src/services/clipboard.ts` so opt-in auto-clear behavior remains consistent.
 
 ---
 

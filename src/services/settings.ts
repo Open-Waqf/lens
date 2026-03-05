@@ -3,6 +3,7 @@ export interface AppSettings {
     defaultVault: boolean;
     enableOcr: boolean;
     ocrLang: string;
+    clearClipboardAfter60s: boolean;
 }
 
 // Internal "Secrets" - Changing these invalidates existing settings
@@ -16,6 +17,7 @@ const KEYS = {
     DEFAULT_VAULT: 'sahifah.defaultVault',
     ENABLE_OCR: 'sahifah.enableOcr',
     OCR_LANG: 'sahifah.ocrLang',
+    CLIPBOARD_AUTO_CLEAR: 'sahifah.clipboardAutoClear',
 };
 
 class SettingsService {
@@ -47,6 +49,7 @@ class SettingsService {
             defaultVault: localStorage.getItem(KEYS.DEFAULT_VAULT) === '1',
             enableOcr: ocrEnabled,
             ocrLang,
+            clearClipboardAfter60s: localStorage.getItem(KEYS.CLIPBOARD_AUTO_CLEAR) === '1',
         };
     }
 
@@ -57,6 +60,11 @@ class SettingsService {
 
     setOcrLang(lang: string) {
         localStorage.setItem(KEYS.OCR_LANG, lang);
+        this._notify();
+    }
+
+    setClipboardAutoClear(enable: boolean) {
+        localStorage.setItem(KEYS.CLIPBOARD_AUTO_CLEAR, enable ? '1' : '0');
         this._notify();
     }
 

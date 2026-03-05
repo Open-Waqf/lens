@@ -22,6 +22,7 @@ control. Read our [Local Privacy Policy](PRIVACY_POLICY.md).
 * **Zero-Cloud Architecture:** Documents are stored in the **Origin Private File System (OPFS)**, isolated from other
   websites.
 * **Biometric App Lock:** Immediate re-locking upon app multitasking/resume to prevent unauthorized physical access.
+* **Clipboard Auto-Clear (Opt-in):** Clears app-copied text from clipboard after 60 seconds.
 * **Stream-Encrypted Backups:** Export your library as a `.slbk` vault using AES-256-GCM with a chunked streaming
   protocol (Magic: `SLBK`).
 * **Nuclear Reset:** A "Reset Storage" kill-switch erases all local documents and database entries instantly.
