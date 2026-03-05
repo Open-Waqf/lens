@@ -142,6 +142,93 @@ function Ensure-AppForeground([string]$adbPath, [string]$serial, [string]$packag
     }
 }
 
+function Assert-FlagSecureEnabled(
+    [string]$adbPath,
+    [string]$serial,
+    [string]$packageName,
+    [string]$windowDumpPath,
+    [string]$summaryPath,
+    [string]$cmdWorkingDir
+) {
+    Write-AdbTextFile $adbPath $serial "shell dumpsys window windows" $windowDumpPath $cmdWorkingDir
+    $dump = Get-Content -Path $windowDumpPath -Raw
+    $lines = $dump -split "(`r`n|`n)"
+
+    $focusLines = @()
+    foreach ($line in $lines) {
+        if ($line -match "^\s*(mCurrentFocus|mFocusedApp)\s*=") {
+            $focusLines += $line.Trim()
+        }
+    }
+
+    $pkgPattern = [regex]::Escape($packageName)
+    $start = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match "Window\{.*$pkgPattern\/") {
+            $start = $i
+            break
+        }
+    }
+
+    if ($start -lt 0) {
+        $summary = @(
+            "FLAG_SECURE check: FAIL"
+            "Reason: Could not find focused package window block for '$packageName'."
+            ""
+            "Focus lines:"
+        ) + $focusLines
+        $summary -join "`r`n" | Out-File -FilePath $summaryPath -Encoding utf8
+        throw "FLAG_SECURE verification failed: package window block not found. See $summaryPath"
+    }
+
+    $end = [Math]::Min($lines.Count - 1, $start + 120)
+    for ($j = $start + 1; $j -le $end; $j++) {
+        if ($lines[$j] -match "^\s*Window #\d+") {
+            $end = $j - 1
+            break
+        }
+    }
+    $windowBlock = ($lines[$start..$end] -join "`r`n")
+
+    $hasSecure = $false
+    if ($windowBlock -match "FLAG_SECURE" -or $windowBlock -match "(?i)\bsecure=true\b") {
+        $hasSecure = $true
+    }
+
+    if (-not $hasSecure) {
+        $flagMatches = [regex]::Matches($windowBlock, "(?i)\bfl=(?:0x)?([0-9a-f]+)")
+        foreach ($m in $flagMatches) {
+            $hex = $m.Groups[1].Value
+            try {
+                $flagsValue = [Convert]::ToInt64($hex, 16)
+                if (($flagsValue -band 0x2000) -ne 0) {
+                    $hasSecure = $true
+                    break
+                }
+            } catch {
+                # ignore malformed flags lines
+            }
+        }
+    }
+
+    $status = if ($hasSecure) { "PASS" } else { "FAIL" }
+    $summary = @(
+        "FLAG_SECURE check: $status"
+        "Package: $packageName"
+        ""
+        "Focus lines:"
+    ) + $focusLines + @(
+        ""
+        "Focused window block excerpt:"
+        $windowBlock
+    )
+    $summary -join "`r`n" | Out-File -FilePath $summaryPath -Encoding utf8
+
+    if (-not $hasSecure) {
+        throw "FLAG_SECURE verification failed: secure flag not found in focused window block. See $summaryPath"
+    }
+}
+
 function Get-JavaMajorVersion([string]$javaExePath) {
     try {
         $verText = & $javaExePath -version 2>&1 | Out-String
@@ -410,6 +497,11 @@ if ($launchText -match "Error type\s+\d+" -or $launchText -match "does not exist
 }
 Ensure-AppForeground $adb $EmulatorSerial $PackageName $launchTarget
 
+Step "Verifying FLAG_SECURE on foreground app window"
+$windowDump = Join-Path $outDir "window-windows.txt"
+$windowFlags = Join-Path $outDir "window-flags.txt"
+Assert-FlagSecureEnabled $adb $EmulatorSerial $PackageName $windowDump $windowFlags $cmdWorkingDir
+
 Step "Collecting diagnostics and logs into $outDir"
 
 $deviceInfo = Join-Path $outDir "device-info.txt"
@@ -671,4 +763,4 @@ if ($RunMaestro) {
     Write-Host "- Maestro summary saved in: $outDir\\maestro-output.txt" -ForegroundColor Green
 }
 Write-Host "- Total script runtime: $(Format-Duration $scriptElapsed)" -ForegroundColor Green
-Write-Host "- Share files from this folder so I can analyze failures/perf: logcat.txt, meminfo.txt, screenshot.png, window-dump.xml, maestro-output.txt" -ForegroundColor Green
+Write-Host "- Share files from this folder so I can analyze failures/perf: logcat.txt, meminfo.txt, screenshot.png, window-dump.xml, window-flags.txt, window-windows.txt, maestro-output.txt" -ForegroundColor Green
