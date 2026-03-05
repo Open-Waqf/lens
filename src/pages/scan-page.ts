@@ -916,13 +916,14 @@ export class ScanPage extends LitElement {
 
         return html`
             <div class="flex gap-4 overflow-x-auto py-3 px-4 no-scrollbar snap-x items-start">
-                ${this.strip.map((it, idx) => html`
-                    <div class="relative shrink-0 snap-center group pt-2">
+                        ${this.strip.map((it, idx) => html`
+                            <div class="relative shrink-0 snap-center group pt-2">
 
-                        <button class="relative block rounded-lg border ${selected === it.id ? 'border-emerald-500 ring-2 ring-emerald-500/20' : 'border-slate-800'} overflow-hidden transition-all active:scale-95 bg-black"
-                                style="width: 84px; height: 108px;"
-                                title="Edit page"
-                                @click=${() => void this.openExistingPageInEditor(it.id)}>
+                                <button class="relative block rounded-lg border ${selected === it.id ? 'border-emerald-500 ring-2 ring-emerald-500/20' : 'border-slate-800'} overflow-hidden transition-all active:scale-95 bg-black"
+                                        style="width: 84px; height: 108px;"
+                                        title=${t('scan.edit_page')}
+                                        aria-label=${t('scan.edit_page')}
+                                        @click=${() => void this.openExistingPageInEditor(it.id)}>
 
                             <img src=${it.url} class="w-full h-full object-cover opacity-90 group-hover:opacity-100"
                                  alt="thumb"/>
@@ -937,6 +938,7 @@ export class ScanPage extends LitElement {
                         </button>
 
                         <button class="absolute top-0 right-[-6px] w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center shadow-md z-10 active:scale-90 transition-transform border-2 border-slate-950"
+                                aria-label=${t('scan.remove_page')}
                                 @click=${(e: Event) => this.removePage(it.id, e)}>
                             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3"
@@ -1108,6 +1110,7 @@ export class ScanPage extends LitElement {
 
                             ${this.camera.torchSupported ? html`
                                 <button class="absolute top-6 right-6 p-4 rounded-full bg-black/40 backdrop-blur-xl border border-white/10"
+                                        aria-label=${t('scan.toggle_torch')}
                                         @click=${async () => {
                                             try {
                                                 await this.camera.toggleTorch();
@@ -1126,6 +1129,7 @@ export class ScanPage extends LitElement {
 
                         <div class="flex items-center justify-between px-10 pb-10">
                             <button class="p-5 text-slate-400 active:text-white"
+                                    aria-label=${t('scan.import_files')}
                                     ?disabled=${this.busy}
                                     @click=${() => this.pickFiles({multiple: !this.replacePageId})}>
                                 <svg class="w-9 h-9" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1141,6 +1145,7 @@ export class ScanPage extends LitElement {
                             </button>
 
                             <button class="p-5 text-slate-400 active:text-white"
+                                    aria-label=${t('scan.done')}
                                     @click=${() => void this.exitScan()}>
                                 ${this.session.hasPages
                                         ? html`

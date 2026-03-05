@@ -712,6 +712,7 @@ export class SettingsPage extends LitElement {
                         <div class="text-[10px] text-slate-500">Require Biometrics to open app</div>
                     </div>
                     <button class="relative h-6 w-11 rounded-full transition-colors ${this.requireAuth ? 'bg-emerald-600' : 'bg-slate-700'}"
+                            aria-label=${t('settings.app_lock')}
                             @click=${this.toggleAuth}>
                         <span class="absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${this.requireAuth ? 'translate-x-5' : ''}"></span>
                     </button>
@@ -724,6 +725,7 @@ export class SettingsPage extends LitElement {
                             <div class="text-[10px] text-slate-500">Encrypt image files at rest by default</div>
                         </div>
                         <button class="relative h-6 w-11 rounded-full transition-colors ${this.defaultVault ? 'bg-emerald-600' : 'bg-slate-700'}"
+                                aria-label=${t('settings.vault_mode')}
                                 @click=${this.toggleDefaultVault}>
                             <span class="absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${this.defaultVault ? 'translate-x-5' : ''}"></span>
                         </button>
@@ -903,6 +905,7 @@ export class SettingsPage extends LitElement {
                         <div class="text-[10px] text-slate-500">Extract text for search.</div>
                     </div>
                     <button class="relative h-6 w-11 rounded-full transition-colors ${this.enableOcr ? 'bg-emerald-600' : 'bg-slate-700'}"
+                            aria-label=${t('settings.ocr_toggle')}
                             @click=${() => this.toggleOcr()}>
                         <span class="absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${this.enableOcr ? 'translate-x-5' : ''}"></span>
                     </button>
