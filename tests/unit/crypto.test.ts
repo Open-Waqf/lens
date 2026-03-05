@@ -89,7 +89,7 @@ describe('Critical: Backup Encryption Protocol', () => {
 
         await expect(async () => {
             await streamToString(decryptStream(bytesToStream(encrypted), 'wrong-pass'));
-        }).rejects.toThrowError('Incorrect password');
+        }).rejects.toThrowError('Incorrect password.');
     });
 
     it('fails with corruption error for truncated files', async () => {

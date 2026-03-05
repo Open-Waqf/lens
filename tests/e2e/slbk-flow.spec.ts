@@ -44,5 +44,8 @@ test('SLBK restore requires password', async ({page}) => {
     await page.getByPlaceholder('Password').fill('wrong-password');
     await page.getByRole('button', {name: 'Restore', exact: true}).click();
 
-    await expect(page.getByText(/Incorrect password/)).toBeVisible({timeout: 10000});
+    await expect(page.getByText('Incorrect password.')).toBeVisible({timeout: 10000});
+
+    await page.goto('http://localhost:4173/#/library');
+    await expect(page.getByText('No scans yet')).toBeVisible({timeout: 10000});
 });

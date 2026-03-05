@@ -12,6 +12,8 @@ const MAX_FRAME_SIZE = 100 * 1024 * 1024;
 const MAX_META_SIZE = 4 * 1024 * 1024;
 
 const HEADER_FIXED_SIZE = 4 + 2 + 1 + 4 + 1 + SALT_SIZE + 1 + IV_SIZE + 8;
+export const ERR_INCORRECT_PASSWORD = 'Incorrect password.';
+export const ERR_CORRUPTED_VAULT = 'Vault file is corrupted or incomplete.';
 
 export type EncryptOptions = {
     iterations?: number;
@@ -258,30 +260,30 @@ class ChunkReader {
 async function decryptV3(reader: ChunkReader, password: string): Promise<AsyncGenerator<Uint8Array>> {
     const kdf = (await reader.readExactly(1))[0];
     if (kdf !== KDF_PBKDF2_SHA256) {
-        throw new Error('Vault file is corrupted or incomplete.');
+        throw new Error(ERR_CORRUPTED_VAULT);
     }
 
     const iterations = await reader.readUint32BE();
     if (iterations < PBKDF2_ITERATIONS_MIN) {
-        throw new Error('Vault file is corrupted or incomplete.');
+        throw new Error(ERR_CORRUPTED_VAULT);
     }
 
     const saltLen = (await reader.readExactly(1))[0];
     if (saltLen !== SALT_SIZE) {
-        throw new Error('Vault file is corrupted or incomplete.');
+        throw new Error(ERR_CORRUPTED_VAULT);
     }
     const salt = await reader.readExactly(saltLen);
 
     const ivLen = (await reader.readExactly(1))[0];
     if (ivLen !== IV_SIZE) {
-        throw new Error('Vault file is corrupted or incomplete.');
+        throw new Error(ERR_CORRUPTED_VAULT);
     }
     const headerIv = await reader.readExactly(ivLen);
 
     const metaLenBytes = await reader.readExactly(8);
     const metaLen = readUint64BE(new DataView(metaLenBytes.buffer, metaLenBytes.byteOffset, metaLenBytes.byteLength), 0);
     if (metaLen < 0 || metaLen > MAX_META_SIZE) {
-        throw new Error('Vault file is corrupted or incomplete.');
+        throw new Error(ERR_CORRUPTED_VAULT);
     }
 
     const key = await deriveAesKey(password, salt, iterations);
@@ -304,7 +306,7 @@ async function decryptV3(reader: ChunkReader, password: string): Promise<AsyncGe
             const chunkLen = await reader.readUint64BEOrEof();
             if (chunkLen === null) break;
             if (chunkLen > MAX_FRAME_SIZE) {
-                throw new Error('Vault file is corrupted or incomplete.');
+                throw new Error(ERR_CORRUPTED_VAULT);
             }
 
             const iv = await reader.readExactly(IV_SIZE);
@@ -352,7 +354,7 @@ async function decryptLegacyAfterMagic(
             if (!lenBytes) break;
             const chunkLen = new DataView(lenBytes.buffer, lenBytes.byteOffset, lenBytes.byteLength).getUint32(0, true);
             if (chunkLen > MAX_FRAME_SIZE) {
-                throw new Error('Vault file is corrupted or incomplete.');
+                throw new Error(ERR_CORRUPTED_VAULT);
             }
 
             const iv = await reader.readExactly(IV_SIZE);
@@ -397,10 +399,10 @@ export async function* decryptStream(
     } catch (e) {
         const err = e as Error;
         if (err.name === 'OperationError') {
-            throw new Error('Incorrect password');
+            throw new Error(ERR_INCORRECT_PASSWORD);
         }
         if (err.message.startsWith('Unexpected EOF')) {
-            throw new Error('Vault file is corrupted or incomplete.');
+            throw new Error(ERR_CORRUPTED_VAULT);
         }
         throw err;
     } finally {

@@ -128,6 +128,8 @@ export const en = {
     'settings.decrypt_backup_desc': 'Enter password',
     'settings.backup_password_required': 'Password is required for .slbk export.',
     'settings.restore_password_required': 'Password is required for .slbk backups.',
+    'settings.restore_incorrect_password': 'Incorrect password.',
+    'settings.restore_corrupted_file': 'Vault file is corrupted or incomplete.',
     'settings.packaging_backup': 'Packaging backup...',
     'settings.backup_exported': 'Backup exported successfully.',
     'settings.decrypting_stream': 'Decrypting stream...',
