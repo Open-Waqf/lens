@@ -916,7 +916,9 @@ export class SettingsPage extends LitElement {
 
                 ${arabicSelected ? html`
                     <div class="p-3 rounded-lg bg-amber-950/20 border border-amber-900/50 text-xs text-amber-200">
-                        ${t('settings.ocr_arabic_disclaimer')}
+                        <div class="font-semibold mb-1">${t('settings.ocr_arabic_notice_title')}</div>
+                        <div>${t('settings.ocr_arabic_disclaimer')}</div>
+                        <div class="mt-1 text-amber-300/90">${t('settings.ocr_arabic_disclaimer_verify')}</div>
                     </div>
                 ` : null}
 

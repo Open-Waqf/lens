@@ -12,6 +12,7 @@ export interface PdfOptions {
 }
 
 const UNICODE_FONT_URL = '/fonts/noto-arabic.ttf'; // Expected location for Arabic/Unicode support
+const ARABIC_SCRIPT_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
 
 export async function buildPdfForDoc(
     store: FileStore,
@@ -96,7 +97,7 @@ export async function buildPdfForDoc(
     return await pdf.save();
 }
 
-function groupWordsIntoLines(words: OcrWord[]): Array<{ text: string, words: OcrWord[] }> {
+export function groupWordsIntoLines(words: OcrWord[]): Array<{ text: string, words: OcrWord[] }> {
     const lines: Array<{ text: string, words: OcrWord[] }> = [];
     if (words.length === 0) return lines;
 
@@ -111,16 +112,20 @@ function groupWordsIntoLines(words: OcrWord[]): Array<{ text: string, words: Ocr
         if (verticalOverlap) {
             currentLine.push(curr);
         } else {
+            const rtl = currentLine.some(w => ARABIC_SCRIPT_RE.test(w.text));
+            const orderedWords = [...currentLine].sort((a, b) => rtl ? b.box[0] - a.box[0] : a.box[0] - b.box[0]);
             lines.push({
-                text: currentLine.map(w => w.text).join(' '),
-                words: currentLine
+                text: orderedWords.map(w => w.text).join(' '),
+                words: orderedWords
             });
             currentLine = [curr];
         }
     }
+    const rtl = currentLine.some(w => ARABIC_SCRIPT_RE.test(w.text));
+    const orderedWords = [...currentLine].sort((a, b) => rtl ? b.box[0] - a.box[0] : a.box[0] - b.box[0]);
     lines.push({
-        text: currentLine.map(w => w.text).join(' '),
-        words: currentLine
+        text: orderedWords.map(w => w.text).join(' '),
+        words: orderedWords
     });
     return lines;
 }

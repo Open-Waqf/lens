@@ -142,8 +142,7 @@ export class LibraryPage extends LitElement {
 
     private loadMore() {
         const currentLen = this.visibleDocs.length;
-        // Re-run filter logic to get full filtered list length
-        // (Optimisation: In a real app we'd cache the filtered list, but for <1000 docs this is fine)
+        // Recompute filtered length for pagination; this O(n) pass is acceptable for <=1k docs.
         let filteredTotal = this.allDocsSource;
         if (this.selectedTag) filteredTotal = filteredTotal.filter(d => d.tags.includes(this.selectedTag!));
         if (this.query.trim()) {
@@ -151,7 +150,9 @@ export class LibraryPage extends LitElement {
             filteredTotal = filteredTotal.filter(d =>
                 d.title.toLowerCase().includes(q) ||
                 d.searchIndex?.toLowerCase().includes(q) ||
-                d.tags.some(t => t.toLowerCase().includes(q))
+                d.tags.some(t => t.toLowerCase().includes(q)) ||
+                d.notes?.toLowerCase().includes(q) ||
+                d.folder?.toLowerCase().includes(q)
             );
         }
 

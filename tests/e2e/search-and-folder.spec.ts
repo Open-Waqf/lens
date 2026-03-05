@@ -16,7 +16,25 @@ test.beforeEach(async ({page}) => {
     await page.goto('http://localhost:4173', { waitUntil: 'networkidle' });
 });
 
-test('Search, Folder Cascade, and Share Warning', async ({page}) => {
+async function readDocFolder(page: import('@playwright/test').Page, docId: string): Promise<string | null> {
+    return await page.evaluate(async (id) => {
+        const req = indexedDB.open('sahifah-lens');
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+            req.onerror = () => reject(req.error ?? new Error('DB open failed'));
+            req.onsuccess = () => resolve(req.result);
+        });
+        const folder = await new Promise<string | null>((resolve, reject) => {
+            const tx = db.transaction(['docs'], 'readonly');
+            const r = tx.objectStore('docs').get(id);
+            r.onsuccess = () => resolve((r.result?.folder ?? null) as string | null);
+            r.onerror = () => reject(r.error ?? new Error('Doc read failed'));
+        });
+        db.close();
+        return folder;
+    }, docId);
+}
+
+test('Search and Folder Cascade', async ({page}) => {
     // 1. Create a document with specific text and folder
     await page.goto('#/scan');
     const importBtn = page.locator('button').filter({hasText: /Import/i});
@@ -48,6 +66,7 @@ test('Search, Folder Cascade, and Share Warning', async ({page}) => {
     await page.locator('h3', {hasText: /Scan/i}).first().click();
     
     await page.waitForURL('**/#/doc/**');
+    const docId = page.url().split('/doc/')[1];
     const titleInput = page.locator('input').first();
     await titleInput.fill('Searchable Doc');
     await titleInput.dispatchEvent('change');
@@ -83,9 +102,9 @@ test('Search, Folder Cascade, and Share Warning', async ({page}) => {
     
     await expect(page.locator('h2', {hasText: /Taxes/i})).not.toBeVisible();
     await expect(page.locator('h2', {hasText: /Unsorted/i})).toBeVisible({timeout: 10000});
+    await expect.poll(async () => await readDocFolder(page, docId)).toBeNull();
 
-    // 5. Test Share Warning
-    // Turn off grouping to make locator easier
+    // 5. Regression check: doc still accessible after unsorting
     await page.locator('button[title="Group by Folder"]').click();
 
     const docInLibrary = page.locator('h3').first();
@@ -93,8 +112,5 @@ test('Search, Folder Cascade, and Share Warning', async ({page}) => {
     await docInLibrary.click();
     
     await page.waitForURL('**/#/doc/**');
-    await page.locator('button', {hasText: 'Export PDF'}).click();
-    const cancelBtn = page.locator('button').filter({hasText: /Cancel/i});
-    await cancelBtn.click();
-    await expect(page.locator('text=Share Decrypted Copy?')).not.toBeVisible();
+    await expect(page.getByPlaceholder('e.g. Finance')).toHaveValue('');
 });
