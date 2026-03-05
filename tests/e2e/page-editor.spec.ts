@@ -87,3 +87,26 @@ test('Page Editor: A11y Hitbox check', async ({page}) => {
     const undoBtn = page.locator('button[title="Undo"]');
     await expect(undoBtn).toBeEnabled();
 });
+
+test('Page Editor: quality preset toggles are visible and selectable', async ({page}) => {
+    const importBtn = page.locator('button').filter({hasText: /Import/i});
+    const fileChooserPromise = page.waitForEvent('filechooser');
+    await importBtn.click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles({
+        name: 'test-doc.png',
+        mimeType: 'image/png',
+        buffer: Buffer.from(MOCK_IMAGE_BASE64, 'base64')
+    });
+
+    const editor = page.locator('page-editor');
+    await expect(editor).toBeVisible({timeout: 10000});
+
+    await expect(editor.getByRole('button', {name: 'Archive', exact: true})).toBeVisible();
+    await expect(editor.getByRole('button', {name: 'Share', exact: true})).toBeVisible();
+    await expect(editor.getByRole('button', {name: 'Original', exact: true})).toBeVisible();
+
+    await editor.getByRole('button', {name: 'Original', exact: true}).click();
+    const preset = await page.evaluate(() => (document.querySelector('page-editor') as any)?.qualityPreset);
+    expect(preset).toBe('original');
+});

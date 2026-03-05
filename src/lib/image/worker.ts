@@ -22,6 +22,7 @@ export type WorkerRequest = {
     outH?: number;
     encode?: boolean; // If true, returns bytes. Else returns bitmap.
     quality?: number;
+    sharpenAmount?: number;
 
     // --- Mode B: Dual Encode (Batch / Pipeline compatibility) ---
     // If these are present, we generate BOTH master and thumb
@@ -96,7 +97,7 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
             }
         }
 
-        // 3. Apply Filters & ENHANCEMENTS
+        // 3. Apply Filters
         if (req.filter !== 'original') {
             if (req.filter === 'grayscale') {
                 for (let i = 0; i < finalRgba.length; i += 4) {
@@ -109,16 +110,15 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
             } else if (req.filter === 'magic') {
                 const magic = magicColorFromRgba(finalRgba, finalW, finalH);
                 finalRgba.set(magic);
-                // Magic filter implicitly sharpens, so we skip explicit sharpen here
             } else if (req.filter === 'whiteboard') {
                 const wb = whiteboardFromRgba(finalRgba, finalW, finalH);
                 finalRgba.set(wb);
             }
-        } else {
-            // Even for "Original", apply a mild unsharp mask to improve OCR/Readability
-            // This makes the "Scan" look better than the raw photo.
-            applyUnsharpMask(finalRgba, finalW, finalH, 0.5);
         }
+
+        // 3b. Optional sharpening policy (keeps backward compatibility for older callers).
+        const sharpenAmount = req.sharpenAmount ?? (req.filter === 'original' ? 0.5 : 0);
+        if (sharpenAmount > 0) applyUnsharpMask(finalRgba, finalW, finalH, sharpenAmount);
 
         // 4. Encoding
         if (req.masterJpegQuality !== undefined && req.thumbMax !== undefined) {

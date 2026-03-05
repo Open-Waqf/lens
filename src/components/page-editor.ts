@@ -5,6 +5,7 @@ import type {Point, Quad} from '../lib/scan/quad';
 import {quadArea, isQuadConvex} from '../lib/scan/quad';
 import {computeOutputSize} from '../lib/image/warp';
 import type {WorkerRequest, WorkerResponse} from '../lib/image/worker';
+import {resolveScanQualityPlan, type ScanQualityPreset} from '../lib/image/quality';
 import {haptics} from '../services/haptics';
 import {ImpactStyle} from "@capacitor/haptics";
 import {t} from '../lib/i18n';
@@ -39,6 +40,7 @@ export class PageEditor extends LitElement {
     @state() private busy = false;
     @state() private err: string | null = null;
     @state() private shareFormat: 'jpg' | 'pdf' = 'jpg';
+    @state() private qualityPreset: ScanQualityPreset = 'share';
 
     private sourceBitmap: ImageBitmap | null = null;
     private baseCanvas: HTMLCanvasElement | null = null;
@@ -506,30 +508,26 @@ export class PageEditor extends LitElement {
         try {
             const mappedQuad = this.mapQuadToSource(this.quad);
             const rawSize = computeOutputSize(mappedQuad);
-            const MIN_OCR_DIM = 1600;
-            const MAX_DIM = 2500;
-            const largestDim = Math.max(rawSize.w, rawSize.h);
-            let mScale = 1;
-            if (largestDim < MIN_OCR_DIM) {
-                mScale = MIN_OCR_DIM / largestDim;
-            } else if (largestDim > MAX_DIM) {
-                mScale = MAX_DIM / largestDim;
-            }
-            const mW = Math.round(rawSize.w * mScale);
-            const mH = Math.round(rawSize.h * mScale);
+            const qualityPlan = resolveScanQualityPlan({
+                action: 'save',
+                preset: this.qualityPreset,
+                filter: this.filter,
+                rawWidth: rawSize.w,
+                rawHeight: rawSize.h,
+            });
             const masterTask = this.runWorkerTask({
                 id: `save-m-${Date.now()}`,
                 blob: this.blob,
                 quad: mappedQuad,
                 rotation: 0,
                 filter: this.filter,
-                outW: mW,
-                outH: mH,
+                outW: qualityPlan.masterWidth,
+                outH: qualityPlan.masterHeight,
                 encode: true,
-                quality: 0.92
+                quality: qualityPlan.masterJpegQuality,
+                sharpenAmount: qualityPlan.sharpenAmount,
             });
-            const THUMB_MAX = 800;
-            const tScale = Math.min(1, THUMB_MAX / largestDim);
+            const tScale = Math.min(1, qualityPlan.thumbMax / Math.max(rawSize.w, rawSize.h));
             const tW = Math.round(rawSize.w * tScale);
             const tH = Math.round(rawSize.h * tScale);
             const thumbTask = this.runWorkerTask({
@@ -541,7 +539,8 @@ export class PageEditor extends LitElement {
                 outW: tW,
                 outH: tH,
                 encode: true,
-                quality: 0.82
+                quality: qualityPlan.thumbJpegQuality,
+                sharpenAmount: 0,
             });
             const [resM, resT] = await Promise.all([masterTask, thumbTask]);
             if (!resM.ok) throw new Error(resM.error || 'Failed to encode master');
@@ -572,17 +571,13 @@ export class PageEditor extends LitElement {
         try {
             const mappedQuad = this.mapQuadToSource(this.quad);
             const rawSize = computeOutputSize(mappedQuad);
-            const MIN_OCR_DIM = 1600;
-            const MAX_DIM = 2500;
-            const largestDim = Math.max(rawSize.w, rawSize.h);
-            let mScale = 1;
-            if (largestDim < MIN_OCR_DIM) {
-                mScale = MIN_OCR_DIM / largestDim;
-            } else if (largestDim > MAX_DIM) {
-                mScale = MAX_DIM / largestDim;
-            }
-            const mW = Math.round(rawSize.w * mScale);
-            const mH = Math.round(rawSize.h * mScale);
+            const qualityPlan = resolveScanQualityPlan({
+                action: 'share',
+                preset: this.qualityPreset,
+                filter: this.filter,
+                rawWidth: rawSize.w,
+                rawHeight: rawSize.h,
+            });
 
             const resM = await this.runWorkerTask({
                 id: `share-m-${Date.now()}`,
@@ -590,10 +585,11 @@ export class PageEditor extends LitElement {
                 quad: mappedQuad,
                 rotation: 0,
                 filter: this.filter,
-                outW: mW,
-                outH: mH,
+                outW: qualityPlan.masterWidth,
+                outH: qualityPlan.masterHeight,
                 encode: true,
-                quality: 0.92
+                quality: qualityPlan.masterJpegQuality,
+                sharpenAmount: qualityPlan.sharpenAmount,
             });
             if (!resM.ok) throw new Error(resM.error || 'Failed to encode share image');
             if (!resM.bytes) throw new Error('Missing share bytes');
@@ -783,6 +779,26 @@ export class PageEditor extends LitElement {
 
                     <div class="fixed left-0 right-0 bottom-0 z-40 bg-slate-950/95 backdrop-blur-md border-t border-slate-800 pb-[env(safe-area-inset-bottom)]">
                         <div class="max-w-7xl mx-auto px-4 py-3 space-y-2">
+                        <div class="rounded-xl border border-slate-700 p-1 bg-slate-900/80 flex gap-1">
+                            <button class="flex-1 px-3 py-2.5 rounded-lg text-sm font-semibold transition-colors min-h-[44px] ${this.qualityPreset === 'archive' ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800'}"
+                                    aria-label=${t('scan.quality_archive')}
+                                    ?disabled=${this.busy}
+                                    @click=${() => this.qualityPreset = 'archive'}>
+                                ${t('scan.quality_archive')}
+                            </button>
+                            <button class="flex-1 px-3 py-2.5 rounded-lg text-sm font-semibold transition-colors min-h-[44px] ${this.qualityPreset === 'share' ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800'}"
+                                    aria-label=${t('scan.quality_share')}
+                                    ?disabled=${this.busy}
+                                    @click=${() => this.qualityPreset = 'share'}>
+                                ${t('scan.quality_share')}
+                            </button>
+                            <button class="flex-1 px-3 py-2.5 rounded-lg text-sm font-semibold transition-colors min-h-[44px] ${this.qualityPreset === 'original' ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800'}"
+                                    aria-label=${t('scan.quality_original')}
+                                    ?disabled=${this.busy}
+                                    @click=${() => this.qualityPreset = 'original'}>
+                                ${t('scan.quality_original')}
+                            </button>
+                        </div>
                         <div class="rounded-xl border border-slate-700 p-1 bg-slate-900/80 flex gap-1">
                             <button class="flex-1 px-3 py-2.5 rounded-lg text-sm font-semibold transition-colors min-h-[44px] ${this.shareFormat === 'jpg' ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800'}"
                                     aria-label=${t('scan.share_format_jpg')}

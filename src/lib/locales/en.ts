@@ -48,6 +48,9 @@ export const en = {
     'scan.discard_capture': 'Discard Capture?',
     'scan.discard_body': 'This action cannot be undone.',
     'scan.save_scan': 'Save Scan',
+    'scan.quality_archive': 'Archive',
+    'scan.quality_share': 'Share',
+    'scan.quality_original': 'Original',
     'scan.share_format_jpg': 'JPG',
     'scan.share_format_pdf': 'PDF',
 

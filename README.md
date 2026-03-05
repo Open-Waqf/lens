@@ -33,6 +33,7 @@ control. Read our [Local Privacy Policy](PRIVACY_POLICY.md).
 
 * **Edge Detection:** Real-time boundary detection via Computer Vision workers.
 * **Visual Filter Picker:** Real-time thumbnail previews for Magic Color, B&W, and Whiteboard filters.
+* **Quality Presets:** `Archive`, `Share`, and `Original` output policies balance readability, file size, and processing cost. `Original` disables auto-sharpening.
 * **The "Stitcher":** Merge multiple separate scans into a single organized document.
 * **Perspective Correction:** Automatically warps and crops images to fix camera angles.
 
