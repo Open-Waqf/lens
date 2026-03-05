@@ -77,6 +77,11 @@ Backups use a specific chunked-streaming protocol to allow multi-gigabyte export
   ```
   Artifacts are written to `artifacts/perf-report.json` and `artifacts/perf-summary.md`.
   Full gate definitions: `docs/perf.md`.
+* Android privacy runtime proof (FLAG_SECURE) is validated in CI via:
+  - `.github/workflows/android-privacy-smoke.yml`
+  - required artifact evidence in `test-results/android-smoke/`:
+    `window-flags.txt`, `window-windows.txt`, `screenshot.png`, `logcat.txt`
+  - workflow fails if `window-flags.txt` does not contain `FLAG_SECURE check: PASS`
 
 
 4. **Linting:** Follow the existing style. We prefer **Lit** for UI components and standard **TypeScript** classes for

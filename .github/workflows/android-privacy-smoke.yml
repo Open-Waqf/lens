@@ -1,0 +1,73 @@
+name: Android Privacy Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      emulator_serial:
+        description: "ADB serial (default emulator-5554)"
+        required: false
+        default: "emulator-5554"
+      package_name:
+        description: "Android package id"
+        required: false
+        default: "org.openwaqf.lens"
+
+permissions:
+  contents: read
+
+jobs:
+  flag-secure-smoke:
+    name: FLAG_SECURE Runtime Smoke
+    runs-on: [self-hosted, windows, android]
+    timeout-minutes: 40
+    env:
+      CI: true
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Android Smoke Script (FLAG_SECURE + telemetry + artifacts)
+        shell: pwsh
+        run: |
+          ./scripts/android-smoke.ps1 `
+            -ProjectRoot "${{ github.workspace }}" `
+            -EmulatorSerial "${{ inputs.emulator_serial }}" `
+            -PackageName "${{ inputs.package_name }}" `
+            -AssembleApk $true `
+            -InstallApk $true `
+            -CheckTelemetry $true `
+            -RunMaestro $false `
+            -AssertSampleFlow $false
+
+      - name: Assert FLAG_SECURE Summary
+        shell: pwsh
+        run: |
+          $flagsFile = Join-Path "${{ github.workspace }}" "test-results/android-smoke/window-flags.txt"
+          if (!(Test-Path $flagsFile)) {
+            throw "Missing FLAG_SECURE summary artifact: $flagsFile"
+          }
+          $content = Get-Content -Path $flagsFile -Raw
+          if ($content -notmatch "FLAG_SECURE check:\s*PASS") {
+            throw "FLAG_SECURE check did not PASS. Inspect window-flags.txt artifact."
+          }
+          Write-Host "FLAG_SECURE summary check passed."
+
+      - name: Upload Android Smoke Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-privacy-smoke-artifacts
+          path: |
+            test-results/android-smoke/**
+          if-no-files-found: warn
+          retention-days: 14
+

@@ -109,6 +109,17 @@ npm run test:security
 
 Network gate policy, CI flow matrix, and allowlist rules are documented in [docs/security-network.md](docs/security-network.md).
 
+### 7. Android Privacy Smoke (FLAG_SECURE)
+
+CI workflow: `.github/workflows/android-privacy-smoke.yml`
+
+The workflow runs `scripts/android-smoke.ps1` on a self-hosted Windows Android runner and uploads runtime proof artifacts:
+- `window-flags.txt` (must contain `FLAG_SECURE check: PASS`)
+- `window-windows.txt`
+- `screenshot.png`
+- `logcat.txt`
+- `telemetry-report.txt`
+
 ---
 
 ## ⚠️ Disclaimers
