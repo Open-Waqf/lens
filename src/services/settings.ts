@@ -13,7 +13,10 @@ export interface AppSettings {
     mirrorBackupMode: 'manual' | 'after_export';
 }
 
-// Internal "Secrets" - Changing these invalidates existing settings
+// Internal constants for the local "app-lock enabled" marker.
+// IMPORTANT: This is a UX lock convenience signal, not a cryptographic boundary.
+// Never store encryption keys or vault secrets in localStorage.
+// Changing these invalidates existing settings.
 const SALT = 'sahifah-secure-salt-v1';
 const ENABLED_PHRASE = 'sahifah-auth-is-enabled-strictly';
 
@@ -106,7 +109,8 @@ class SettingsService {
 
     async setAuth(enable: boolean) {
         if (enable) {
-            // Store the specific hash
+            // Store a local marker hash for app-lock state only.
+            // This value does not protect encrypted vault data.
             const hash = await this._generateHash(ENABLED_PHRASE);
             localStorage.setItem(KEYS.LOCK_INTEGRITY, hash);
         } else {

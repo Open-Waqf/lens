@@ -159,6 +159,8 @@ node scripts/slbk-verify.mjs ./lens-backup-YYYY-MM-DD.slbk
 
 * **Sovereignty:** You are responsible for your own keys/passwords. There is no "Forgot Password" link because there is
   no server.
+* **App Lock Scope:** Biometric/app lock is a local UX gate for shoulder-surfing/device access friction. It is not the
+  cryptographic security boundary; vault backup encryption (`.slbk`) is enforced separately via PBKDF2 + AES-GCM.
 
 <div align="center">
 <p><em>Built with ❤️ for the Ummah and Humanity.</em></p>
