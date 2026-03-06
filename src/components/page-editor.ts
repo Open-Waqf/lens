@@ -83,16 +83,29 @@ export class PageEditor extends LitElement {
         if (!this.quad || !this.edgesEl) return 'display:none';
         const p = this.quad[index];
         if (!p) return 'display:none';
-        const sx = this.edgesEl.width / this.baseW;
-        const sy = this.edgesEl.height / this.baseH;
+        // Use rendered CSS size, not backing store pixels.
+        // Canvas can be visually scaled by max-h constraints; using width/height here
+        // causes handles (especially bottom corners) to drift away from visible corners.
+        const cssW = this.edgesEl.clientWidth || this.edgesEl.width;
+        const cssH = this.edgesEl.clientHeight || this.edgesEl.height;
+        const sx = cssW / this.baseW;
+        const sy = cssH / this.baseH;
         const rawX = p.x * sx;
         const rawY = p.y * sy;
-        // Keep the 44x44 touch target fully inside the visible canvas area.
-        // Without this, corners at the edge get clipped and become hard to grab.
-        const halfHit = 30;
-        const x = clamp(rawX, halfHit, Math.max(halfHit, this.edgesEl.width - halfHit));
-        const y = clamp(rawY, halfHit, Math.max(halfHit, this.edgesEl.height - halfHit));
-        return `left:${x}px;top:${y}px;`;
+        // Canvas can be centered inside the stage; include its offset so
+        // handles sit exactly over rendered corner points.
+        const ox = this.edgesEl.offsetLeft || 0;
+        const oy = this.edgesEl.offsetTop || 0;
+        // Per-corner anchoring keeps hit boxes inside the canvas without shifting
+        // the perceived grab direction differently per corner.
+        const hit = 60;
+        let left = ox + rawX;
+        let top = oy + rawY;
+        if (index === 1 || index === 2) left -= hit; // right-side corners
+        if (index === 2 || index === 3) top -= hit;  // bottom-side corners
+        left = clamp(left, ox, ox + Math.max(0, cssW - hit));
+        top = clamp(top, oy, oy + Math.max(0, cssH - hit));
+        return `left:${left}px;top:${top}px;`;
     }
 
     private getCssFilter(mode: string): string {
@@ -761,18 +774,18 @@ export class PageEditor extends LitElement {
                         ${[0, 1, 2, 3].map(i => html`
                             <div
                                     data-testid="corner-handle-${i}"
-                                    class="absolute z-20 -translate-x-1/2 -translate-y-1/2 min-w-[60px] min-h-[60px] w-[60px] h-[60px] pointer-events-auto"
+                                    class="absolute z-[45] min-w-[60px] min-h-[60px] w-[60px] h-[60px] pointer-events-auto"
                                     style="${this.getCornerHandleStyle(i)} touch-action:none;"
                                     aria-label=${t('scan.edit_page')}
                                     @pointerdown=${(ev: PointerEvent) => this.onHandlePointerDown(i, ev)}></div>
                         `)}
 
-                        <div class=${['absolute top-4 right-4 rounded-full overflow-hidden border-4 border-white shadow-2xl z-20 w-32 h-32 pointer-events-none transition-opacity duration-200', this.showMagnify ? 'opacity-100' : 'opacity-0'].join(' ')}>
+                        <div class=${['absolute top-4 right-4 rounded-full overflow-hidden border-4 border-white shadow-2xl z-[45] w-32 h-32 pointer-events-none transition-opacity duration-200', this.showMagnify ? 'opacity-100' : 'opacity-0'].join(' ')}>
                             <canvas data-magnify class="block w-full h-full bg-black"></canvas>
                         </div>
 
                         ${!this.isQuadValid ? html`
-                            <div data-testid="invalid-warning" class="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 px-4 py-2 bg-red-600/90 text-white text-xs font-bold rounded-full shadow-lg backdrop-blur-sm flex items-center gap-2">
+                            <div data-testid="invalid-warning" class="absolute bottom-4 left-1/2 -translate-x-1/2 z-[45] px-4 py-2 bg-red-600/90 text-white text-xs font-bold rounded-full shadow-lg backdrop-blur-sm flex items-center gap-2">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
                                 </svg>

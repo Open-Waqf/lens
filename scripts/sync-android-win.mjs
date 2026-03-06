@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 
 const cwd = process.cwd();
@@ -114,6 +115,25 @@ function collectPluginNodeModulePathsFromCapacitorSettings() {
   return out;
 }
 
+function hashFileIfExists(filePath) {
+  if (!fs.existsSync(filePath)) return '';
+  const buf = fs.readFileSync(filePath);
+  return crypto.createHash('sha256').update(buf).digest('hex');
+}
+
+function readState(statePath) {
+  try {
+    return JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function writeState(statePath, state) {
+  fs.mkdirSync(path.dirname(statePath), {recursive: true});
+  fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+}
+
 function main() {
   const projectName = 'lens';
   const stageName = process.env.OWQ_WIN_STAGE_NAME || `owq-${projectName}-android`;
@@ -122,9 +142,18 @@ function main() {
 
   const stageRootWsl = path.join(wslTemp, stageName);
   const stageRootWin = toWinPath(stageRootWsl);
+  const statePath = path.join(stageRootWsl, '.owq-sync-state.json');
 
   const pluginSources = collectPluginNodeModulePathsFromCapacitorSettings();
   const sources = ['android', 'node_modules/@capacitor/core', ...pluginSources];
+  const currentState = {
+    packageLockHash: hashFileIfExists(path.join(cwd, 'package-lock.json')),
+    capacitorSettingsHash: hashFileIfExists(path.join(cwd, 'android', 'capacitor.settings.gradle')),
+  };
+  const previousState = readState(statePath);
+  const canReuseNodeModules = !!previousState
+    && previousState.packageLockHash === currentState.packageLockHash
+    && previousState.capacitorSettingsHash === currentState.capacitorSettingsHash;
 
   for (const rel of sources) {
     const src = path.join(cwd, rel);
@@ -133,9 +162,18 @@ function main() {
       continue;
     }
     const dst = path.join(stageRootWsl, rel);
+    if (canReuseNodeModules && rel.startsWith('node_modules/') && fs.existsSync(dst)) {
+      process.stdout.write(`[skip] ${rel} (cached)\n`);
+      continue;
+    }
     process.stdout.write(`[sync] ${rel}\n`);
     copyDir(src, dst);
   }
+
+  writeState(statePath, {
+    ...currentState,
+    updatedAt: new Date().toISOString(),
+  });
 
   const androidWin = toWinPath(path.join(stageRootWsl, 'android'));
   process.stdout.write(`\nStaged Android project: ${androidWin}\n`);
