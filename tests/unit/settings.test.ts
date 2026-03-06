@@ -27,4 +27,18 @@ describe('settings OCR language', () => {
         const s = await settings.get();
         expect(s.clearClipboardAfter60s).toBe(true);
     });
+
+    it('defaults mirror backup settings to disabled/manual', async () => {
+        const s = await settings.get();
+        expect(s.mirrorBackupEnabled).toBe(false);
+        expect(s.mirrorBackupMode).toBe('manual');
+    });
+
+    it('persists mirror backup settings', async () => {
+        settings.setMirrorBackupEnabled(true);
+        settings.setMirrorBackupMode('after_export');
+        const s = await settings.get();
+        expect(s.mirrorBackupEnabled).toBe(true);
+        expect(s.mirrorBackupMode).toBe('after_export');
+    });
 });

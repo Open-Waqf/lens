@@ -6,7 +6,8 @@ export type PersistenceStatus = {
     usageBytes?: number;
 };
 
-export async function getPersistenceStatus(): Promise<PersistenceStatus> {
+export async function getPersistenceStatus(options?: { requestIfNeeded?: boolean }): Promise<PersistenceStatus> {
+    const requestIfNeeded = options?.requestIfNeeded ?? true;
 
     const supported =
         !!navigator.storage &&
@@ -16,7 +17,7 @@ export async function getPersistenceStatus(): Promise<PersistenceStatus> {
     if (!supported) return {supported: false, persisted: false, grantedThisCall: false};
 
     const already = await navigator.storage.persisted();
-    const grantedThisCall = already ? false : await navigator.storage.persist();
+    const grantedThisCall = already || !requestIfNeeded ? false : await navigator.storage.persist();
 
     let quotaBytes: number | undefined;
     let usageBytes: number | undefined;

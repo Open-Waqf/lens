@@ -26,6 +26,14 @@ import {repairLibrary} from '../services/repair';
 import {CapacitorFileStore} from "../services/filestore/capacitor-store";
 import {hasIndexLossRiskFlag, runStorageHealthProbe} from '../services/storage-health';
 import {rebuildLibraryIndexFromFiles} from '../services/rebuild-index';
+import {
+    getMirrorFolderLabel,
+    hasMirrorBackupFolder,
+    isMirrorBackupSupported,
+    maybeMirrorBackupAfterExport,
+    pickMirrorBackupFolder
+} from '../services/mirror-backup';
+import {getPersistenceStatus, type PersistenceStatus} from '../services/storage-persistence';
 
 type RestoreMode = 'merge' | 'replace';
 
@@ -67,6 +75,15 @@ export class SettingsPage extends LitElement {
     @state() private storageAuditBusy = false;
     @state() private storageAuditFound = 0;
     @state() private storageAuditDeleted = 0;
+    @state() private mirrorBackupEnabled = false;
+    @state() private mirrorBackupMode: 'manual' | 'after_export' = 'manual';
+    @state() private mirrorBackupReady = false;
+    @state() private mirrorFolderLabel: string | null = null;
+    @state() private showMirrorAdvanced = false;
+    @state() private showPrivacyDetails = false;
+    @state() private showAdvancedDataTools = false;
+    @state() private persistence: PersistenceStatus | null = null;
+    @state() private persistenceBusy = false;
 
     async connectedCallback() {
         super.connectedCallback();
@@ -75,6 +92,9 @@ export class SettingsPage extends LitElement {
         void this.loadStorageStats();
         void tryPersistStorage();
         await this.refreshStorageRisk();
+        if (!this.caps.isCapacitor) {
+            await this.refreshPersistence(false);
+        }
         if (location.hash.includes('repair=1')) {
             this.showRepairTool = true;
         }
@@ -97,6 +117,18 @@ export class SettingsPage extends LitElement {
             this.err = t('settings.repair_failed', {error: String(e)});
         } finally {
             this.busy = false;
+        }
+    }
+
+    protected updated(changed: Map<string, unknown>) {
+        const msgChanged = changed.has('msg') && !!this.msg;
+        const errChanged = changed.has('err') && !!this.err;
+        if (msgChanged || errChanged) {
+            try {
+                window.scrollTo({top: 0, behavior: 'smooth'});
+            } catch {
+                window.scrollTo(0, 0);
+            }
         }
     }
 
@@ -150,6 +182,10 @@ export class SettingsPage extends LitElement {
         this.enableOcr = s.enableOcr;
         this.ocrLang = s.ocrLang || 'ara+eng';
         this.clearClipboardAfter60s = s.clearClipboardAfter60s;
+        this.mirrorBackupEnabled = s.mirrorBackupEnabled;
+        this.mirrorBackupMode = s.mirrorBackupMode || 'manual';
+        this.mirrorBackupReady = await hasMirrorBackupFolder();
+        this.mirrorFolderLabel = getMirrorFolderLabel();
     }
 
     private async refreshStorageRisk() {
@@ -197,6 +233,36 @@ export class SettingsPage extends LitElement {
         settings.setOcr(this.enableOcr);
     }
 
+    private async refreshPersistence(requestIfNeeded: boolean) {
+        if (this.caps.isCapacitor) return;
+        try {
+            this.persistence = await getPersistenceStatus({requestIfNeeded});
+        } catch {
+            this.persistence = {supported: false, persisted: false, grantedThisCall: false};
+        }
+    }
+
+    private async requestPersistentStorage() {
+        if (this.caps.isCapacitor || this.persistenceBusy) return;
+        this.persistenceBusy = true;
+        this.err = null;
+        try {
+            const status = await getPersistenceStatus({requestIfNeeded: true});
+            this.persistence = status;
+            if (status.persisted && status.grantedThisCall) {
+                this.msg = t('settings.persistence_granted');
+            } else if (status.persisted) {
+                this.msg = t('settings.persistence_already');
+            } else {
+                this.msg = t('settings.persistence_denied');
+            }
+        } catch (e) {
+            this.err = t('settings.persistence_failed', {error: toUserErrorMessage(e)});
+        } finally {
+            this.persistenceBusy = false;
+        }
+    }
+
     private setOcrLang(lang: string) {
         if (!lang) return;
         this.ocrLang = lang;
@@ -206,6 +272,55 @@ export class SettingsPage extends LitElement {
     private toggleClipboardAutoClear() {
         this.clearClipboardAfter60s = !this.clearClipboardAfter60s;
         settings.setClipboardAutoClear(this.clearClipboardAfter60s);
+    }
+
+    private async toggleMirrorBackupEnabled() {
+        const next = !this.mirrorBackupEnabled;
+        if (next && !isMirrorBackupSupported()) {
+            this.mirrorBackupEnabled = false;
+            settings.setMirrorBackupEnabled(false);
+            this.msg = t('settings.mirror_unsupported');
+            return;
+        }
+        this.mirrorBackupEnabled = next;
+        settings.setMirrorBackupEnabled(next);
+        if (next && !this.mirrorBackupReady) {
+            if (this.mirrorBackupMode !== 'after_export') {
+                this.mirrorBackupMode = 'after_export';
+                settings.setMirrorBackupMode('after_export');
+            }
+            this.msg = t('settings.mirror_pick_required');
+        }
+    }
+
+    private async pickMirrorBackupFolder() {
+        try {
+            const res = await pickMirrorBackupFolder();
+            this.mirrorBackupReady = res.ok;
+            if (!res.ok) {
+                if (res.reason === 'permission_denied') {
+                    this.err = t('settings.mirror_permission_denied');
+                } else if (res.reason === 'cancelled') {
+                    this.msg = t('settings.mirror_pick_cancelled');
+                } else if (res.reason === 'unsupported') {
+                    this.err = t('settings.mirror_unsupported');
+                } else {
+                    this.err = t('settings.mirror_pick_failed');
+                }
+                return false;
+            }
+            this.mirrorFolderLabel = getMirrorFolderLabel();
+            this.msg = t('settings.mirror_pick_success');
+            return true;
+        } catch (e) {
+            this.err = t('settings.mirror_pick_error', {error: toUserErrorMessage(e)});
+            return false;
+        }
+    }
+
+    private setMirrorBackupMode(mode: 'manual' | 'after_export') {
+        this.mirrorBackupMode = mode;
+        settings.setMirrorBackupMode(mode);
     }
 
     private async toggleAuth() {
@@ -355,6 +470,13 @@ export class SettingsPage extends LitElement {
                 type: 'application/octet-stream',
                 lastModified: Date.now()
             });
+
+            const mirror = await maybeMirrorBackupAfterExport(namedFile);
+            if (mirror.status === 'mirrored') {
+                this.msg = t('settings.mirror_auto_saved', {file: mirror.filename || finalName});
+            } else if (mirror.status === 'needs_setup') {
+                this.msg = t('settings.mirror_needs_setup_after_export');
+            }
 
             AuthService.ignoreNextResumeForExternalAction('export-backup-share');
             await shareFile(namedFile, finalName);
@@ -640,7 +762,6 @@ export class SettingsPage extends LitElement {
 
                 ${this.renderStorageSection()}
                 ${this.renderDataManagement()}
-                ${this.renderSystemInfo()}
                 ${this.renderDangerZone()}
             </div>
         `;
@@ -662,26 +783,43 @@ export class SettingsPage extends LitElement {
     private renderAlerts() {
         return html`
             ${this.msg ? html`
-                <div class="p-4 rounded-lg bg-slate-800 text-emerald-400 border border-emerald-900/50">${this.msg}
+                <div class="sticky top-2 z-30 p-4 rounded-lg bg-slate-800 text-emerald-300 border border-emerald-900/50 flex items-start justify-between gap-3 shadow-lg">
+                    <div class="font-medium">${this.msg}</div>
+                    <button class="text-slate-400 hover:text-slate-200 text-sm"
+                            aria-label=${t('common.cancel')}
+                            @click=${() => this.msg = null}>✕</button>
                 </div>` : null}
             ${this.err ? html`
-                <div class="p-4 rounded-lg bg-red-950/40 text-red-200 border border-red-900">${this.err}</div>` : null}
+                <div class="sticky top-2 z-30 p-4 rounded-lg bg-red-950/50 text-red-100 border border-red-900 flex items-start justify-between gap-3 shadow-lg">
+                    <div class="font-medium">${this.err}</div>
+                    <button class="text-red-300 hover:text-red-100 text-sm"
+                            aria-label=${t('common.cancel')}
+                            @click=${() => this.err = null}>✕</button>
+                </div>` : null}
         `;
     }
 
     private renderPrivacySection() {
         return html`
             <section class="p-4 rounded-xl border border-slate-700 bg-slate-800/50 space-y-2">
-                <div class="flex items-center gap-2 text-emerald-400 font-semibold text-sm">
+                <div class="flex items-center justify-between gap-2">
+                    <div class="flex items-center gap-2 text-emerald-400 font-semibold text-sm">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                               d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
                     </svg>
                     ${t('settings.privacy_title')}
+                    </div>
+                    <button class="text-xs text-slate-400 hover:text-slate-200"
+                            @click=${() => this.showPrivacyDetails = !this.showPrivacyDetails}>
+                        ${this.showPrivacyDetails ? t('settings.hide_details') : t('settings.show_details')}
+                    </button>
                 </div>
-                <p class="text-xs text-slate-300 leading-relaxed">
-                    ${t('settings.privacy_body')}
-                </p>
+                ${this.showPrivacyDetails ? html`
+                    <p class="text-xs text-slate-300 leading-relaxed">
+                        ${t('settings.privacy_body')}
+                    </p>
+                ` : null}
             </section>
         `;
     }
@@ -735,6 +873,7 @@ export class SettingsPage extends LitElement {
             ? t('settings.storage_native_info')
             : t('settings.storage_web_info');
 
+        const persistence = this.persistence;
         return html`
             <section class="space-y-2">
                 <div class="flex items-center justify-between text-xs text-slate-400 uppercase tracking-wider font-semibold">
@@ -750,6 +889,25 @@ export class SettingsPage extends LitElement {
                 ` : null}
 
                 <div class="text-[10px] text-slate-500">${infoText}</div>
+                ${this.caps.isCapacitor ? null : html`
+                    <div class="p-3 rounded-lg border border-slate-800 bg-slate-900/50 space-y-2">
+                        <div class="text-xs text-slate-300">${t('settings.persistence_title')}</div>
+                        <div class="text-[11px] ${persistence?.persisted ? 'text-emerald-300' : 'text-amber-300'}">
+                            ${!persistence || !persistence.supported
+                                    ? t('settings.persistence_unsupported')
+                                    : persistence.persisted
+                                            ? t('settings.persistence_active')
+                                            : t('settings.persistence_inactive')}
+                        </div>
+                        ${persistence?.supported && !persistence.persisted ? html`
+                            <button class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 min-h-[44px]"
+                                    ?disabled=${this.persistenceBusy}
+                                    @click=${() => this.requestPersistentStorage()}>
+                                ${this.persistenceBusy ? t('settings.persistence_requesting') : t('settings.persistence_request')}
+                            </button>
+                        ` : null}
+                    </div>
+                `}
             </section>
         `;
     }
@@ -759,6 +917,7 @@ export class SettingsPage extends LitElement {
             <section class="space-y-3">
                 <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">${t('settings.data_management')}</h2>
                 ${this.renderBackupStatus()}
+                ${this.renderMirrorBackupSection()}
                 <div class="grid gap-3">
 
                     <button class="flex items-center justify-between p-4 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors"
@@ -808,7 +967,12 @@ export class SettingsPage extends LitElement {
                                }}/>
                     </label>
 
-                    ${this.showRepairTool ? html`
+                    <button class="text-xs text-slate-400 hover:text-slate-200 text-left"
+                            @click=${() => this.showAdvancedDataTools = !this.showAdvancedDataTools}>
+                        ${this.showAdvancedDataTools ? t('settings.hide_advanced_tools') : t('settings.show_advanced_tools')}
+                    </button>
+
+                    ${this.showAdvancedDataTools && this.showRepairTool ? html`
                         <button class="flex items-center justify-between p-4 rounded-xl bg-indigo-950/30 border border-indigo-500/30 hover:bg-indigo-900/40 transition-colors"
                                 ?disabled=${this.busy} @click=${() => this.runRepair()}>
                             <div class="flex items-center gap-3">
@@ -828,7 +992,7 @@ export class SettingsPage extends LitElement {
                         </button>
                     ` : null}
 
-                    ${(this.hasIndexRisk || this.showRepairTool) ? html`
+                    ${this.showAdvancedDataTools && (this.hasIndexRisk || this.showRepairTool) ? html`
                         <button class="flex items-center justify-between p-4 rounded-xl bg-red-950/20 border border-red-500/30 hover:bg-red-900/30 transition-colors"
                                 ?disabled=${this.busy} @click=${() => this.rebuildIndex()}>
                             <div class="flex items-center gap-3">
@@ -846,6 +1010,7 @@ export class SettingsPage extends LitElement {
                         </button>
                     ` : null}
 
+                    ${this.showAdvancedDataTools ? html`
                     <button class="flex items-center justify-between p-4 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors"
                             data-testid="run-storage-audit-btn"
                             ?disabled=${this.busy || this.storageAuditBusy}
@@ -872,9 +1037,69 @@ export class SettingsPage extends LitElement {
                                                     : t('settings.storage_audit_idle')}
                         </div>
                     </button>
+                    ` : null}
 
                 </div>
             </section>
+        `;
+    }
+
+    private renderMirrorBackupSection() {
+        const unsupported = !isMirrorBackupSupported();
+        return html`
+            <div class="p-3 rounded-xl border border-slate-800 bg-slate-900/60 space-y-2">
+                <div class="flex items-center justify-between gap-3">
+                    <div class="text-left">
+                        <div class="text-sm text-slate-200 font-medium">${t('settings.mirror_title')}</div>
+                        <div class="text-xs text-slate-500">${t('settings.mirror_desc')}</div>
+                        <div class="text-[11px] text-slate-500 mt-1">${t('settings.mirror_trigger_note')}</div>
+                    </div>
+                    <button class="relative h-6 w-11 rounded-full transition-colors ${this.mirrorBackupEnabled ? 'bg-emerald-600' : 'bg-slate-700'}"
+                            aria-label=${t('settings.mirror_title')}
+                            ?disabled=${this.busy}
+                            @click=${() => this.toggleMirrorBackupEnabled()}>
+                        <span class="absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${this.mirrorBackupEnabled ? 'translate-x-5' : ''}"></span>
+                    </button>
+                </div>
+
+                ${unsupported ? html`
+                    <div class="text-[11px] text-slate-500">${t('settings.mirror_unsupported')}</div>
+                ` : html`
+                    <div class="flex items-center justify-between gap-2">
+                        <div class="text-xs ${this.mirrorBackupReady ? 'text-emerald-300' : 'text-amber-300'}">
+                            ${this.mirrorBackupReady ? t('settings.mirror_folder_ready') : t('settings.mirror_folder_missing')}
+                            ${this.mirrorBackupReady && this.mirrorFolderLabel ? html`
+                                <div class="mt-1 text-[10px] text-slate-400 break-all">${this.mirrorFolderLabel}</div>
+                            ` : null}
+                        </div>
+                        <button class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 min-h-[44px]"
+                                ?disabled=${this.busy}
+                                @click=${() => this.pickMirrorBackupFolder()}>
+                            ${t('settings.mirror_choose_folder')}
+                        </button>
+                    </div>
+                    <div class="text-[11px] text-slate-500">${t('settings.mirror_picker_hint')}</div>
+
+                    <button class="text-xs text-slate-400 hover:text-slate-200"
+                            @click=${() => this.showMirrorAdvanced = !this.showMirrorAdvanced}>
+                        ${this.showMirrorAdvanced ? t('settings.mirror_hide_advanced') : t('settings.mirror_show_advanced')}
+                    </button>
+
+                    ${this.showMirrorAdvanced ? html`
+                        <div class="space-y-2 p-2 rounded-lg border border-slate-800 bg-black/30">
+                            <label class="text-[10px] text-slate-500 uppercase tracking-wider">${t('settings.mirror_when')}</label>
+                            <select
+                                    class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100"
+                                    .value=${this.mirrorBackupMode}
+                                    @change=${(e: Event) => this.setMirrorBackupMode((e.target as HTMLSelectElement).value as 'manual' | 'after_export')}>
+                                <option value="manual">${t('settings.mirror_mode_manual')}</option>
+                                <option value="after_export">${t('settings.mirror_mode_after_export')}</option>
+                            </select>
+                            <div class="text-[11px] text-amber-200/90">${t('settings.mirror_advanced_warning')}</div>
+                        </div>
+                    ` : null}
+                `}
+            </div>
         `;
     }
 
@@ -934,19 +1159,6 @@ export class SettingsPage extends LitElement {
                     </button>
                 </div>
             </section>
-        `;
-    }
-
-    private renderSystemInfo() {
-        return html`
-            <div class="p-4 rounded-xl border border-slate-800 bg-slate-950/50 space-y-2">
-                <div class="text-xs font-mono text-slate-500">${t('settings.system_capabilities')}</div>
-                <div class="text-xs text-slate-600">${t('settings.system_capabilities_values', {
-                    capacitor: String(this.caps.isCapacitor),
-                    opfs: String(this.caps.hasOPFS),
-                    share: String(this.caps.hasWebShare)
-                })}</div>
-            </div>
         `;
     }
 

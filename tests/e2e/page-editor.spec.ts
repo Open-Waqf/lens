@@ -88,7 +88,7 @@ test('Page Editor: A11y Hitbox check', async ({page}) => {
     await expect(undoBtn).toBeEnabled();
 });
 
-test('Page Editor: quality preset toggles are visible and selectable', async ({page}) => {
+test('Page Editor: share button opens explicit format sheet', async ({page}) => {
     const importBtn = page.locator('button').filter({hasText: /Import/i});
     const fileChooserPromise = page.waitForEvent('filechooser');
     await importBtn.click();
@@ -101,12 +101,23 @@ test('Page Editor: quality preset toggles are visible and selectable', async ({p
 
     const editor = page.locator('page-editor');
     await expect(editor).toBeVisible({timeout: 10000});
+    await page.evaluate(() => {
+        const el = document.querySelector('page-editor') as any;
+        if (!el) return;
+        el.quad = [
+            {x: 10, y: 10},
+            {x: 490, y: 10},
+            {x: 490, y: 490},
+            {x: 10, y: 490}
+        ];
+        el.requestUpdate();
+    });
+    await expect(editor.getByRole('button', {name: /Share Now/i})).toBeEnabled();
 
-    await expect(editor.getByRole('button', {name: 'Archive', exact: true})).toBeVisible();
-    await expect(editor.getByRole('button', {name: 'Share', exact: true})).toBeVisible();
-    await expect(editor.getByRole('button', {name: 'Original', exact: true})).toBeVisible();
+    await expect(editor.getByRole('button', {name: 'JPG', exact: true})).toHaveCount(0);
+    await expect(editor.getByRole('button', {name: 'PDF', exact: true})).toHaveCount(0);
 
-    await editor.getByRole('button', {name: 'Original', exact: true}).click();
-    const preset = await page.evaluate(() => (document.querySelector('page-editor') as any)?.qualityPreset);
-    expect(preset).toBe('original');
+    await editor.getByRole('button', {name: /Share Now/i}).click();
+    await expect(page.getByRole('button', {name: 'Share as JPG'})).toBeVisible();
+    await expect(page.getByRole('button', {name: 'Share as PDF'})).toBeVisible();
 });

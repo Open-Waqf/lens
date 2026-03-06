@@ -13,6 +13,8 @@ is simple: **We do not collect, see, or store your data.**
   No image or text data is ever sent to our servers.
 * **On-Device Storage:** Your documents are stored in the **Origin Private File System (OPFS)** and **IndexedDB**. This
   data is physically isolated from other websites.
+* **Optional Mirror Folder:** If you enable "Auto Backup to Folder (Advanced)", the app writes extra encrypted `.slbk`
+  backup files to the local folder you choose. The app does not upload these files itself.
 * **Web/PWA Storage Risk:** In browser contexts, OPFS/IndexedDB remain browser-managed. Sahifah Lens requests persistent
   storage where supported, but browser/OS eviction under storage pressure can still occur. The app surfaces in-app
   backup reminders and storage warnings for this case.
@@ -34,6 +36,7 @@ Sahifah Lens uses local-only libraries:
 * **Capacitor:** To interface with native hardware (Camera, Biometrics, Haptics).
 
 Sahifah Lens does not run a cloud OCR service and does not require account-linked remote APIs for document processing.
+If you connect your mirror folder to external sync tools, their own metadata/network behavior is outside Sahifah Lens.
 
 ## 5. Security of Data
 

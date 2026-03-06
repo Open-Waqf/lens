@@ -4,6 +4,8 @@ export interface AppSettings {
     enableOcr: boolean;
     ocrLang: string;
     clearClipboardAfter60s: boolean;
+    mirrorBackupEnabled: boolean;
+    mirrorBackupMode: 'manual' | 'after_export';
 }
 
 // Internal "Secrets" - Changing these invalidates existing settings
@@ -18,6 +20,8 @@ const KEYS = {
     ENABLE_OCR: 'sahifah.enableOcr',
     OCR_LANG: 'sahifah.ocrLang',
     CLIPBOARD_AUTO_CLEAR: 'sahifah.clipboardAutoClear',
+    MIRROR_BACKUP_ENABLED: 'sahifah.mirrorBackupEnabled',
+    MIRROR_BACKUP_MODE: 'sahifah.mirrorBackupMode',
 };
 
 class SettingsService {
@@ -50,6 +54,8 @@ class SettingsService {
             enableOcr: ocrEnabled,
             ocrLang,
             clearClipboardAfter60s: localStorage.getItem(KEYS.CLIPBOARD_AUTO_CLEAR) === '1',
+            mirrorBackupEnabled: localStorage.getItem(KEYS.MIRROR_BACKUP_ENABLED) === '1',
+            mirrorBackupMode: (localStorage.getItem(KEYS.MIRROR_BACKUP_MODE) as 'manual' | 'after_export') || 'manual',
         };
     }
 
@@ -65,6 +71,16 @@ class SettingsService {
 
     setClipboardAutoClear(enable: boolean) {
         localStorage.setItem(KEYS.CLIPBOARD_AUTO_CLEAR, enable ? '1' : '0');
+        this._notify();
+    }
+
+    setMirrorBackupEnabled(enable: boolean) {
+        localStorage.setItem(KEYS.MIRROR_BACKUP_ENABLED, enable ? '1' : '0');
+        this._notify();
+    }
+
+    setMirrorBackupMode(mode: 'manual' | 'after_export') {
+        localStorage.setItem(KEYS.MIRROR_BACKUP_MODE, mode);
         this._notify();
     }
 

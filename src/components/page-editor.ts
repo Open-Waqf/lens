@@ -5,7 +5,7 @@ import type {Point, Quad} from '../lib/scan/quad';
 import {quadArea, isQuadConvex} from '../lib/scan/quad';
 import {computeOutputSize} from '../lib/image/warp';
 import type {WorkerRequest, WorkerResponse} from '../lib/image/worker';
-import {resolveScanQualityPlan, type ScanQualityPreset} from '../lib/image/quality';
+import {resolveScanQualityPlan} from '../lib/image/quality';
 import {haptics} from '../services/haptics';
 import {ImpactStyle} from "@capacitor/haptics";
 import {t} from '../lib/i18n';
@@ -40,7 +40,7 @@ export class PageEditor extends LitElement {
     @state() private busy = false;
     @state() private err: string | null = null;
     @state() private shareFormat: 'jpg' | 'pdf' = 'jpg';
-    @state() private qualityPreset: ScanQualityPreset = 'share';
+    @state() private showShareSheet = false;
 
     private sourceBitmap: ImageBitmap | null = null;
     private baseCanvas: HTMLCanvasElement | null = null;
@@ -510,7 +510,7 @@ export class PageEditor extends LitElement {
             const rawSize = computeOutputSize(mappedQuad);
             const qualityPlan = resolveScanQualityPlan({
                 action: 'save',
-                preset: this.qualityPreset,
+                preset: 'archive',
                 filter: this.filter,
                 rawWidth: rawSize.w,
                 rawHeight: rawSize.h,
@@ -573,7 +573,7 @@ export class PageEditor extends LitElement {
             const rawSize = computeOutputSize(mappedQuad);
             const qualityPlan = resolveScanQualityPlan({
                 action: 'share',
-                preset: this.qualityPreset,
+                preset: 'share',
                 filter: this.filter,
                 rawWidth: rawSize.w,
                 rawHeight: rawSize.h,
@@ -606,6 +606,12 @@ export class PageEditor extends LitElement {
         } finally {
             this.busy = false;
         }
+    }
+
+    private async shareAs(format: 'jpg' | 'pdf'): Promise<void> {
+        this.shareFormat = format;
+        this.showShareSheet = false;
+        await this.onShareNow();
     }
 
     private onCancel(): void {
@@ -779,40 +785,6 @@ export class PageEditor extends LitElement {
 
                     <div class="fixed left-0 right-0 bottom-0 z-40 bg-slate-950/95 backdrop-blur-md border-t border-slate-800 pb-[env(safe-area-inset-bottom)]">
                         <div class="max-w-7xl mx-auto px-4 py-3 space-y-2">
-                        <div class="rounded-xl border border-slate-700 p-1 bg-slate-900/80 flex gap-1">
-                            <button class="flex-1 px-3 py-2.5 rounded-lg text-sm font-semibold transition-colors min-h-[44px] ${this.qualityPreset === 'archive' ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800'}"
-                                    aria-label=${t('scan.quality_archive')}
-                                    ?disabled=${this.busy}
-                                    @click=${() => this.qualityPreset = 'archive'}>
-                                ${t('scan.quality_archive')}
-                            </button>
-                            <button class="flex-1 px-3 py-2.5 rounded-lg text-sm font-semibold transition-colors min-h-[44px] ${this.qualityPreset === 'share' ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800'}"
-                                    aria-label=${t('scan.quality_share')}
-                                    ?disabled=${this.busy}
-                                    @click=${() => this.qualityPreset = 'share'}>
-                                ${t('scan.quality_share')}
-                            </button>
-                            <button class="flex-1 px-3 py-2.5 rounded-lg text-sm font-semibold transition-colors min-h-[44px] ${this.qualityPreset === 'original' ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800'}"
-                                    aria-label=${t('scan.quality_original')}
-                                    ?disabled=${this.busy}
-                                    @click=${() => this.qualityPreset = 'original'}>
-                                ${t('scan.quality_original')}
-                            </button>
-                        </div>
-                        <div class="rounded-xl border border-slate-700 p-1 bg-slate-900/80 flex gap-1">
-                            <button class="flex-1 px-3 py-2.5 rounded-lg text-sm font-semibold transition-colors min-h-[44px] ${this.shareFormat === 'jpg' ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800'}"
-                                    aria-label=${t('scan.share_format_jpg')}
-                                    ?disabled=${this.busy}
-                                    @click=${() => this.shareFormat = 'jpg'}>
-                                ${t('scan.share_format_jpg')}
-                            </button>
-                            <button class="flex-1 px-3 py-2.5 rounded-lg text-sm font-semibold transition-colors min-h-[44px] ${this.shareFormat === 'pdf' ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800'}"
-                                    aria-label=${t('scan.share_format_pdf')}
-                                    ?disabled=${this.busy}
-                                    @click=${() => this.shareFormat = 'pdf'}>
-                                ${t('scan.share_format_pdf')}
-                            </button>
-                        </div>
                         <div class="flex items-center gap-2">
                         <button class="flex-1 px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-300 font-bold tracking-wide transition-colors min-h-[44px] flex items-center justify-center"
                                 type="button"
@@ -825,7 +797,7 @@ export class PageEditor extends LitElement {
                                 class="flex-1 px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-200 font-bold tracking-wide transition-colors min-h-[44px] flex items-center justify-center"
                                 type="button"
                                 ?disabled=${this.busy || !this.isQuadValid}
-                                @click=${() => void this.onShareNow()}>
+                                @click=${() => this.showShareSheet = true}>
                             <span class="inline-flex items-center justify-center shrink-0">${Icons.Share('w-5 h-5 block')}</span>
                             <span class="sr-only">${t('common.share_now')}</span>
                         </button>
@@ -842,6 +814,30 @@ export class PageEditor extends LitElement {
                         </div>
                         </div>
                     </div>
+
+                    ${this.showShareSheet ? html`
+                        <div class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end"
+                             @click=${() => this.showShareSheet = false}>
+                            <div class="w-full p-4 pb-[calc(env(safe-area-inset-bottom)+16px)] bg-slate-950 border-t border-slate-800 rounded-t-2xl space-y-3"
+                                 @click=${(e: Event) => e.stopPropagation()}>
+                                <div class="text-sm font-semibold text-slate-200">${t('scan.share_as_title')}</div>
+                                <button class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-100 text-sm font-medium min-h-[44px]"
+                                        ?disabled=${this.busy}
+                                        @click=${() => void this.shareAs('jpg')}>
+                                    ${t('scan.share_as_jpg')}
+                                </button>
+                                <button class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-100 text-sm font-medium min-h-[44px]"
+                                        ?disabled=${this.busy}
+                                        @click=${() => void this.shareAs('pdf')}>
+                                    ${t('scan.share_as_pdf')}
+                                </button>
+                                <button class="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 hover:bg-slate-900 text-slate-300 text-sm min-h-[44px]"
+                                        @click=${() => this.showShareSheet = false}>
+                                    ${t('common.cancel')}
+                                </button>
+                            </div>
+                        </div>
+                    ` : null}
             </div>
         `;
     }

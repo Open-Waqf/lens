@@ -25,6 +25,7 @@ control. Read our [Local Privacy Policy](PRIVACY_POLICY.md).
 * **Clipboard Auto-Clear (Opt-in):** Clears app-copied text from clipboard after 60 seconds.
 * **Stream-Encrypted Backups:** Export your library as a `.slbk` vault using AES-256-GCM with a chunked streaming
   protocol (Magic: `SLBK`).
+* **Advanced Mirror Folder (Optional):** Save an extra encrypted `.slbk` copy to a user-chosen local folder after export.
 * **Nuclear Reset:** A "Reset Storage" kill-switch erases all local documents and database entries instantly.
 * **Inclusive Design:** Optimized for screen readers with semantic labels and high-contrast controls.
 * **Offline First:** Fully functional in airplane mode; OCR and image processing are 100% local.
