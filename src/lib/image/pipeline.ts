@@ -7,6 +7,8 @@ export type PipelineInput = {
     rotation: Rotation;
     filter: FilterMode;
     masterJpegQuality?: number;
+    thumbMax?: number;
+    thumbJpegQuality?: number;
 };
 
 export type PipelineOutput = {
@@ -43,7 +45,8 @@ export function processPhoto(opts: PipelineInput): Promise<PipelineOutput> {
             rotation: opts.rotation,
             filter: opts.filter,
             masterJpegQuality: opts.masterJpegQuality ?? 0.82,
-            thumbMax: 800,
+            thumbMax: opts.thumbMax ?? 800,
+            thumbJpegQuality: opts.thumbJpegQuality ?? 0.82,
         });
     });
 }

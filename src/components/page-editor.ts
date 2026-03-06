@@ -539,6 +539,7 @@ export class PageEditor extends LitElement {
                 outW: tW,
                 outH: tH,
                 encode: true,
+                outputMime: 'image/webp',
                 quality: qualityPlan.thumbJpegQuality,
                 sharpenAmount: 0,
             });

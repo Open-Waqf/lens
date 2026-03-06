@@ -33,9 +33,11 @@ control. Read our [Local Privacy Policy](PRIVACY_POLICY.md).
 ### 📸 Intelligent Scanning & Editing
 
 * **Dual Native Scan Modes:** On Android/iOS, choose `Quick Scan` (native ML scanner, default) or `Manual Scan` (live camera + edge overlay).
+* **Native Capture Stabilization:** In manual native mode, capture performs a best-effort AE/AF lock + short settle before shutter to reduce flicker/soft frames.
 * **Edge Detection:** Real-time boundary detection via Computer Vision workers.
 * **Visual Filter Picker:** Real-time thumbnail previews for Magic Color, B&W, and Whiteboard filters.
 * **Quality Presets:** `Archive`, `Share`, and `Original` output policies balance readability, file size, and processing cost. `Original` disables auto-sharpening.
+* **Thumb Encoding Policy:** Library/editor thumbnails are encoded as WebP for smaller storage while master pages remain JPEG for compatibility.
 * **The "Stitcher":** Merge multiple separate scans into a single organized document.
 * **Perspective Correction:** Automatically warps and crops images to fix camera angles.
 

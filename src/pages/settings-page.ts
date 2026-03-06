@@ -463,8 +463,14 @@ export class SettingsPage extends LitElement {
             }
 
             const file = await writer.close();
-            const dateStr = new Date().toISOString().split('T')[0];
-            const finalName = `lens-backup-${dateStr}.slbk`;
+            const nowDate = new Date();
+            const y = nowDate.getFullYear();
+            const m = String(nowDate.getMonth() + 1).padStart(2, '0');
+            const d = String(nowDate.getDate()).padStart(2, '0');
+            const hh = String(nowDate.getHours()).padStart(2, '0');
+            const mm = String(nowDate.getMinutes()).padStart(2, '0');
+            const ss = String(nowDate.getSeconds()).padStart(2, '0');
+            const finalName = `lens-backup-${y}${m}${d}-${hh}${mm}${ss}.slbk`;
 
             const namedFile = new File([file], finalName, {
                 type: 'application/octet-stream',

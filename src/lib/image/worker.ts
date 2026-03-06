@@ -22,6 +22,7 @@ export type WorkerRequest = {
     outW?: number;
     outH?: number;
     encode?: boolean; // If true, returns bytes. Else returns bitmap.
+    outputMime?: 'image/jpeg' | 'image/webp';
     quality?: number;
     sharpenAmount?: number;
 
@@ -153,7 +154,7 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
 
         } else if (req.encode) {
             // Mode A: Single Save
-            const bytes = await encodeJpeg(finalRgba, finalW, finalH, req.quality ?? 0.85);
+            const bytes = await encodeImage(finalRgba, finalW, finalH, req.outputMime ?? 'image/jpeg', req.quality ?? 0.85);
             if (req.blob) src.close();
             const res: WorkerResponse = {id: req.id, ok: true, bytes, width: finalW, height: finalH};
             (self as unknown as Worker).postMessage(res, [bytes.buffer]);
@@ -177,10 +178,20 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
 };
 
 async function encodeJpeg(rgba: Uint8ClampedArray, w: number, h: number, q: number): Promise<Uint8Array> {
+    return encodeImage(rgba, w, h, 'image/jpeg', q);
+}
+
+async function encodeImage(
+    rgba: Uint8ClampedArray,
+    w: number,
+    h: number,
+    mime: 'image/jpeg' | 'image/webp',
+    q: number
+): Promise<Uint8Array> {
     const c = new OffscreenCanvas(w, h);
     const ctx = c.getContext('2d')!;
     ctx.putImageData(new ImageData(rgba as any, w, h), 0, 0);
-    const blob = await c.convertToBlob({type: 'image/jpeg', quality: q});
+    const blob = await c.convertToBlob({type: mime, quality: q});
     return new Uint8Array(await blob.arrayBuffer());
 }
 

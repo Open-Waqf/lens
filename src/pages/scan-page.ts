@@ -35,6 +35,7 @@ import {shareFile} from '../services/share';
 import {PDFDocument} from 'pdf-lib';
 import {settings, type ScanMode} from '../services/settings';
 import {detectImageMime} from '../lib/image/mime';
+import {resolveScanQualityPlan} from '../lib/image/quality';
 
 const APPEND_DOC_KEY = 'sahifah.appendToDocId';
 const AUTO_KEY = 'sahifah.autoCapture';
@@ -657,8 +658,13 @@ export class ScanPage extends LitElement {
         setTimeout(() => this.flashActive = false, 150);
 
         this.captureInFlight = true;
+        let aeAfLocked = false;
         try {
             const v = this.videoEl;
+            if (this.caps.isCapacitor) {
+                aeAfLocked = await this.camera.lockExposureAndFocus();
+                if (aeAfLocked) await new Promise(r => setTimeout(r, 80));
+            }
             const maxDim = 1800;
             const scale = Math.min(1, maxDim / Math.max(v.videoWidth, v.videoHeight));
             const w = Math.max(1, Math.round(v.videoWidth * scale));
@@ -700,6 +706,7 @@ export class ScanPage extends LitElement {
         } catch (e) {
             this.error = toUserErrorMessage(e);
         } finally {
+            if (aeAfLocked) await this.camera.unlockExposureAndFocus();
             this.captureInFlight = false;
         }
     }
@@ -790,7 +797,15 @@ export class ScanPage extends LitElement {
             const docId = await this.ensureDocId();
 
             if (this.replacePageId && files.length > 0) {
-                const {master, thumb} = await processPhoto({blob: files[0], rotation: 0, filter: 'original'} as any);
+                const replacePlan = await this.resolveImportQualityPlan(files[0]);
+                const {master, thumb} = await processPhoto({
+                    blob: files[0],
+                    rotation: 0,
+                    filter: 'original',
+                    masterJpegQuality: replacePlan.masterJpegQuality,
+                    thumbMax: replacePlan.thumbMax,
+                    thumbJpegQuality: replacePlan.thumbJpegQuality,
+                } as any);
                 await this.repo.updateExistingPage(this.replacePageId, master, thumb);
                 this.replacePageId = null;
                 localStorage.removeItem(REPLACE_PAGE_KEY);
@@ -807,7 +822,15 @@ export class ScanPage extends LitElement {
             const filesToImport = files.slice(0, remaining);
             const importedPageIds: string[] = [];
             for (const file of filesToImport) {
-                const {master, thumb} = await processPhoto({blob: file, rotation: 0, filter: 'original'} as any);
+                const qualityPlan = await this.resolveImportQualityPlan(file);
+                const {master, thumb} = await processPhoto({
+                    blob: file,
+                    rotation: 0,
+                    filter: 'original',
+                    masterJpegQuality: qualityPlan.masterJpegQuality,
+                    thumbMax: qualityPlan.thumbMax,
+                    thumbJpegQuality: qualityPlan.thumbJpegQuality,
+                } as any);
                 const pageId = await this.repo.addNewPage(docId, master, thumb);
                 importedPageIds.push(pageId);
                 this.newPageIds.add(pageId);
@@ -968,6 +991,21 @@ export class ScanPage extends LitElement {
                 void this.capturePhoto();
                 this.stableSince = 0;
             }, AUTO_CAPTURE_SETTLE_MS);
+        }
+    }
+
+    private async resolveImportQualityPlan(file: Blob): Promise<ReturnType<typeof resolveScanQualityPlan>> {
+        const bmp = await createImageBitmap(file);
+        try {
+            return resolveScanQualityPlan({
+                action: 'save',
+                preset: 'archive',
+                filter: 'original',
+                rawWidth: bmp.width,
+                rawHeight: bmp.height,
+            });
+        } finally {
+            bmp.close();
         }
     }
 

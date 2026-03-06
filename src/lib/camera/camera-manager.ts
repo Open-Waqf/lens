@@ -1,3 +1,5 @@
+import {Capacitor, registerPlugin} from '@capacitor/core';
+
 export type CameraStartResult = {
     stream: MediaStream;
     width: number;
@@ -10,6 +12,7 @@ export class CameraManager {
 
     private _torchSupported = false;
     private _torchOn = false;
+    private _aeAfLocked = false;
 
     get isRunning(): boolean {
         return !!this._stream;
@@ -113,6 +116,78 @@ export class CameraManager {
         await this.setTorch(!this._torchOn);
     }
 
+    /**
+     * Best-effort lock before capture to reduce focus/exposure flicker in native WebViews.
+     * Returns true when lock constraints were applied.
+     */
+    async lockExposureAndFocus(): Promise<boolean> {
+        if (!this._videoTrack) return false;
+        const track: any = this._videoTrack as any;
+
+        if (Capacitor.isNativePlatform()) {
+            try {
+                await NativeCameraControl.lockExposureAndFocus();
+                this._aeAfLocked = true;
+                return true;
+            } catch {
+                // Fallback to track constraints below.
+            }
+        }
+
+        const caps = safeGetCapabilities(track);
+        const advanced: Record<string, unknown> = {};
+
+        if (arrayHas(caps?.focusMode, 'manual') || arrayHas(caps?.focusMode, 'single-shot')) {
+            advanced.focusMode = arrayHas(caps?.focusMode, 'manual') ? 'manual' : 'single-shot';
+        }
+        if (arrayHas(caps?.exposureMode, 'manual') || arrayHas(caps?.exposureMode, 'single-shot')) {
+            advanced.exposureMode = arrayHas(caps?.exposureMode, 'manual') ? 'manual' : 'single-shot';
+        }
+
+        if (Object.keys(advanced).length === 0) return false;
+        try {
+            await track.applyConstraints({advanced: [advanced]});
+            this._aeAfLocked = true;
+            return true;
+        } catch {
+            this._aeAfLocked = false;
+            return false;
+        }
+    }
+
+    async unlockExposureAndFocus(): Promise<void> {
+        if (!this._videoTrack || !this._aeAfLocked) return;
+        const track: any = this._videoTrack as any;
+
+        if (Capacitor.isNativePlatform()) {
+            try {
+                await NativeCameraControl.unlockExposureAndFocus();
+                this._aeAfLocked = false;
+                return;
+            } catch {
+                // Fallback to track constraints below.
+            }
+        }
+
+        const caps = safeGetCapabilities(track);
+        const advanced: Record<string, unknown> = {};
+
+        if (arrayHas(caps?.focusMode, 'continuous')) advanced.focusMode = 'continuous';
+        if (arrayHas(caps?.exposureMode, 'continuous')) advanced.exposureMode = 'continuous';
+        if (Object.keys(advanced).length === 0) {
+            this._aeAfLocked = false;
+            return;
+        }
+
+        try {
+            await track.applyConstraints({advanced: [advanced]});
+        } catch {
+            // ignore
+        } finally {
+            this._aeAfLocked = false;
+        }
+    }
+
     async setTorch(on: boolean): Promise<void> {
         if (!this._videoTrack) return;
         if (!this._torchSupported) return;
@@ -128,6 +203,13 @@ export class CameraManager {
     }
 }
 
+type NativeCameraControlPlugin = {
+    lockExposureAndFocus(): Promise<void>;
+    unlockExposureAndFocus(): Promise<void>;
+};
+
+const NativeCameraControl = registerPlugin<NativeCameraControlPlugin>('NativeCameraControl');
+
 function stopStream(stream: MediaStream) {
     for (const t of stream.getTracks()) {
         try {
@@ -135,6 +217,18 @@ function stopStream(stream: MediaStream) {
         } catch {
         }
     }
+}
+
+function safeGetCapabilities(track: any): any {
+    try {
+        return track?.getCapabilities?.();
+    } catch {
+        return null;
+    }
+}
+
+function arrayHas(value: unknown, wanted: string): boolean {
+    return Array.isArray(value) && value.includes(wanted);
 }
 
 function waitForVideoReady(video: HTMLVideoElement, timeoutMs: number): Promise<void> {
