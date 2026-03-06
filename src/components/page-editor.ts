@@ -52,10 +52,12 @@ export class PageEditor extends LitElement {
 
     private _previewTimer: number | null = null;
     private _previewToken = 0;
+    private _previewRetryBudget = 0;
     private worker: Worker | null = null;
 
     @query('canvas[data-edges]') private edgesEl!: HTMLCanvasElement;
     private dragIdx: number | null = null;
+    private dragPointerId: number | null = null;
     @query('canvas[data-preview]') private previewEl!: HTMLCanvasElement;
     @query('canvas[data-magnify]') private magnifyEl!: HTMLCanvasElement;
 
@@ -119,6 +121,9 @@ export class PageEditor extends LitElement {
     }
 
     disconnectedCallback(): void {
+        window.removeEventListener('pointermove', this.onPointerMove);
+        window.removeEventListener('pointerup', this.onPointerUp);
+        window.removeEventListener('pointercancel', this.onPointerUp);
         this.stopWorker();
         if (this._previewTimer) window.clearTimeout(this._previewTimer);
         this._previewTimer = null;
@@ -164,6 +169,7 @@ export class PageEditor extends LitElement {
         this.quad = null;
         this.rotation = 0;
         this.history = [];
+        this._previewRetryBudget = 6;
         try {
             if (this.sourceBitmap) this.sourceBitmap.close();
             this.sourceBitmap = await createImageBitmap(this.blob);
@@ -177,6 +183,9 @@ export class PageEditor extends LitElement {
                 void this.autoDetectEdges();
             } else {
                 this.queuePreview();
+                // Native scanner return can race layout; schedule bounded retries.
+                window.setTimeout(() => this.queuePreview(), 140);
+                window.setTimeout(() => this.queuePreview(), 280);
             }
         } catch (e) {
             this.err = "Failed to load image";
@@ -257,45 +266,24 @@ export class PageEditor extends LitElement {
         }
     }
 
-    private pickHandle(ev: PointerEvent): number | null {
-        if (!this.edgesEl || !this.quad) return null;
-        const rect = this.edgesEl.getBoundingClientRect();
-        const scaleX = this.edgesEl.width / rect.width;
-        const scaleY = this.edgesEl.height / rect.height;
-        const x = (ev.clientX - rect.left) * scaleX;
-        const y = (ev.clientY - rect.top) * scaleY;
-        const sx = this.edgesEl.width / this.baseW;
-        const sy = this.edgesEl.height / this.baseH;
-
-        // WCAG 2.5.5: 44x44px target (radius 22px).
-        // hitRadius is in canvas pixels. We ensure at least 22 CSS pixels of hit area.
-        const minHitRadius = 22 * Math.max(scaleX, scaleY);
-        const hitRadius = Math.max(minHitRadius, 32 * Math.max(scaleX, scaleY));
-
-        let best: { i: number; d: number } | null = null;
-        for (let i = 0; i < 4; i++) {
-            const p = this.quad[i];
-            const px = p.x * sx;
-            const py = p.y * sy;
-            const d = Math.hypot(px - x, py - y);
-            if (d < hitRadius && (!best || d < best.d)) best = {i, d};
-        }
-        return best ? best.i : null;
-    }
-
-    private onPointerDown = (ev: PointerEvent) => {
+    private onHandlePointerDown = (idx: number, ev: PointerEvent) => {
         if (!this.quad) return;
-        const idx = this.pickHandle(ev);
-        if (idx == null) return;
         ev.preventDefault();
+        ev.stopPropagation();
         this.pushHistory();
         this.dragIdx = idx;
-        (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
+        this.dragPointerId = ev.pointerId;
+        (ev.currentTarget as HTMLElement).setPointerCapture?.(ev.pointerId);
+        window.addEventListener('pointermove', this.onPointerMove, {passive: false});
+        window.addEventListener('pointerup', this.onPointerUp, {passive: true});
+        window.addEventListener('pointercancel', this.onPointerUp, {passive: true});
         this.showMagnify = true;
     };
 
     private onPointerMove = (ev: PointerEvent) => {
         if (this.dragIdx == null || !this.quad) return;
+        if (this.dragPointerId != null && ev.pointerId !== this.dragPointerId) return;
+        ev.preventDefault();
         const rect = this.edgesEl.getBoundingClientRect();
         const x = ev.clientX - rect.left;
         const y = ev.clientY - rect.top;
@@ -311,8 +299,13 @@ export class PageEditor extends LitElement {
         this.queuePreview();
     };
 
-    private onPointerUp = (_ev: PointerEvent) => {
+    private onPointerUp = (ev: PointerEvent) => {
+        if (this.dragPointerId != null && ev.pointerId !== this.dragPointerId) return;
         this.dragIdx = null;
+        this.dragPointerId = null;
+        window.removeEventListener('pointermove', this.onPointerMove);
+        window.removeEventListener('pointerup', this.onPointerUp);
+        window.removeEventListener('pointercancel', this.onPointerUp);
         this.showMagnify = false;
         this.clearMagnifier();
     };
@@ -432,12 +425,25 @@ export class PageEditor extends LitElement {
             const mappedQuad = this.mapQuadToSource(this.quad);
             const outSize = computeOutputSize(mappedQuad);
             const out = this.previewEl;
-            if (!out) return;
+            if (!out) {
+                if (this._previewRetryBudget > 0) {
+                    this._previewRetryBudget--;
+                    window.setTimeout(() => this.queuePreview(), 120);
+                }
+                return;
+            }
 
             // FIX: Dynamic Sizing to match Android/Mobile viewports
             // 1. Determine available width (container) and safe max height
             const container = out.parentElement;
             const cw = container?.clientWidth || window.innerWidth;
+            if (!cw || cw < 12) {
+                if (this._previewRetryBudget > 0) {
+                    this._previewRetryBudget--;
+                    window.setTimeout(() => this.queuePreview(), 180);
+                }
+                return;
+            }
             const maxH = window.innerHeight * 0.65; // Matches Crop view constraint
 
             // 2. Calculate aspect-ratio preserving dimensions
@@ -493,7 +499,12 @@ export class PageEditor extends LitElement {
             // Draw result to fill the calculated space
             ctx.drawImage(res.bitmap, 0, 0, out.width, out.height);
             res.bitmap.close();
+            this._previewRetryBudget = 0;
         } catch (e) {
+            if (this._previewRetryBudget > 0) {
+                this._previewRetryBudget--;
+                window.setTimeout(() => this.queuePreview(), 160);
+            }
         } finally {
             if (token === this._previewToken) this.busy = false;
         }
@@ -690,18 +701,15 @@ export class PageEditor extends LitElement {
                     <div class="relative w-full flex justify-center bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 min-h-[50vh]">
                         <canvas data-edges
                                 class="max-w-full max-h-[70vh] w-auto h-auto object-contain select-none z-10"
-                                style="touch-action: none;"
-                                @pointerdown=${this.onPointerDown}
-                                @pointermove=${this.onPointerMove}
-                                @pointerup=${this.onPointerUp}
-                                @pointercancel=${this.onPointerUp}></canvas>
+                                style="touch-action: pan-y;"></canvas>
 
                         ${[0, 1, 2, 3].map(i => html`
                             <div
                                     data-testid="corner-handle-${i}"
-                                    class="absolute z-20 -translate-x-1/2 -translate-y-1/2 min-w-[44px] min-h-[44px] w-11 h-11 pointer-events-none"
+                                    class="absolute z-20 -translate-x-1/2 -translate-y-1/2 min-w-[44px] min-h-[44px] w-11 h-11 pointer-events-auto"
                                     style=${this.getCornerHandleStyle(i)}
-                                    aria-hidden="true"></div>
+                                    aria-label=${t('scan.edit_page')}
+                                    @pointerdown=${(ev: PointerEvent) => this.onHandlePointerDown(i, ev)}></div>
                         `)}
 
                         <div class=${['absolute top-4 right-4 rounded-full overflow-hidden border-4 border-white shadow-2xl z-20 w-32 h-32 pointer-events-none transition-opacity duration-200', this.showMagnify ? 'opacity-100' : 'opacity-0'].join(' ')}>

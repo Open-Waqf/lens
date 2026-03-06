@@ -64,7 +64,7 @@ export class ScanPage extends LitElement {
     @state() private showWelcome = false;
     @state() private flashActive = false; // For visual feedback
 
-    @state() private showPermissionError = false; // To control the error screen
+    @state() private showPermissionError = false; // Controls inline recovery panel in idle state.
 
     @state() private docTitle: string | null = null;
     @state() private targetDocTitle: string | null = null;
@@ -803,6 +803,18 @@ export class ScanPage extends LitElement {
         });
     }
 
+    private onImportClick = (e: Event) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void this.pickFiles({multiple: !this.replacePageId});
+    };
+
+    private onTryCameraClick = (e: Event) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.beginCameraFromGesture(true);
+    };
+
     private async batchImport(files: File[]): Promise<void> {
         this.busy = true;
         this.error = null;
@@ -1221,6 +1233,11 @@ export class ScanPage extends LitElement {
                             </svg>
                         </div>
                         <div class="w-full space-y-3">
+                            ${this.busy ? html`
+                                <div class="w-full py-5 rounded-[1.5rem] border border-slate-800 bg-slate-900/70 text-slate-200 text-center font-semibold">
+                                    ${t('scan.importing_files')}
+                                </div>
+                            ` : html`
                             ${this.caps.isCapacitor ? html`
                                 <div class="grid grid-cols-2 gap-2 p-1 rounded-xl border border-slate-800 bg-slate-900/60">
                                     <button
@@ -1243,33 +1260,39 @@ export class ScanPage extends LitElement {
                                     <div class="text-xs text-amber-100/90">${t('scan.permission_body')}</div>
                                     <div class="flex gap-2 pt-1">
                                         <button class="flex-1 py-2 rounded-lg bg-amber-600/90 hover:bg-amber-500 text-slate-950 text-sm font-semibold min-h-[44px]"
-                                                @click=${() => this.beginCameraFromGesture(true)}>
+                                                type="button"
+                                                @click=${this.onTryCameraClick}>
                                             ${t('scan.try_again')}
                                         </button>
                                         <button class="flex-1 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 text-sm font-semibold min-h-[44px]"
+                                                type="button"
                                                 ?disabled=${this.busy}
-                                                @click=${() => this.pickFiles({multiple: !this.replacePageId})}>
+                                                @click=${this.onImportClick}>
                                             ${t('scan.import_files')}
                                         </button>
                                     </div>
                                 </div>
-                            ` : null}
-                            <button class="w-full py-5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 rounded-[1.5rem] font-bold text-xl shadow-lg shadow-emerald-900/20 transition-all active:scale-95"
-                                    @click=${() => this.beginCameraFromGesture(true)}>
-                                ${this.caps.isCapacitor
-                                        ? (this.scanMode === 'quick' ? t('scan.start_scanner') : t('scan.open_camera'))
-                                        : t('scan.open_camera')}
-                            </button>
-                            ${this.caps.isCapacitor ? html`
-                                <div class="text-[11px] text-slate-500 text-center px-1">
-                                    ${this.scanMode === 'quick' ? t('scan.mode_quick_desc') : t('scan.mode_manual_desc')}
-                                </div>
-                            ` : null}
-                            <button class="w-full py-4 text-slate-400 font-semibold hover:text-white transition-colors"
-                                    ?disabled=${this.busy}
-                                    @click=${() => this.pickFiles({multiple: !this.replacePageId})}>
-                                ${t('scan.import_docs')}
-                            </button>
+                            ` : html`
+                                <button class="w-full py-5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 rounded-[1.5rem] font-bold text-xl shadow-lg shadow-emerald-900/20 transition-all active:scale-95"
+                                        type="button"
+                                        @click=${this.onTryCameraClick}>
+                                    ${this.caps.isCapacitor
+                                            ? (this.scanMode === 'quick' ? t('scan.start_scanner') : t('scan.open_camera'))
+                                            : t('scan.open_camera')}
+                                </button>
+                                ${this.caps.isCapacitor ? html`
+                                    <div class="text-[11px] text-slate-500 text-center px-1">
+                                        ${this.scanMode === 'quick' ? t('scan.mode_quick_desc') : t('scan.mode_manual_desc')}
+                                    </div>
+                                ` : null}
+                                <button class="w-full py-4 text-slate-400 font-semibold hover:text-white transition-colors"
+                                        type="button"
+                                        ?disabled=${this.busy}
+                                        @click=${this.onImportClick}>
+                                    ${t('scan.import_docs')}
+                                </button>
+                            `}
+                            `}
                         </div>
                     </div>
                 ` : null}
@@ -1277,9 +1300,10 @@ export class ScanPage extends LitElement {
                 ${stage === 'camera' ? html`
                     <div class="space-y-8">
                         <div class="aspect-[3/4] rounded-[2.5rem] overflow-hidden bg-black relative border border-slate-800 shadow-2xl">
-                            <video class="w-full h-full object-cover" autoplay playsinline muted></video>
+                            <video class="w-full h-full object-cover pointer-events-none select-none" autoplay playsinline muted></video>
 
                             <scan-overlay
+                                    class="pointer-events-none"
                                     .detected=${this.lastDetect}
                                     .quad=${this.smoothedQuad}
                                     .guidance=${this.guidance}
@@ -1310,9 +1334,10 @@ export class ScanPage extends LitElement {
 
                         <div class="flex items-center justify-between px-10 pb-10">
                             <button class="p-5 text-slate-400 active:text-white"
+                                    type="button"
                                     aria-label=${t('scan.import_files')}
                                     ?disabled=${this.busy}
-                                    @click=${() => this.pickFiles({multiple: !this.replacePageId})}>
+                                    @click=${this.onImportClick}>
                                 <svg class="w-9 h-9" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                           d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>

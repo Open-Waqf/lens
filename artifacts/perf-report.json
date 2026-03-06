@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-03-05T13:18:19.159Z",
+  "generatedAt": "2026-03-06T17:10:27.671Z",
   "environment": {
     "browser": "Desktop Chrome (Playwright)",
     "routeBase": "http://localhost:4173"
@@ -15,54 +15,54 @@
     {
       "name": "cold_start_camera_ready",
       "thresholdMs": 2500,
-      "measuredMs": 53,
-      "p95Ms": 151,
+      "measuredMs": 12,
+      "p95Ms": 46,
       "samples": [
-        151,
-        53,
-        31
+        46,
+        12,
+        11
       ],
       "pass": true
     },
     {
       "name": "ocr_single_page",
       "thresholdMs": 30000,
-      "measuredMs": 3105,
-      "p95Ms": 3105,
+      "measuredMs": 1649,
+      "p95Ms": 1649,
       "samples": [
-        3105
+        1649
       ],
       "pass": true
     },
     {
       "name": "search_1000_docs",
       "thresholdMs": 500,
-      "measuredMs": 62,
-      "p95Ms": 257,
+      "measuredMs": 25,
+      "p95Ms": 121,
       "samples": [
-        257,
-        62,
-        41
+        121,
+        25,
+        19
       ],
       "pass": true
     },
     {
       "name": "export_100_docs",
       "thresholdMs": 60000,
-      "measuredMs": 12664,
-      "p95Ms": 12664,
+      "measuredMs": 14490,
+      "p95Ms": 14490,
       "samples": [
-        12664
+        14490
       ],
       "pass": true
     },
     {
       "name": "reset_500_docs",
       "thresholdMs": 3000,
-      "measuredMs": 410,
-      "p95Ms": 410,
+      "measuredMs": 421,
+      "p95Ms": 421,
       "samples": [
-        410
+        421
       ],
       "pass": true
     }
