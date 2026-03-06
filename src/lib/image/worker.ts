@@ -28,6 +28,7 @@ export type WorkerRequest = {
     // If these are present, we generate BOTH master and thumb
     masterJpegQuality?: number;
     thumbMax?: number;
+    thumbJpegQuality?: number;
 };
 
 export type WorkerResponse =
@@ -137,8 +138,8 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
 
             tctx.drawImage(fullCanvas, 0, 0, finalW, finalH, 0, 0, tW, tH);
 
-            // Thumbnails can be lower quality (70%) to load instantly in grid
-            const tBlob = await tCanvas.convertToBlob({type: 'image/jpeg', quality: 0.82});
+            // Encode thumbs as WebP for significantly smaller size at same visual quality.
+            const tBlob = await tCanvas.convertToBlob({type: 'image/webp', quality: req.thumbJpegQuality ?? 0.82});
             const tBytes = new Uint8Array(await tBlob.arrayBuffer());
 
             if (req.blob) src.close();

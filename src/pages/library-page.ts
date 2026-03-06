@@ -8,6 +8,7 @@ import {db} from '../services/db';
 import type {DocRecord} from '../domain/types';
 import {ScanRepo} from './scan/scan-repo';
 import {bytesToBlob} from '../lib/bytes';
+import {detectImageMime} from '../lib/image/mime';
 import {ConfirmModal} from '../components/confirm-modal';
 import {ocrQueue} from '../services/ocr-queue';
 import {haptics} from "../services/haptics";
@@ -169,7 +170,8 @@ export class LibraryPage extends LitElement {
             // Only load if not already loaded
             const strip = await this.repo.getDocStrip(doc.id, 1);
             if (strip?.items[0]) {
-                const blob = bytesToBlob(strip.items[0].thumbBytes, 'image/jpeg');
+                const bytes = strip.items[0].thumbBytes;
+                const blob = bytesToBlob(bytes, detectImageMime(bytes));
                 const url = URL.createObjectURL(blob);
                 this.thumbnails.set(doc.id, url);
                 this.requestUpdate(); // Update UI as thumbs arrive

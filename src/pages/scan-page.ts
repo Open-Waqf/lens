@@ -34,6 +34,7 @@ import {toUserErrorMessage} from '../lib/user-error';
 import {shareFile} from '../services/share';
 import {PDFDocument} from 'pdf-lib';
 import {settings, type ScanMode} from '../services/settings';
+import {detectImageMime} from '../lib/image/mime';
 
 const APPEND_DOC_KEY = 'sahifah.appendToDocId';
 const AUTO_KEY = 'sahifah.autoCapture';
@@ -562,7 +563,7 @@ export class ScanPage extends LitElement {
         this.revokeStrip();
         const items: StripItem[] = [];
         for (const it of info.items) {
-            const url = URL.createObjectURL(bytesToBlob(it.thumbBytes, 'image/jpeg'));
+            const url = URL.createObjectURL(bytesToBlob(it.thumbBytes, detectImageMime(it.thumbBytes)));
             items.push({id: it.id, url, isNew: this.newPageIds.has(it.id)});
         }
         this.strip = items;

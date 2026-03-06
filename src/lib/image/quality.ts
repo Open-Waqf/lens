@@ -43,7 +43,7 @@ function getPresetPolicy(preset: ScanQualityPreset, action: ScanQualityAction): 
         return {
             minDim: 1800,
             maxDim: 2800,
-            masterJpegQuality: action === 'share' ? 0.9 : 0.93,
+            masterJpegQuality: action === 'share' ? 0.9 : 0.95,
             thumbMax: 900,
             thumbJpegQuality: 0.82,
             baseSharpen: 0.42,

@@ -7,6 +7,7 @@ import {getFileStore} from '../services/filestore';
 import {buildPdfForDoc, type PdfQuality} from '../lib/pdf';
 import {jsonFileMap, makeZip} from '../lib/zip';
 import {bytesToBlob} from '../lib/bytes';
+import {detectImageMime} from '../lib/image/mime';
 import {ScanRepo} from './scan/scan-repo';
 
 import {ConfirmModal} from '../components/confirm-modal';
@@ -269,7 +270,7 @@ export class DocPage extends LitElement {
         for (const p of this.pages) {
             try {
                 const bytes = await store.get(p.thumbPath);
-                const blob = bytesToBlob(bytes, 'image/jpeg');
+                const blob = bytesToBlob(bytes, detectImageMime(bytes));
                 thumbs[p.id] = URL.createObjectURL(blob);
             } catch {
             }

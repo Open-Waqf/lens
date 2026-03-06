@@ -9,6 +9,7 @@ import {bytesToBlob} from "../../lib/bytes";
 import {ocrQueue} from '../../services/ocr-queue';
 import {settings} from '../../services/settings';
 import {markStorageCleanupPending} from '../../services/storage-cleanup-flag';
+import {detectImageMime} from '../../lib/image/mime';
 
 export type DocStripItem = { id: string; thumbBytes: Uint8Array };
 
@@ -93,7 +94,7 @@ export class ScanRepo {
         // 2. Write Files OUTSIDE the Transaction
         try {
             await store.put(imagePath, master.bytes, 'image/jpeg');
-            await store.put(thumbPath, thumb.bytes, 'image/jpeg');
+            await store.put(thumbPath, thumb.bytes, detectImageMime(thumb.bytes));
         } catch (e) {
             try {
                 await store.del(imagePath);
@@ -190,7 +191,7 @@ export class ScanRepo {
 
         try {
             await store.put(newImagePath, master.bytes, 'image/jpeg');
-            await store.put(newThumbPath, thumb.bytes, 'image/jpeg');
+            await store.put(newThumbPath, thumb.bytes, detectImageMime(thumb.bytes));
         } catch (e) {
             try {
                 await store.del(newImagePath);
