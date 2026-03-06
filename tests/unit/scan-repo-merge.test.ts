@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({
     docs: new Map<string, Doc>(),
     pages: new Map<string, Page>(),
     files: new Map<string, Uint8Array>(),
+    failPutPath: null as string | null,
 }));
 
 vi.mock('../../src/services/settings', () => ({
@@ -25,6 +26,7 @@ vi.mock('../../src/services/filestore', () => ({
             return v;
         }),
         put: vi.fn(async (path: string, bytes: Uint8Array) => {
+            if (state.failPutPath && path === state.failPutPath) throw new Error(`put failed: ${path}`);
             state.files.set(path, new Uint8Array(bytes));
         }),
         del: vi.fn(async (path: string) => {
@@ -92,6 +94,7 @@ describe('ScanRepo mergeDocuments file migration', () => {
         state.docs.clear();
         state.pages.clear();
         state.files.clear();
+        state.failPutPath = null;
 
         state.docs.set('d1', {id: 'd1', pageIds: ['p1'], updatedAt: 1});
         state.docs.set('d2', {id: 'd2', pageIds: ['p2'], updatedAt: 2});
@@ -134,5 +137,35 @@ describe('ScanRepo mergeDocuments file migration', () => {
         expect(state.files.has('docs/d1/pages/p2.jpg')).toBe(true);
         expect(state.files.has('docs/d1/thumbs/p2.jpg')).toBe(true);
     });
-});
 
+    it('keeps merged files removable by deleteDocCompletely on target doc', async () => {
+        const repo = new ScanRepo();
+        await repo.mergeDocuments(['d1', 'd2']);
+        await repo.deleteDocCompletely('d1');
+
+        expect(state.docs.size).toBe(0);
+        expect(state.pages.size).toBe(0);
+        expect(Array.from(state.files.keys())).toEqual([]);
+    });
+
+    it('rolls back file migration when target write fails', async () => {
+        state.failPutPath = 'docs/d1/thumbs/p2.jpg';
+        const repo = new ScanRepo();
+
+        await expect(repo.mergeDocuments(['d1', 'd2'])).rejects.toThrow('put failed');
+
+        // DB unchanged
+        expect(state.docs.has('d1')).toBe(true);
+        expect(state.docs.has('d2')).toBe(true);
+        expect(state.pages.get('p2')?.docId).toBe('d2');
+        expect(state.pages.get('p2')?.imagePath).toBe('docs/d2/pages/p2.jpg');
+        expect(state.pages.get('p2')?.thumbPath).toBe('docs/d2/thumbs/p2.jpg');
+
+        // Source files preserved
+        expect(state.files.has('docs/d2/pages/p2.jpg')).toBe(true);
+        expect(state.files.has('docs/d2/thumbs/p2.jpg')).toBe(true);
+        // Partially created target artifacts cleaned up
+        expect(state.files.has('docs/d1/pages/p2.jpg')).toBe(false);
+        expect(state.files.has('docs/d1/thumbs/p2.jpg')).toBe(false);
+    });
+});
