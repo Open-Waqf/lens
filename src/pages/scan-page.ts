@@ -41,6 +41,7 @@ const AUTO_KEY = 'sahifah.autoCapture';
 const JUST_SAVED_DOC_KEY = 'sahifah.justSavedDocId';
 const REPLACE_PAGE_KEY = 'sahifah.replacePageId';
 const WELCOME_KEY = 'sahifah.welcomeSeen';
+const AUTO_CAPTURE_SETTLE_MS = 150;
 
 type StripItem = { id: string; url: string; isNew: boolean };
 
@@ -107,6 +108,7 @@ export class ScanPage extends LitElement {
     private detectLoopTimer: number | null = null;
     private detectLoopToken = 0;
     private lastAnnouncedStage: ScanStage | null = null;
+    private autoCaptureSettleTimer: number | null = null;
 
     async connectedCallback(): Promise<void> {
         super.connectedCallback();
@@ -885,6 +887,8 @@ export class ScanPage extends LitElement {
         this.detectLoopToken++;
         if (this.detectLoopTimer) window.clearTimeout(this.detectLoopTimer);
         this.detectLoopTimer = null;
+        if (this.autoCaptureSettleTimer) window.clearTimeout(this.autoCaptureSettleTimer);
+        this.autoCaptureSettleTimer = null;
         this.worker?.terminate();
         this.worker = null;
         this.offscreen = null;
@@ -955,9 +959,15 @@ export class ScanPage extends LitElement {
         }
         if (this.stableSince === 0) this.stableSince = Date.now();
         if (Date.now() - this.stableSince > 650) {
-            void this.capturePhoto();
-            this.cooldownUntil = Date.now() + 1200;
-            this.stableSince = 0;
+            if (this.autoCaptureSettleTimer) return;
+            this.cooldownUntil = Date.now() + 1200 + AUTO_CAPTURE_SETTLE_MS;
+            this.autoCaptureSettleTimer = window.setTimeout(() => {
+                this.autoCaptureSettleTimer = null;
+                if (!this.autoCapture || this.session.stage !== 'camera' || this.captureInFlight) return;
+                if (this.stableSince === 0 || Date.now() - this.stableSince < 650) return;
+                void this.capturePhoto();
+                this.stableSince = 0;
+            }, AUTO_CAPTURE_SETTLE_MS);
         }
     }
 
