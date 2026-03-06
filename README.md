@@ -32,6 +32,7 @@ control. Read our [Local Privacy Policy](PRIVACY_POLICY.md).
 
 ### 📸 Intelligent Scanning & Editing
 
+* **Dual Native Scan Modes:** On Android/iOS, choose `Quick Scan` (native ML scanner, default) or `Manual Scan` (live camera + edge overlay).
 * **Edge Detection:** Real-time boundary detection via Computer Vision workers.
 * **Visual Filter Picker:** Real-time thumbnail previews for Magic Color, B&W, and Whiteboard filters.
 * **Quality Presets:** `Archive`, `Share`, and `Original` output policies balance readability, file size, and processing cost. `Original` disables auto-sharpening.

@@ -1,5 +1,5 @@
 import {beforeEach, describe, expect, it} from 'vitest';
-import {settings} from '../../src/services/settings';
+import {resolveDefaultScanMode, settings} from '../../src/services/settings';
 
 describe('settings OCR language', () => {
     beforeEach(() => {
@@ -40,5 +40,20 @@ describe('settings OCR language', () => {
         const s = await settings.get();
         expect(s.mirrorBackupEnabled).toBe(true);
         expect(s.mirrorBackupMode).toBe('after_export');
+    });
+
+    it('resolves scan mode default by platform', () => {
+        expect(resolveDefaultScanMode(true)).toBe('quick');
+        expect(resolveDefaultScanMode(false)).toBe('manual');
+    });
+
+    it('persists scan mode setting', async () => {
+        settings.setScanMode('quick');
+        let s = await settings.get();
+        expect(s.scanMode).toBe('quick');
+
+        settings.setScanMode('manual');
+        s = await settings.get();
+        expect(s.scanMode).toBe('manual');
     });
 });

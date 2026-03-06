@@ -32,9 +32,13 @@ class MockOffscreenCanvas {
 global.OffscreenCanvas = MockOffscreenCanvas;
 
 // --- 2. DEPENDENCY MOCKS ---
+const mockState = vi.hoisted(() => ({
+    isNativePlatform: false,
+    mockScanDocument: vi.fn().mockResolvedValue({scannedImages: []}),
+}));
 
 vi.mock('@capacitor/core', () => ({
-    Capacitor: {isNativePlatform: () => false, convertFileSrc: (s: any) => s}
+    Capacitor: {isNativePlatform: () => mockState.isNativePlatform, convertFileSrc: (s: any) => s}
 }));
 
 vi.mock('@capacitor/haptics', () => ({
@@ -43,7 +47,7 @@ vi.mock('@capacitor/haptics', () => ({
 }));
 
 vi.mock('@capacitor-mlkit/document-scanner', () => ({
-    DocumentScanner: {scanDocument: vi.fn()}
+    DocumentScanner: {scanDocument: (...args: any[]) => mockState.mockScanDocument(...args)}
 }));
 
 const mockCameraStart = vi.fn().mockResolvedValue({width: 1920, height: 1080});
@@ -121,6 +125,18 @@ async function waitForElement(parent: HTMLElement, selector: string, timeout = 1
     throw new Error(`Timeout: Element '${selector}' not found in ${parent.innerHTML.substring(0, 100)}...`);
 }
 
+async function waitForButtonWithText(parent: HTMLElement, text: string, timeout = 1500): Promise<HTMLButtonElement> {
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+        const btn = Array.from(parent.querySelectorAll('button')).find(
+            b => b.textContent?.trim().includes(text)
+        ) as HTMLButtonElement | undefined;
+        if (btn) return btn;
+        await new Promise(r => setTimeout(r, 50));
+    }
+    throw new Error(`Timeout: Button with text '${text}' not found`);
+}
+
 // --- 4. THE TESTS ---
 
 describe('ScanPage Component', () => {
@@ -131,6 +147,8 @@ describe('ScanPage Component', () => {
         localStorage.clear();
         document.body.innerHTML = ''; // Clean DOM
         mockRecordSaveReminder.mockReturnValue(false);
+        mockState.isNativePlatform = false;
+        mockState.mockScanDocument.mockResolvedValue({scannedImages: []});
 
         vi.mock('../../src/services/pending-import', () => ({
             takePendingImport: () => []
@@ -143,6 +161,8 @@ describe('ScanPage Component', () => {
         }
         const el = document.createElement('scan-page') as ScanPage;
         document.body.appendChild(el);
+        await el.updateComplete;
+        await new Promise(r => setTimeout(r, 0));
         await el.updateComplete;
         return el;
     }
@@ -166,16 +186,42 @@ describe('ScanPage Component', () => {
     it('starts the camera when "Open Camera" is clicked', async () => {
         element = await mountPage(true); // Welcome already seen
 
-        const buttons = Array.from(element.querySelectorAll('button'));
-        const openBtn = buttons.find(b => b.textContent?.trim().includes('Open Camera'));
-
-        openBtn?.click();
+        const openBtn = await waitForButtonWithText(element, 'Open Camera');
+        openBtn.click();
 
         // Wait for video element to appear
         await waitForElement(element, 'video');
 
         expect(mockCameraStart).toHaveBeenCalled();
         expect(element.querySelector('video')).toBeTruthy();
+    });
+
+    it('uses native quick mode and invokes native scanner', async () => {
+        mockState.isNativePlatform = true;
+        localStorage.setItem('sahifah.scanMode', 'quick');
+        element = await mountPage(true);
+
+        const startBtn = await waitForButtonWithText(element, 'Start Scanner');
+        startBtn.click();
+
+        await new Promise(r => setTimeout(r, 30));
+
+        expect(mockState.mockScanDocument).toHaveBeenCalledTimes(1);
+    });
+
+    it('uses manual camera flow on native when scan mode is manual', async () => {
+        mockState.isNativePlatform = true;
+        localStorage.setItem('sahifah.scanMode', 'manual');
+        element = await mountPage(true);
+
+        const startBtn = await waitForButtonWithText(element, 'Open Camera');
+        startBtn.click();
+
+        await waitForElement(element, 'video');
+        await new Promise(r => setTimeout(r, 120));
+
+        expect(mockCameraStart).toHaveBeenCalledTimes(1);
+        expect(mockState.mockScanDocument).not.toHaveBeenCalled();
     });
 
     it('enters Edit Mode after capturing a photo', async () => {
@@ -191,7 +237,7 @@ describe('ScanPage Component', () => {
         // Ensure button exists before searching
         await waitForElement(element, 'button');
 
-        const captureBtn = element.querySelector('button[aria-label="capture"]') as HTMLButtonElement | null;
+        const captureBtn = element.querySelector('button[aria-label="Capture"]') as HTMLButtonElement | null;
         expect(captureBtn).toBeTruthy();
         captureBtn!.click();
 

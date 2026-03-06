@@ -16,7 +16,7 @@ import {base64ToBytes, bytesToBlob} from "../lib/bytes";
 import {resetAllStorage} from '../services/reset-storage';
 import {ConfirmModal} from '../components/confirm-modal';
 import pkg from '../../package.json'
-import {settings} from '../services/settings';
+import {settings, type ScanMode} from '../services/settings';
 import {AuthService} from '../services/auth-service';
 import {t} from '../lib/i18n';
 import {toUserErrorMessage} from '../lib/user-error';
@@ -74,6 +74,7 @@ export class SettingsPage extends LitElement {
 
     @state() private enableOcr = true;
     @state() private ocrLang = 'ara+eng';
+    @state() private scanMode: ScanMode = 'manual';
     @state() private clearClipboardAfter60s = false;
     @state() private hasIndexRisk = false;
     @state() private storageAuditBusy = false;
@@ -121,18 +122,6 @@ export class SettingsPage extends LitElement {
             this.err = t('settings.repair_failed', {error: String(e)});
         } finally {
             this.busy = false;
-        }
-    }
-
-    protected updated(changed: Map<string, unknown>) {
-        const msgChanged = changed.has('msg') && !!this.msg;
-        const errChanged = changed.has('err') && !!this.err;
-        if (msgChanged || errChanged) {
-            try {
-                window.scrollTo({top: 0, behavior: 'smooth'});
-            } catch {
-                window.scrollTo(0, 0);
-            }
         }
     }
 
@@ -185,6 +174,7 @@ export class SettingsPage extends LitElement {
         this.defaultVault = s.defaultVault;
         this.enableOcr = s.enableOcr;
         this.ocrLang = s.ocrLang || 'ara+eng';
+        this.scanMode = s.scanMode || 'manual';
         this.clearClipboardAfter60s = s.clearClipboardAfter60s;
         this.mirrorBackupEnabled = s.mirrorBackupEnabled;
         this.mirrorBackupMode = s.mirrorBackupMode || 'manual';
@@ -271,6 +261,12 @@ export class SettingsPage extends LitElement {
         if (!lang) return;
         this.ocrLang = lang;
         settings.setOcrLang(lang);
+    }
+
+    private setScanMode(mode: ScanMode) {
+        if (mode !== 'quick' && mode !== 'manual') return;
+        this.scanMode = mode;
+        settings.setScanMode(mode);
     }
 
     private toggleClipboardAutoClear() {
@@ -762,6 +758,7 @@ export class SettingsPage extends LitElement {
 
         this.busy = true;
         this.msg = t('settings.nuke_running');
+        await this.updateComplete;
         try {
             await resetAllStorage();
             location.reload();
@@ -826,20 +823,26 @@ export class SettingsPage extends LitElement {
 
     private renderAlerts() {
         return html`
-            ${this.msg ? html`
-                <div class="sticky top-2 z-30 p-4 rounded-lg bg-slate-800 text-emerald-300 border border-emerald-900/50 flex items-start justify-between gap-3 shadow-lg">
-                    <div class="font-medium">${this.msg}</div>
-                    <button class="text-slate-400 hover:text-slate-200 text-sm"
-                            aria-label=${t('common.cancel')}
-                            @click=${() => this.msg = null}>✕</button>
-                </div>` : null}
-            ${this.err ? html`
-                <div class="sticky top-2 z-30 p-4 rounded-lg bg-red-950/50 text-red-100 border border-red-900 flex items-start justify-between gap-3 shadow-lg">
-                    <div class="font-medium">${this.err}</div>
-                    <button class="text-red-300 hover:text-red-100 text-sm"
-                            aria-label=${t('common.cancel')}
-                            @click=${() => this.err = null}>✕</button>
-                </div>` : null}
+            ${(this.msg || this.err) ? html`
+                <div class="fixed top-3 left-1/2 -translate-x-1/2 z-40 w-[min(92vw,44rem)] pointer-events-none">
+                    ${this.msg ? html`
+                        <div class="pointer-events-auto p-4 rounded-lg bg-slate-800 text-emerald-300 border border-emerald-900/50 flex items-start justify-between gap-3 shadow-lg">
+                            <div class="font-medium">${this.msg}</div>
+                            <button class="text-slate-400 hover:text-slate-200 text-sm"
+                                    aria-label=${t('common.cancel')}
+                                    @click=${() => this.msg = null}>✕</button>
+                        </div>
+                    ` : null}
+                    ${this.err ? html`
+                        <div class="pointer-events-auto mt-2 p-4 rounded-lg bg-red-950/50 text-red-100 border border-red-900 flex items-start justify-between gap-3 shadow-lg">
+                            <div class="font-medium">${this.err}</div>
+                            <button class="text-red-300 hover:text-red-100 text-sm"
+                                    aria-label=${t('common.cancel')}
+                                    @click=${() => this.err = null}>✕</button>
+                        </div>
+                    ` : null}
+                </div>
+            ` : null}
         `;
     }
 
@@ -1180,6 +1183,20 @@ export class SettingsPage extends LitElement {
                         `)}
                     </select>
                 </div>
+
+                ${this.caps.isCapacitor ? html`
+                    <div class="space-y-2">
+                        <label class="text-[10px] text-slate-500 uppercase tracking-wider">${t('settings.scan_mode')}</label>
+                        <select
+                                class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100"
+                                .value=${this.scanMode}
+                                @change=${(e: Event) => this.setScanMode((e.target as HTMLSelectElement).value as ScanMode)}>
+                            <option value="quick">${t('settings.scan_mode_quick')}</option>
+                            <option value="manual">${t('settings.scan_mode_manual')}</option>
+                        </select>
+                        <div class="text-[11px] text-slate-500">${t('settings.scan_mode_desc')}</div>
+                    </div>
+                ` : null}
 
                 ${arabicSelected ? html`
                     <div class="p-3 rounded-lg bg-amber-950/20 border border-amber-900/50 text-xs text-amber-200">

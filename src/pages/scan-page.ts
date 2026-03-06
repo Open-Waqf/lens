@@ -33,6 +33,7 @@ import {showToast} from '../components/toast-notification';
 import {toUserErrorMessage} from '../lib/user-error';
 import {shareFile} from '../services/share';
 import {PDFDocument} from 'pdf-lib';
+import {settings, type ScanMode} from '../services/settings';
 
 const APPEND_DOC_KEY = 'sahifah.appendToDocId';
 const AUTO_KEY = 'sahifah.autoCapture';
@@ -80,6 +81,7 @@ export class ScanPage extends LitElement {
     private importReviewQueue: string[] = [];
 
     @state() private autoCapture = readBool(AUTO_KEY, false);
+    @state() private scanMode: ScanMode = 'manual';
 
     @state() private videoW = 0;
     @state() private videoH = 0;
@@ -257,6 +259,12 @@ export class ScanPage extends LitElement {
 
         this.lastDetect = null;
         this.smoothedQuad = null;
+        try {
+            const prefs = await settings.get();
+            this.scanMode = prefs.scanMode || (this.caps.isCapacitor ? 'quick' : 'manual');
+        } catch {
+            this.scanMode = this.caps.isCapacitor ? 'quick' : 'manual';
+        }
 
         const params = this.getHashParams();
         const forceNew = params.get('new') === '1';
@@ -551,10 +559,16 @@ export class ScanPage extends LitElement {
         this.strip = items;
     }
 
+    private setScanMode(mode: ScanMode): void {
+        if (mode !== 'quick' && mode !== 'manual') return;
+        this.scanMode = mode;
+        settings.setScanMode(mode);
+    }
+
     // UPDATED: Added explicit flag to handle the regression
     private beginCameraFromGesture(explicit: boolean = false): void {
         this.error = null;
-        if (this.caps.isCapacitor) {
+        if (this.caps.isCapacitor && this.scanMode === 'quick') {
             void this.invokeNativeScanner();
             return;
         }
@@ -587,6 +601,7 @@ export class ScanPage extends LitElement {
 
     private async invokeNativeScanner(): Promise<void> {
         this.busy = true;
+        this.error = null;
         AuthService.ignoreNextResumeForExternalAction('native-doc-scanner');
         try {
             const limit = this.replacePageId ? 1 : 24;
@@ -602,7 +617,12 @@ export class ScanPage extends LitElement {
                 if (files.length === 1) await this.openNewBlobInEditor(files[0]);
                 else await this.batchImport(files);
             }
-        } catch (e) {
+        } catch (e: any) {
+            if (e?.message?.toLowerCase().includes('cancel') || e?.code === 'USER_CANCELLED') {
+                return;
+            }
+            this.error = t('scan.quick_scan_failed', {error: toUserErrorMessage(e)});
+            this.session.setStage('idle');
         } finally {
             this.busy = false;
         }
@@ -1172,10 +1192,33 @@ export class ScanPage extends LitElement {
                             </svg>
                         </div>
                         <div class="w-full space-y-3">
+                            ${this.caps.isCapacitor ? html`
+                                <div class="grid grid-cols-2 gap-2 p-1 rounded-xl border border-slate-800 bg-slate-900/60">
+                                    <button
+                                            class="py-2.5 rounded-lg text-sm font-semibold transition-colors min-h-[44px] ${this.scanMode === 'quick' ? 'bg-emerald-600 text-slate-950' : 'text-slate-300 hover:bg-slate-800'}"
+                                            @click=${() => this.setScanMode('quick')}
+                                            aria-pressed=${this.scanMode === 'quick'}>
+                                        ${t('scan.mode_quick')}
+                                    </button>
+                                    <button
+                                            class="py-2.5 rounded-lg text-sm font-semibold transition-colors min-h-[44px] ${this.scanMode === 'manual' ? 'bg-emerald-600 text-slate-950' : 'text-slate-300 hover:bg-slate-800'}"
+                                            @click=${() => this.setScanMode('manual')}
+                                            aria-pressed=${this.scanMode === 'manual'}>
+                                        ${t('scan.mode_manual')}
+                                    </button>
+                                </div>
+                            ` : null}
                             <button class="w-full py-5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 rounded-[1.5rem] font-bold text-xl shadow-lg shadow-emerald-900/20 transition-all active:scale-95"
                                     @click=${() => this.beginCameraFromGesture(true)}>
-                                ${this.caps.isCapacitor ? t('scan.start_scanner') : t('scan.open_camera')}
+                                ${this.caps.isCapacitor
+                                        ? (this.scanMode === 'quick' ? t('scan.start_scanner') : t('scan.open_camera'))
+                                        : t('scan.open_camera')}
                             </button>
+                            ${this.caps.isCapacitor ? html`
+                                <div class="text-[11px] text-slate-500 text-center px-1">
+                                    ${this.scanMode === 'quick' ? t('scan.mode_quick_desc') : t('scan.mode_manual_desc')}
+                                </div>
+                            ` : null}
                             <button class="w-full py-4 text-slate-400 font-semibold hover:text-white transition-colors"
                                     ?disabled=${this.busy}
                                     @click=${() => this.pickFiles({multiple: !this.replacePageId})}>
