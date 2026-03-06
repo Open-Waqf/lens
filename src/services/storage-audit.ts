@@ -83,28 +83,32 @@ export async function findOrphanStorageFiles(): Promise<string[]> {
     return files.filter(path => path.startsWith('docs/') && !knownPaths.has(path));
 }
 
-async function removeStorageFile(path: string): Promise<void> {
+async function removeStorageFile(path: string): Promise<boolean> {
     if (Capacitor.isNativePlatform()) {
         try {
             await Filesystem.deleteFile({
                 path,
                 directory: Directory.Data
             });
+            return true;
         } catch {
             // Best effort delete.
+            return false;
         }
-        return;
     }
 
-    await opfsRemoveEntry(path);
+    try {
+        await opfsRemoveEntry(path);
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 export async function deleteOrphanStorageFiles(orphanPaths: string[]): Promise<number> {
     let deleted = 0;
     for (const path of orphanPaths) {
-        await removeStorageFile(path);
-        deleted++;
+        if (await removeStorageFile(path)) deleted++;
     }
     return deleted;
 }
-

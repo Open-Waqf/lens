@@ -171,7 +171,14 @@ export class AuthService {
     // --- Helpers ---
 
     private static _bufferToBase64(buffer: ArrayBuffer): string {
-        return btoa(String.fromCharCode(...new Uint8Array(buffer)));
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        const chunk = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunk) {
+            const part = bytes.subarray(i, i + chunk);
+            binary += String.fromCharCode(...part);
+        }
+        return btoa(binary);
     }
 
     private static _base64ToBuffer(base64: string): ArrayBuffer {

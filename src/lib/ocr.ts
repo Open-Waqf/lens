@@ -112,7 +112,7 @@ export async function recognizeText(
                 const conf = parseFloat(row[10]);
                 const text = row[11].trim();
 
-                if (text.length > 0) {
+                if (text.length > 0 && conf >= 0) {
                     words.push({
                         text: text,
                         box: [

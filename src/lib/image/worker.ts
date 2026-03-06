@@ -48,8 +48,8 @@ export type WorkerResponse =
 
 self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
     const req = ev.data;
+    let src: ImageBitmap | null = null;
     try {
-        let src: ImageBitmap;
         if (req.bitmap) src = req.bitmap;
         else if (req.blob) src = await createImageBitmap(req.blob);
         else throw new Error('No source image');
@@ -122,7 +122,7 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
         }
 
         // 3b. Optional sharpening policy (keeps backward compatibility for older callers).
-        const sharpenAmount = req.sharpenAmount ?? (req.filter === 'original' ? 0.5 : 0);
+        const sharpenAmount = req.sharpenAmount ?? (req.filter === 'original' ? 0 : 0.5);
         if (sharpenAmount > 0) applyUnsharpMask(finalRgba, finalW, finalH, sharpenAmount);
 
         // 4. Encoding
@@ -143,8 +143,6 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
             const tBlob = await tCanvas.convertToBlob({type: 'image/webp', quality: req.thumbJpegQuality ?? 0.82});
             const tBytes = new Uint8Array(await tBlob.arrayBuffer());
 
-            if (req.blob) src.close();
-
             const res: WorkerResponse = {
                 id: req.id, ok: true,
                 master: {bytes: mBytes, width: finalW, height: finalH},
@@ -155,7 +153,6 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
         } else if (req.encode) {
             // Mode A: Single Save
             const bytes = await encodeImage(finalRgba, finalW, finalH, req.outputMime ?? 'image/jpeg', req.quality ?? 0.85);
-            if (req.blob) src.close();
             const res: WorkerResponse = {id: req.id, ok: true, bytes, width: finalW, height: finalH};
             (self as unknown as Worker).postMessage(res, [bytes.buffer]);
 
@@ -166,7 +163,6 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
             ctx.putImageData(new ImageData(finalRgba as any, finalW, finalH), 0, 0);
             const outBmp = outC.transferToImageBitmap();
 
-            if (req.blob) src.close();
             const res: WorkerResponse = {id: req.id, ok: true, bitmap: outBmp, width: finalW, height: finalH};
             (self as unknown as Worker).postMessage(res, [outBmp]);
         }
@@ -174,6 +170,8 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
     } catch (e) {
         const res: WorkerResponse = {id: req.id, ok: false, error: String(e)};
         (self as unknown as Worker).postMessage(res);
+    } finally {
+        src?.close();
     }
 };
 

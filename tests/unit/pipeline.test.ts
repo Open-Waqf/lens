@@ -1,4 +1,4 @@
-import {describe, expect, it, vi} from 'vitest';
+import {describe, expect, it} from 'vitest';
 import {processPhoto} from '../../src/lib/image/pipeline';
 
 class MockWorker {
@@ -82,4 +82,3 @@ describe('processPhoto', () => {
         expect(out.thumb.width).toBe(1);
     });
 });
-

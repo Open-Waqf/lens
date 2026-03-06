@@ -6,7 +6,8 @@ export function bytesToBase64(bytes: Uint8Array): Promise<string> {
         const reader = new FileReader();
         reader.onload = () => {
             const res = reader.result as string;
-            resolve(res.split(',')[1]);
+            const comma = res.indexOf(',');
+            resolve(comma > -1 ? res.substring(comma + 1) : res);
         };
         reader.onerror = reject;
         reader.readAsDataURL(blob);

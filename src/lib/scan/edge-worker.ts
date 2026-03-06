@@ -1,6 +1,5 @@
 import {detectQuadFromRgba} from './detect';
-
-console.warn('%c[Worker] 🚀 WORKER STARTED', 'color: lime; background: black; font-size: 14px;');
+const DEBUG = false;
 
 type Req = { type: 'detect'; width: number; height: number; rgba: Uint8ClampedArray };
 
@@ -11,7 +10,7 @@ self.onmessage = (ev: MessageEvent<Req>) => {
     frameCount++;
 
     if (msg.type !== 'detect') {
-        console.warn('[Worker] ❓ Unknown message type:', msg);
+        if (DEBUG) console.warn('[Worker] Unknown message type:', msg);
         return;
     }
 
@@ -19,13 +18,10 @@ self.onmessage = (ev: MessageEvent<Req>) => {
     const r = detectQuadFromRgba(msg.rgba, msg.width, msg.height);
     const tMs = performance.now() - t0;
 
-    // Log every 30 frames to keep signal high without spamming
-    if (frameCount % 30 === 0) {
-        if (r.confidence > 0) {
-            console.log(`[Worker] ✅ Found quad (Conf: ${r.confidence.toFixed(2)}) in ${tMs.toFixed(0)}ms`);
-        } else {
-            console.log(`[Worker] ❌ No quad found (${tMs.toFixed(0)}ms)`);
-        }
+    // Debug-only worker diagnostics.
+    if (DEBUG && frameCount % 30 === 0) {
+        if (r.confidence > 0) console.log(`[Worker] Found quad (${r.confidence.toFixed(2)}) in ${tMs.toFixed(0)}ms`);
+        else console.log(`[Worker] No quad (${tMs.toFixed(0)}ms)`);
     }
 
     const out = {
