@@ -181,20 +181,26 @@ export async function secureOverwriteAndRemoveOpfsTree(prefixDir: string): Promi
         throw e;
     }
 
-    await secureWipeRecursive(dir);
-    
-    // After wiping contents, remove the tree
     const name = parts.pop();
-    if (name) {
-        const parent = await ensureDir(root, parts, false);
-        await parent.removeEntry(name, {recursive: true});
-    } else {
-        // We are at root, remove everything inside
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        for await (const [name, handle] of (dir as any).entries()) {
-            await dir.removeEntry(name, {recursive: handle.kind === 'directory'});
+    let wipeError: unknown = null;
+    try {
+        await secureWipeRecursive(dir);
+    } catch (e) {
+        wipeError = e;
+    } finally {
+        // Always try to remove tree even if secure wipe had failures.
+        if (name) {
+            const parent = await ensureDir(root, parts, false);
+            await parent.removeEntry(name, {recursive: true});
+        } else {
+            // We are at root, remove everything inside
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            for await (const [entryName, handle] of (dir as any).entries()) {
+                await dir.removeEntry(entryName, {recursive: handle.kind === 'directory'});
+            }
         }
     }
+    if (wipeError) throw wipeError;
 }
 
 async function secureWipeRecursive(dir: FileSystemDirectoryHandle): Promise<void> {
