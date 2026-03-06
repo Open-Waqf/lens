@@ -1,6 +1,7 @@
 import type {FilterMode} from '../../domain/types';
 import type {Quad} from '../scan/quad';
 import {adaptiveBwFromRgba} from './adaptive-bw';
+import {applyConservativeDeskew} from './deskew';
 import {magicColorFromRgba, whiteboardFromRgba} from './magic-filter';
 import {warpRgba} from './warp';
 
@@ -78,6 +79,8 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
             tctx.drawImage(src, 0, 0);
             const srcData = tctx.getImageData(0, 0, src.width, src.height).data;
             finalRgba = warpRgba(srcData, src.width, src.height, req.quad, finalW, finalH);
+            // Conservative post-warp deskew improves OCR alignment without touching detector logic.
+            finalRgba = applyConservativeDeskew(finalRgba, finalW, finalH);
         } else {
             const crop = req.crop ?? {x: 0, y: 0, w: src.width, h: src.height};
             const tmp = new OffscreenCanvas(crop.w, crop.h);
