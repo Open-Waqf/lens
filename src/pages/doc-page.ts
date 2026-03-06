@@ -195,6 +195,9 @@ export class DocPage extends LitElement {
     }
 
     private onHandlePointerDown(e: PointerEvent, id: string) {
+        // Desktop mouse should use native HTML5 DnD (Firefox compatibility).
+        // Touch/pen keeps the custom pointer-driven drag path.
+        if (e.pointerType === 'mouse') return;
         e.preventDefault();
         e.stopPropagation();
         this.pointerDragActive = true;
