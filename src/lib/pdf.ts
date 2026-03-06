@@ -3,6 +3,7 @@ import type {OcrWord, PageRecord} from '../domain/types';
 import type {FileStore} from '../services/filestore/opfs-store';
 import {bytesToBlob} from './bytes';
 import fontkit from '@pdf-lib/fontkit';
+import {t} from './i18n';
 
 export type PdfQuality = 'original' | 'email';
 
@@ -20,10 +21,10 @@ let cachedUnicodeFontBytes: Uint8Array | null = null;
 async function loadBundledArabicFontBytes(): Promise<Uint8Array> {
     if (cachedUnicodeFontBytes) return cachedUnicodeFontBytes;
     const fontRes = await fetch(UNICODE_FONT_URL);
-    if (!fontRes.ok) throw new Error(`Failed to load bundled Arabic font (${fontRes.status}).`);
+    if (!fontRes.ok) throw new Error(t('errors.pdf_font_load_failed', {status: String(fontRes.status)}));
     const bytes = new Uint8Array(await fontRes.arrayBuffer());
     if (bytes.byteLength < MIN_FONT_BYTES) {
-        throw new Error('Bundled Arabic font file is invalid or truncated.');
+        throw new Error(t('errors.pdf_font_invalid'));
     }
     cachedUnicodeFontBytes = bytes;
     return bytes;
@@ -49,7 +50,7 @@ export async function buildPdfForDoc(
         customFont = await pdf.embedFont(fontBytes);
     } catch (e) {
         if (needsArabicFont) {
-            throw new Error('Arabic OCR text layer requires bundled Arabic font. Please reinstall app assets.');
+            throw new Error(t('errors.pdf_arabic_font_required'));
         }
         console.warn('PDF: Custom font not available; continuing with standard font for non-Arabic text.');
     }
@@ -91,7 +92,7 @@ export async function buildPdfForDoc(
 
                     try {
                         if (line.rtl && !customFont) {
-                            throw new Error('Arabic line requires embedded Unicode font.');
+                            throw new Error(t('errors.pdf_arabic_line_font_required'));
                         }
                         page.drawText(line.text, {
                             x: px,
@@ -112,7 +113,7 @@ export async function buildPdfForDoc(
 
         } catch (e) {
             console.error(`Failed to embed page ${p.id}`, e);
-            throw new Error(`Failed to generate PDF at page ${i + 1}.`);
+            throw new Error(t('errors.pdf_generate_page_failed', {page: String(i + 1)}));
         }
     }
 

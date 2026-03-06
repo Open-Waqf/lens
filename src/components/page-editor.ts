@@ -58,7 +58,14 @@ export class PageEditor extends LitElement {
     @query('canvas[data-edges]') private edgesEl!: HTMLCanvasElement;
     private dragIdx: number | null = null;
     private dragPointerId: number | null = null;
-    private scrollLockPrev: { overflow: string; touchAction: string; overscrollBehavior: string } | null = null;
+    private scrollLockPrev: {
+        bodyOverflow: string;
+        bodyTouchAction: string;
+        bodyOverscrollBehavior: string;
+        htmlOverflow: string;
+        htmlTouchAction: string;
+        htmlOverscrollBehavior: string;
+    } | null = null;
     @query('canvas[data-preview]') private previewEl!: HTMLCanvasElement;
     @query('canvas[data-magnify]') private magnifyEl!: HTMLCanvasElement;
 
@@ -78,8 +85,13 @@ export class PageEditor extends LitElement {
         if (!p) return 'display:none';
         const sx = this.edgesEl.width / this.baseW;
         const sy = this.edgesEl.height / this.baseH;
-        const x = p.x * sx;
-        const y = p.y * sy;
+        const rawX = p.x * sx;
+        const rawY = p.y * sy;
+        // Keep the 44x44 touch target fully inside the visible canvas area.
+        // Without this, corners at the edge get clipped and become hard to grab.
+        const halfHit = 30;
+        const x = clamp(rawX, halfHit, Math.max(halfHit, this.edgesEl.width - halfHit));
+        const y = clamp(rawY, halfHit, Math.max(halfHit, this.edgesEl.height - halfHit));
         return `left:${x}px;top:${y}px;`;
     }
 
@@ -270,6 +282,10 @@ export class PageEditor extends LitElement {
 
     private onHandlePointerDown = (idx: number, ev: PointerEvent) => {
         if (!this.quad) return;
+        this.startDraggingCorner(idx, ev);
+    };
+
+    private startDraggingCorner(idx: number, ev: PointerEvent) {
         ev.preventDefault();
         ev.stopPropagation();
         this.pushHistory();
@@ -281,7 +297,7 @@ export class PageEditor extends LitElement {
         window.addEventListener('pointercancel', this.onPointerUp, {passive: true});
         this.lockPageScroll();
         this.showMagnify = true;
-    };
+    }
 
     private onPointerMove = (ev: PointerEvent) => {
         if (this.dragIdx == null || !this.quad) return;
@@ -317,22 +333,33 @@ export class PageEditor extends LitElement {
     private lockPageScroll(): void {
         if (this.scrollLockPrev) return;
         const bodyStyle = document.body.style;
+        const htmlStyle = document.documentElement.style;
         this.scrollLockPrev = {
-            overflow: bodyStyle.overflow || '',
-            touchAction: bodyStyle.touchAction || '',
-            overscrollBehavior: bodyStyle.overscrollBehavior || '',
+            bodyOverflow: bodyStyle.overflow || '',
+            bodyTouchAction: bodyStyle.touchAction || '',
+            bodyOverscrollBehavior: bodyStyle.overscrollBehavior || '',
+            htmlOverflow: htmlStyle.overflow || '',
+            htmlTouchAction: htmlStyle.touchAction || '',
+            htmlOverscrollBehavior: htmlStyle.overscrollBehavior || '',
         };
         bodyStyle.overflow = 'hidden';
         bodyStyle.touchAction = 'none';
         bodyStyle.overscrollBehavior = 'none';
+        htmlStyle.overflow = 'hidden';
+        htmlStyle.touchAction = 'none';
+        htmlStyle.overscrollBehavior = 'none';
     }
 
     private unlockPageScroll(): void {
         if (!this.scrollLockPrev) return;
         const bodyStyle = document.body.style;
-        bodyStyle.overflow = this.scrollLockPrev.overflow;
-        bodyStyle.touchAction = this.scrollLockPrev.touchAction;
-        bodyStyle.overscrollBehavior = this.scrollLockPrev.overscrollBehavior;
+        const htmlStyle = document.documentElement.style;
+        bodyStyle.overflow = this.scrollLockPrev.bodyOverflow;
+        bodyStyle.touchAction = this.scrollLockPrev.bodyTouchAction;
+        bodyStyle.overscrollBehavior = this.scrollLockPrev.bodyOverscrollBehavior;
+        htmlStyle.overflow = this.scrollLockPrev.htmlOverflow;
+        htmlStyle.touchAction = this.scrollLockPrev.htmlTouchAction;
+        htmlStyle.overscrollBehavior = this.scrollLockPrev.htmlOverscrollBehavior;
         this.scrollLockPrev = null;
     }
 
@@ -518,7 +545,7 @@ export class PageEditor extends LitElement {
 
             if (token !== this._previewToken) return;
             if (!res.ok) throw new Error(res.error);
-            if (!res.bitmap) throw new Error('No bitmap returned');
+            if (!res.bitmap) throw new Error(t('errors.editor_bitmap_missing'));
 
             const ctx = out.getContext('2d')!;
             ctx.clearRect(0, 0, out.width, out.height);
@@ -581,10 +608,10 @@ export class PageEditor extends LitElement {
                 sharpenAmount: 0,
             });
             const [resM, resT] = await Promise.all([masterTask, thumbTask]);
-            if (!resM.ok) throw new Error(resM.error || 'Failed to encode master');
-            if (!resT.ok) throw new Error(resT.error || 'Failed to encode thumb');
-            if (!resM.bytes) throw new Error('Missing master bytes');
-            if (!resT.bytes) throw new Error('Missing thumb bytes');
+            if (!resM.ok) throw new Error(resM.error || t('errors.editor_encode_master_failed'));
+            if (!resT.ok) throw new Error(resT.error || t('errors.editor_encode_thumb_failed'));
+            if (!resM.bytes) throw new Error(t('errors.editor_master_missing'));
+            if (!resT.bytes) throw new Error(t('errors.editor_thumb_missing'));
             const detail: PageEditorSaveDetail = {
                 master: {bytes: resM.bytes, width: resM.width!, height: resM.height!},
                 thumb: {bytes: resT.bytes, width: resT.width!, height: resT.height!},
@@ -629,8 +656,8 @@ export class PageEditor extends LitElement {
                 quality: qualityPlan.masterJpegQuality,
                 sharpenAmount: qualityPlan.sharpenAmount,
             });
-            if (!resM.ok) throw new Error(resM.error || 'Failed to encode share image');
-            if (!resM.bytes) throw new Error('Missing share bytes');
+            if (!resM.ok) throw new Error(resM.error || t('errors.editor_encode_share_failed'));
+            if (!resM.bytes) throw new Error(t('errors.editor_share_missing'));
 
             const detail: PageEditorShareDetail = {
                 master: {bytes: resM.bytes, width: resM.width!, height: resM.height!},
@@ -726,7 +753,7 @@ export class PageEditor extends LitElement {
                         </div>
                     </div>
 
-                    <div class="relative w-full flex justify-center bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 min-h-[50vh]">
+                    <div class="relative w-full flex justify-center bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 min-h-[50vh] mb-4 pb-[max(8px,env(safe-area-inset-bottom))]">
                         <canvas data-edges
                                 class="max-w-full max-h-[70vh] w-auto h-auto object-contain select-none z-10"
                                 style="touch-action: pan-y;"></canvas>
@@ -734,7 +761,7 @@ export class PageEditor extends LitElement {
                         ${[0, 1, 2, 3].map(i => html`
                             <div
                                     data-testid="corner-handle-${i}"
-                                    class="absolute z-20 -translate-x-1/2 -translate-y-1/2 min-w-[44px] min-h-[44px] w-11 h-11 pointer-events-auto"
+                                    class="absolute z-20 -translate-x-1/2 -translate-y-1/2 min-w-[60px] min-h-[60px] w-[60px] h-[60px] pointer-events-auto"
                                     style="${this.getCornerHandleStyle(i)} touch-action:none;"
                                     aria-label=${t('scan.edit_page')}
                                     @pointerdown=${(ev: PointerEvent) => this.onHandlePointerDown(i, ev)}></div>

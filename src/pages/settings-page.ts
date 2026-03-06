@@ -537,7 +537,7 @@ export class SettingsPage extends LitElement {
 
         // 1. Read Metadata
         const metaFile = loadedZip.file('metadata.json');
-        if (!metaFile) throw new Error('Invalid backup: missing metadata');
+        if (!metaFile) throw new Error(t('settings.restore_invalid_backup'));
 
         const metaStr = await metaFile.async('string');
         const backupData = JSON.parse(metaStr);
