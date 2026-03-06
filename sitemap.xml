@@ -3,7 +3,7 @@
         xmlns:xhtml="http://www.w3.org/1999/xhtml">
     <url>
         <loc>https://lens.open-waqf.org/</loc>
-        <lastmod>2024-02-12</lastmod>
+        <lastmod>2026-03-06</lastmod>
         <priority>1.0</priority>
 
         <xhtml:link
@@ -15,11 +15,6 @@
                 rel="alternate"
                 hreflang="ar"
                 href="https://lens.open-waqf.org/?lang=ar"/>
-
-        <xhtml:link
-                rel="alternate"
-                hreflang="fr"
-                href="https://lens.open-waqf.org/?lang=fr"/>
 
         <xhtml:link
                 rel="alternate"
