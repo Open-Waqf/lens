@@ -5,7 +5,8 @@ import {Filesystem} from '@capacitor/filesystem';
 vi.mock('@capacitor/filesystem', () => ({
     Directory: {Data: 'DATA'},
     Filesystem: {
-        readdir: vi.fn()
+        readdir: vi.fn(),
+        stat: vi.fn(),
     }
 }));
 
@@ -55,5 +56,29 @@ describe('CapacitorFileStore Usage Accuracy', () => {
 
         const total = await store.getUsageEstimate();
         expect(total).toBe(810);
+    });
+
+    it('falls back to stat size when readdir entry size is missing', async () => {
+        vi.mocked(Filesystem.readdir).mockImplementation(async ({path}) => {
+            if (path === '' || path === '/') {
+                return {
+                    files: [{name: 'docs', type: 'directory', size: 0, uri: '', mtime: 0}]
+                } as any;
+            }
+            if (path === 'docs') {
+                return {
+                    files: [{name: 'a.jpg', type: 'file', uri: '', mtime: 0}]
+                } as any;
+            }
+            throw new Error(`Path not mocked: ${path}`);
+        });
+
+        vi.mocked(Filesystem.stat as any).mockResolvedValue({size: 321});
+        const total = await store.getUsageEstimate();
+        expect(total).toBe(321);
+        expect((Filesystem.stat as any)).toHaveBeenCalledWith({
+            path: 'docs/a.jpg',
+            directory: 'DATA',
+        });
     });
 });

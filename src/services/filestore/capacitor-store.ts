@@ -84,6 +84,19 @@ export class CapacitorFileStore implements FileStore {
         return this.calculateDirSize('');
     }
 
+    private async fileSize(path: string, listedSize?: number): Promise<number> {
+        if (typeof listedSize === 'number' && listedSize > 0) return listedSize;
+        try {
+            const stat = await Filesystem.stat({
+                path,
+                directory: Directory.Data
+            });
+            return Number((stat as any).size ?? 0);
+        } catch {
+            return 0;
+        }
+    }
+
     private async calculateDirSize(path: string): Promise<number> {
         let total = 0;
         try {
@@ -97,7 +110,8 @@ export class CapacitorFileStore implements FileStore {
                     const subPath = path ? `${path}/${file.name}` : file.name;
                     total += await this.calculateDirSize(subPath);
                 } else {
-                    total += file.size || 0;
+                    const filePath = path ? `${path}/${file.name}` : file.name;
+                    total += await this.fileSize(filePath, file.size);
                 }
             }
         } catch (e) {
