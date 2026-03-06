@@ -559,6 +559,8 @@ export class LibraryPage extends LitElement {
         return html`
             ${this.selectionMode ? html`
                 <button class="p-2 rounded-full hover:bg-slate-800 text-slate-400"
+                        aria-label=${t('library.move_selected')}
+                        title=${t('library.move_selected')}
                         @click=${this.moveSelectedToFolder}
                         ?disabled=${this.selectedIds.size === 0}>
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -569,19 +571,23 @@ export class LibraryPage extends LitElement {
                 <button class="px-3 py-1.5 text-xs font-bold text-emerald-400 bg-emerald-950/30 rounded-lg border border-emerald-900/50"
                         @click=${this.mergeSelected}
                         ?disabled=${this.selectedIds.size < 2}>
-                    Merge
+                    ${t('library.merge_confirm')}
                 </button>
                 <button class="px-3 py-1.5 text-xs font-bold text-red-400 bg-red-950/30 rounded-lg border border-red-900/50"
                         @click=${this.deleteSelected}
                         ?disabled=${this.selectedIds.size === 0}>
-                    Delete (${this.selectedIds.size})
+                    ${t('library.delete_selected_count', {count: this.selectedIds.size})}
                 </button>
-                <button class="p-2 rounded-full hover:bg-slate-800 text-slate-400" @click=${this.toggleSelectionMode}>
+                <button class="p-2 rounded-full hover:bg-slate-800 text-slate-400"
+                        aria-label=${t('common.cancel')}
+                        title=${t('common.cancel')}
+                        @click=${this.toggleSelectionMode}>
                     ${t('common.cancel')}
                 </button>
             ` : html`
                 <button class="p-2 rounded-full ${this.groupByFolder ? 'text-emerald-400 bg-emerald-950/30' : 'text-slate-400'}"
                         @click=${() => this.groupByFolder = !this.groupByFolder}
+                        aria-label=${t('library.group_by_folder_title')}
                         title=${t('library.group_by_folder_title')}>
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -589,6 +595,7 @@ export class LibraryPage extends LitElement {
                     </svg>
                 </button>
                 <button class="p-2 rounded-full hover:bg-slate-800 text-slate-400" @click=${this.toggleSelectionMode}
+                        aria-label=${t('library.select_title')}
                         title=${t('library.select_title')}>
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -598,6 +605,7 @@ export class LibraryPage extends LitElement {
             `}
 
             <button class="p-2 rounded-full hover:bg-slate-800 text-slate-400" @click=${this.toggleView}
+                    aria-label=${isGallery ? t('library.list_view') : t('library.gallery_view')}
                     title=${isGallery ? t('library.list_view') : t('library.gallery_view')}>
                 ${isGallery
                         ? html`
@@ -636,6 +644,7 @@ export class LibraryPage extends LitElement {
                         ${folderName !== t('library.unsorted') ? html`
                             <button @click=${() => this.onDeleteFolder(folderName)}
                                     class="p-1 hover:bg-slate-800 rounded transition-colors text-slate-600 hover:text-red-400"
+                                    aria-label=${t('library.unsort_folder_title')}
                                     title=${t('library.unsort_folder_title')}>
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"

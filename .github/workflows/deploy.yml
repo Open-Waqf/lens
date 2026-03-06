@@ -45,7 +45,7 @@ jobs:
         run: npx playwright install --with-deps
 
       - name: Run Safety Tests (E2E)
-        run: npx playwright test
+        run: npm run test:e2e -- --reporter=list
 
       # 5. Deployment Prep
       - name: Copy CNAME

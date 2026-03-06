@@ -95,6 +95,7 @@ export class AppRoot extends LitElement {
         });
 
         window.addEventListener('hashchange', this._onHash);
+        window.addEventListener('sahifah-locale-changed', this._onLocaleChanged as EventListener);
         window.addEventListener('error', this._onGlobalError);
         window.addEventListener('unhandledrejection', this._onUnhandled);
         document.addEventListener('visibilitychange', this._onVisibilityChange);
@@ -203,6 +204,7 @@ export class AppRoot extends LitElement {
 
     disconnectedCallback(): void {
         window.removeEventListener('hashchange', this._onHash);
+        window.removeEventListener('sahifah-locale-changed', this._onLocaleChanged as EventListener);
         window.removeEventListener('error', this._onGlobalError);
         window.removeEventListener('unhandledrejection', this._onUnhandled);
         document.removeEventListener('visibilitychange', this._onVisibilityChange);
@@ -223,6 +225,10 @@ export class AppRoot extends LitElement {
     private _onHash = () => {
         this.route = parseHash();
         if (this.route.name !== 'scan') this.scanStage = 'idle';
+    };
+
+    private _onLocaleChanged = () => {
+        this.requestUpdate();
     };
 
     private _onScanStageChange = (ev: CustomEvent<{ stage: ScanStage }>) => {
@@ -287,7 +293,7 @@ export class AppRoot extends LitElement {
                 </div>
                 <div class="space-y-2">
                     <h1 class="text-xl font-bold text-slate-100">${t('app.fatal_title')}</h1>
-                    <div class="text-[10px] text-red-400 bg-black/50 p-4 rounded-lg overflow-x-auto max-w-sm mx-auto text-left whitespace-pre-wrap max-h-48">
+                    <div class="text-[10px] text-red-400 bg-black/50 p-4 rounded-lg overflow-x-auto max-w-sm mx-auto text-start whitespace-pre-wrap max-h-48">
                         ${this.fatal.message} ${this.fatal.detail || ''}
                     </div>
                 </div>

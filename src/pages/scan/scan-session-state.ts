@@ -1,3 +1,5 @@
+import {t} from '../../lib/i18n';
+
 export type ScanStage = 'idle' | 'camera' | 'edit';
 
 export type ExitDecision =
@@ -45,11 +47,11 @@ export class ScanSessionState {
     }
 
     get exitLabel(): string {
-        if (this.isAppend) return 'Back to document';
-        if (!this.hasDoc && !this.hasPages) return 'Cancel';
-        if (!this.committed && this.hasPages) return 'Discard';
-        if (this.committed) return 'Back to library';
-        return 'Cancel';
+        if (this.isAppend) return t('scan.back_to_document');
+        if (!this.hasDoc && !this.hasPages) return t('common.cancel');
+        if (!this.committed && this.hasPages) return t('common.discard');
+        if (this.committed) return t('scan.back_to_library');
+        return t('common.cancel');
     }
 
     // ----- mutations -----
@@ -109,7 +111,7 @@ export class ScanSessionState {
             return {
                 kind: 'confirm-discard',
                 docId: id,
-                message: 'Discard this document? Imported pages will be lost.'
+                message: t('scan.discard_imported_body')
             };
         }
 

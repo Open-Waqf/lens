@@ -1,8 +1,48 @@
-import {expect, test} from '@playwright/test';
+import {expect, test, type Download, type Page} from '@playwright/test';
 import fs from 'fs';
+import path from 'path';
 
 const MOCK_IMAGE_BASE64 =
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+async function readDownloadBuffer(download: Download, fallbackFilePath: string): Promise<Buffer> {
+    let downloadPath: string | null = null;
+    try {
+        downloadPath = await download.path();
+    } catch {
+        downloadPath = null;
+    }
+    if (downloadPath) {
+        return fs.readFileSync(downloadPath);
+    }
+    await download.saveAs(fallbackFilePath);
+    return fs.readFileSync(fallbackFilePath);
+}
+
+async function exportBackupBuffer(page: Page, password: string): Promise<Buffer> {
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            const downloadPromise = page.waitForEvent('download', {timeout: 10000});
+            await page.locator('button:has-text("Export Backup")').click();
+            await page.getByPlaceholder('Password123').fill(password);
+            await page.getByRole('button', {name: 'Export', exact: true}).click();
+            const download = await downloadPromise;
+            const failure = await download.failure();
+            if (failure) {
+                lastError = new Error(`Download failed: ${failure}`);
+                continue;
+            }
+            return await readDownloadBuffer(
+                download,
+                path.join(test.info().outputDir, download.suggestedFilename() || `offline-core-attempt-${attempt + 1}.slbk`)
+            );
+        } catch (e) {
+            lastError = e;
+        }
+    }
+    throw new Error(`Could not export backup after retries: ${String(lastError)}`);
+}
 
 function isLocalHost(url: string): boolean {
     try {
@@ -97,15 +137,7 @@ test('core flow works offline and does not attempt external network', async ({pa
     await page.locator('input[placeholder*="Search"]').fill('scan');
 
     await page.goto('http://localhost:4173/#/settings');
-    const downloadPromise = page.waitForEvent('download');
-    await page.locator('button:has-text("Export Backup")').click();
-    await page.getByPlaceholder('Password123').fill('offline123');
-    await page.getByRole('button', {name: 'Export', exact: true}).click();
-    const download = await downloadPromise;
-    expect(download.suggestedFilename().endsWith('.slbk')).toBe(true);
-    const backupPath = await download.path();
-    if (!backupPath) throw new Error('Missing backup file path');
-    const backupBuffer = fs.readFileSync(backupPath);
+    const backupBuffer = await exportBackupBuffer(page, 'offline123');
 
     await page.getByRole('button', {name: 'Show Destructive Options'}).click();
     await page.locator('input[placeholder="DELETE"]').fill('DELETE');

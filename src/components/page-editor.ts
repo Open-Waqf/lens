@@ -8,7 +8,7 @@ import type {WorkerRequest, WorkerResponse} from '../lib/image/worker';
 import {resolveScanQualityPlan} from '../lib/image/quality';
 import {haptics} from '../services/haptics';
 import {ImpactStyle} from "@capacitor/haptics";
-import {t} from '../lib/i18n';
+import {i18n, t} from '../lib/i18n';
 import {Icons} from './icons';
 
 export type PageEditorSaveDetail = {
@@ -667,27 +667,29 @@ export class PageEditor extends LitElement {
             ${this.err ? html`
                 <div class="fixed top-4 left-4 right-4 z-[100] p-4 rounded-xl bg-red-950/90 backdrop-blur border border-red-900 text-red-100 shadow-xl flex items-center justify-between animate-bounce">
                     <span>${this.err}</span>
-                    <button aria-label="Clear error" class="ml-2 font-bold" @click=${() => this.err = null}>✕</button>
+                    <button aria-label=${t('editor.clear_error')} class="ml-2 font-bold" @click=${() => this.err = null}>✕</button>
                 </div>` : null}
 
             <div class="flex flex-col min-h-dvh gap-6 p-4 pb-32 bg-black text-slate-100">
 
                 <div class="flex flex-col gap-3">
                     <div class="flex items-center justify-between px-1">
-                        <div class="text-xs font-bold text-slate-500 uppercase tracking-widest">Crop & Rotate</div>
+                        <div class="text-xs font-bold text-slate-500 uppercase tracking-widest">${t('editor.crop_rotate')}</div>
                         <div class="flex gap-2">
-                            <button aria-label="Auto Detect Edges"
+                            <button aria-label=${t('editor.auto_detect_edges')}
                                     class="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-400 active:scale-95 transition-transform border border-slate-700 hover:text-white"
                                     ?disabled=${this.busy}
                                     @click=${() => void this.autoDetectEdges()}>
-                                AUTO
+                                ${t('editor.auto_short')}
                             </button>
                             <button class="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-400 active:scale-95 transition-transform border border-slate-700 hover:text-white"
+                                    aria-label=${t('editor.rotate_90')}
                                     @click=${() => this.rotate90()}>
                                 ⟳ 90°
                             </button>
                             <button class="p-1.5 rounded-lg bg-slate-800 text-slate-400 active:scale-95 transition-transform border border-slate-700 hover:text-white"
-                                    title="Undo"
+                                    aria-label=${t('editor.undo')}
+                                    title=${t('editor.undo')}
                                     ?disabled=${this.busy || this.history.length === 0}
                                     @click=${() => this.undo()}>
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -721,14 +723,14 @@ export class PageEditor extends LitElement {
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
                                 </svg>
-                                Invalid Selection
+                                ${t('editor.invalid_selection')}
                             </div>
                         ` : null}
                     </div>
                 </div>
 
                 <div class="flex flex-col gap-3">
-                    <div class="text-xs font-bold text-slate-500 uppercase tracking-widest px-1">Filter</div>
+                    <div class="text-xs font-bold text-slate-500 uppercase tracking-widest px-1">${t('editor.filter')}</div>
                     <div class="flex overflow-x-auto gap-3 pb-2 -mx-1 px-1 no-scrollbar snap-x">
                         ${FILTERS.map(mode => html`
                             <button @click=${() => {
@@ -769,13 +771,13 @@ export class PageEditor extends LitElement {
                 </div>
 
                 <div class="flex flex-col gap-3">
-                    <div class="text-xs font-bold text-slate-500 uppercase tracking-widest px-1">Final Result</div>
+                    <div class="text-xs font-bold text-slate-500 uppercase tracking-widest px-1">${t('editor.final_result')}</div>
                     <div class="relative w-full flex justify-center bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 group">
                         <canvas data-preview class="block max-w-full object-contain"></canvas>
                         ${!this.sourceBitmap ? html`
                             <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-500 min-h-[200px]">
                                 <div class="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-                                <span class="text-xs font-bold uppercase tracking-wider">Loading...</span>
+                                <span class="text-xs font-bold uppercase tracking-wider">${t('common.loading')}</span>
                             </div>` : null}
                     </div>
                 </div>
@@ -787,8 +789,8 @@ export class PageEditor extends LitElement {
                                .checked=${this.extractText}
                                @change=${(e: Event) => this.extractText = (e.target as HTMLInputElement).checked}>
                         <div class="flex-1">
-                            <div class="text-sm font-bold text-slate-200">Extract Text (OCR)</div>
-                            <div class="text-[10px] text-slate-500">Make document searchable</div>
+                            <div class="text-sm font-bold text-slate-200">${t('editor.extract_text')}</div>
+                            <div class="text-[10px] text-slate-500">${t('editor.extract_text_desc')}</div>
                         </div>
                     </label>
 
@@ -799,7 +801,7 @@ export class PageEditor extends LitElement {
                                 type="button"
                                 aria-label=${t('common.back')}
                                 ?disabled=${this.busy} @click=${this.onCancel}>
-                            <span class="inline-flex items-center justify-center shrink-0">${Icons.Back('w-5 h-5 block')}</span>
+                            <span class="inline-flex items-center justify-center shrink-0">${Icons.Back(i18n.getDirection() === 'rtl' ? 'w-5 h-5 block rotate-180' : 'w-5 h-5 block')}</span>
                             <span class="sr-only">${t('common.back')}</span>
                         </button>
                         <button aria-label=${t('common.share_now')}

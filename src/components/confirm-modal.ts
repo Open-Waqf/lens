@@ -1,5 +1,6 @@
 import {html, LitElement} from 'lit';
 import {customElement, property, query} from 'lit/decorators.js';
+import {t} from '../lib/i18n';
 
 @customElement('confirm-modal')
 export class ConfirmModal extends LitElement {
@@ -10,8 +11,8 @@ export class ConfirmModal extends LitElement {
     @property({type: Boolean}) open = false;
     @property({type: String}) title = '';
     @property({type: String}) description = '';
-    @property({type: String}) confirmLabel = 'Confirm';
-    @property({type: String}) cancelLabel = 'Cancel';
+    @property({type: String}) confirmLabel = t('common.confirm');
+    @property({type: String}) cancelLabel = t('common.cancel');
     @property({type: Boolean}) destructive = false;
     @property({type: Boolean}) input = false; // Is this a prompt?
     @property({type: String}) inputValue = '';
@@ -49,8 +50,8 @@ export class ConfirmModal extends LitElement {
     show(opts: any): Promise<boolean | string | null> {
         this.title = opts.title;
         this.description = opts.description || '';
-        this.confirmLabel = opts.confirm || 'Confirm';
-        this.cancelLabel = opts.cancel || 'Cancel';
+        this.confirmLabel = opts.confirm || t('common.confirm');
+        this.cancelLabel = opts.cancel || t('common.cancel');
         this.destructive = !!opts.destructive;
         this.inputPlaceholder = opts.placeholder || '';
         this.open = true;

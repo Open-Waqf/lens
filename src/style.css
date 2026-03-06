@@ -15,4 +15,39 @@
             --text-default: #ffffff;
         }
     }
+
+    html[dir='ltr'] {
+        direction: ltr;
+    }
+
+    html[dir='rtl'] {
+        direction: rtl;
+    }
+
+    body {
+        text-align: start;
+    }
+
+    /* Translation-safe defaults: avoid clipped labels when strings get longer. */
+    :where(button, a, label, p, h1, h2, h3, h4, h5, h6, span) {
+        overflow-wrap: anywhere;
+    }
+
+    :where(input, textarea, select) {
+        text-align: start;
+        direction: inherit;
+    }
+
+    .text-start {
+        text-align: start;
+    }
+
+    /* Future RTL readiness for existing utility classes without per-component rewrites. */
+    html[dir='rtl'] .text-left {
+        text-align: right;
+    }
+
+    html[dir='rtl'] .text-right {
+        text-align: left;
+    }
 }

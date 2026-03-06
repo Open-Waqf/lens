@@ -10,7 +10,7 @@ import type {DetectedQuad, Point, Quad} from '../lib/scan/quad';
 import {lerpQuad, quadArea} from '../lib/scan/quad';
 
 import {takePendingImport} from '../services/pending-import';
-import {base64ToBytes, bytesToBlob} from '../lib/bytes';
+import {bytesToBlob} from '../lib/bytes';
 import {processPhoto} from '../lib/image/pipeline';
 import {DetectGovernor} from '../lib/scan/detect-governor';
 import {getPlatformCaps} from '../services/platform';
@@ -36,6 +36,7 @@ import {PDFDocument} from 'pdf-lib';
 import {settings, type ScanMode} from '../services/settings';
 import {detectImageMime} from '../lib/image/mime';
 import {resolveScanQualityPlan} from '../lib/image/quality';
+import {pickedFileToBlob} from '../services/picked-file';
 
 const APPEND_DOC_KEY = 'sahifah.appendToDocId';
 const AUTO_KEY = 'sahifah.autoCapture';
@@ -743,16 +744,7 @@ export class ScanPage extends LitElement {
 
                 const files: File[] = [];
                 for (const f of result.files) {
-                    let blob: Blob | null = null;
-                    if (f.blob instanceof Blob) {
-                        blob = f.blob;
-                    } else if (f.path) {
-                        const res = await fetch(f.path);
-                        blob = await res.blob();
-                    } else if (f.data) {
-                        const bytes = await base64ToBytes(f.data);
-                        blob = bytesToBlob(bytes, f.mimeType || 'application/octet-stream');
-                    }
+                    const blob = await pickedFileToBlob(f);
                     if (!blob) continue;
                     files.push(new File([blob], f.name, {type: f.mimeType || blob.type || 'application/octet-stream'}));
                 }
@@ -1067,7 +1059,7 @@ export class ScanPage extends LitElement {
                     <div class="min-w-0">
                         <div class="text-xs text-slate-400">${t('scan.adding_to')}</div>
                         <div class="text-sm text-slate-100 truncate">${title}</div>
-                        <div class="text-xs text-slate-500">${this.session.pageCount} page(s)</div>
+                        <div class="text-xs text-slate-500">${t('scan.page_count', {count: this.session.pageCount})}</div>
                     </div>
                     <div class="flex gap-2">
                         <button class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
@@ -1089,7 +1081,7 @@ export class ScanPage extends LitElement {
                 <div class="min-w-0">
                     <div class="text-xs text-slate-400">${t('scan.building_doc')}</div>
                     <div class="text-sm text-slate-100 truncate">${title}</div>
-                    <div class="text-xs text-slate-500">${this.session.pageCount} page(s)</div>
+                    <div class="text-xs text-slate-500">${t('scan.page_count', {count: this.session.pageCount})}</div>
                 </div>
                 <div class="flex gap-2">
                     <button class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
@@ -1121,7 +1113,7 @@ export class ScanPage extends LitElement {
                                         @click=${() => void this.openExistingPageInEditor(it.id)}>
 
                             <img src=${it.url} class="w-full h-full object-cover opacity-90 group-hover:opacity-100"
-                                 alt="thumb"/>
+                                 alt=${t('scan.thumbnail_alt', {index: idx + 1})}/>
 
                             <div class="absolute bottom-1 right-1 text-[9px] font-bold text-white bg-black/60 px-1.5 py-0.5 rounded backdrop-blur-sm">
                                 ${idx + 1}
@@ -1165,7 +1157,7 @@ export class ScanPage extends LitElement {
                 </div>
 
                 <div class="space-y-4 max-w-xs w-full">
-                    <div class="flex items-start gap-3 text-left text-sm text-slate-300 bg-slate-900/50 p-4 rounded-xl">
+                    <div class="flex items-start gap-3 text-start text-sm text-slate-300 bg-slate-900/50 p-4 rounded-xl">
                         <svg class="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" fill="none" stroke="currentColor"
                              viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -1344,7 +1336,7 @@ export class ScanPage extends LitElement {
                                 </svg>
                             </button>
 
-                            <button aria-label="Capture"
+                            <button aria-label=${t('scan.capture')}
                                     class="w-24 h-24 rounded-full border-4 border-white/20 p-2 active:scale-90 transition-transform bg-slate-900/50"
                                     @click=${() => void this.capturePhoto()}>
                                 <div class="w-full h-full rounded-full bg-white shadow-xl"></div>

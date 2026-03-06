@@ -20,7 +20,7 @@ import {haptics} from '../services/haptics';
 import {ImpactStyle} from '@capacitor/haptics';
 import {shareFile, shareFiles} from "../services/share";
 import {AuthService} from "../services/auth-service";
-import {t} from '../lib/i18n';
+import {i18n, t} from '../lib/i18n';
 import {writeClipboardWithAutoClear} from '../services/clipboard';
 import {showToast} from '../components/toast-notification';
 import {PDFDocument} from 'pdf-lib';
@@ -93,7 +93,7 @@ export class DocPage extends LitElement {
         try {
             const store = getFileStore();
             const page = this.pages.find(p => p.id === pageId);
-            if (!page) throw new Error("Page not found");
+            if (!page) throw new Error(t('doc.page_not_found'));
 
             const bytes = await store.get(page.imagePath);
             const blob = bytesToBlob(bytes, 'image/jpeg');
@@ -339,7 +339,7 @@ export class DocPage extends LitElement {
             this.editingBlob = bytesToBlob(bytes, 'image/jpeg');
             this.editingPage = page;
         } catch (e) {
-            this.error = "Could not load image for editing";
+            this.error = t('doc.edit_load_failed');
         } finally {
             this.busy = false;
         }
@@ -411,7 +411,7 @@ export class DocPage extends LitElement {
             const blob = bytesToBlob(bytes, 'image/jpeg');
             this.viewerUrl = URL.createObjectURL(blob);
         } catch (e) {
-            this.viewerErr = "Failed to load image";
+            this.viewerErr = t('doc.viewer_load_failed');
         } finally {
             this.viewerBusy = false;
         }
@@ -598,7 +598,7 @@ export class DocPage extends LitElement {
 
     render() {
         if (!this.doc) return html`
-            <div class="p-4 text-slate-500">Document not found</div>`;
+            <div class="p-4 text-slate-500">${t('doc.not_found')}</div>`;
 
         if (this.editingPage && this.editingBlob) {
             return html`
@@ -628,8 +628,10 @@ export class DocPage extends LitElement {
 
                 <div class="flex items-center justify-between">
                     <a class="text-sm text-slate-300 hover:underline flex items-center gap-1 min-h-[44px]"
+                       aria-label=${t('doc.library_back')}
+                       title=${t('doc.library_back')}
                        href="#/library">
-                        ${Icons.Back('w-4 h-4')}
+                        ${Icons.Back(i18n.getDirection() === 'rtl' ? 'w-4 h-4 rotate-180' : 'w-4 h-4')}
                         ${t('doc.library_back')}
                     </a>
                 </div>
@@ -637,7 +639,10 @@ export class DocPage extends LitElement {
                 ${this.error ? html`
                     <div class="p-3 bg-red-900/30 text-red-200 border border-red-900/50 rounded-xl text-sm flex justify-between items-start">
                         <span>${this.error}</span>
-                        <button class="ml-2 text-red-300 hover:text-white" @click=${() => this.error = null}>✕</button>
+                        <button class="ml-2 text-red-300 hover:text-white"
+                                aria-label=${t('common.close')}
+                                title=${t('common.close')}
+                                @click=${() => this.error = null}>✕</button>
                     </div>` : null}
 
                 <div class="p-4 rounded-xl border border-slate-800 bg-slate-950 space-y-3">
@@ -702,6 +707,8 @@ export class DocPage extends LitElement {
                             </svg>
                             ${this.searchQuery ? html`
                                 <button class="absolute right-2 top-2 text-slate-500 hover:text-white"
+                                        aria-label=${t('doc.clear_search')}
+                                        title=${t('doc.clear_search')}
                                         @click=${() => this.searchQuery = ''}>
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -806,7 +813,7 @@ export class DocPage extends LitElement {
                     <div class="flex flex-wrap gap-2 pt-2">
                         <button class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-lg shadow-emerald-900/20 min-h-[44px]"
                                 ?disabled=${this.busy || this.pages.length === 0} @click=${this.exportPdf}>
-                            ${this.busy ? '...' : t('doc.export_pdf')}
+                            ${this.busy ? t('common.processing') : t('doc.export_pdf')}
                         </button>
                         <button class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm min-h-[44px]"
                                 ?disabled=${this.busy || this.pages.length === 0}
@@ -834,9 +841,9 @@ export class DocPage extends LitElement {
 
                 <div class="space-y-2">
                     <div class="text-sm font-semibold text-slate-400 uppercase tracking-wider flex justify-between">
-                        <span>Pages (${visiblePages.length})</span>
+                        <span>${t('doc.pages_count', {count: visiblePages.length})}</span>
                         ${this.searchQuery && visiblePages.length < this.pages.length ? html`
-                            <span class="text-emerald-500 text-xs">Filtered by search</span>
+                            <span class="text-emerald-500 text-xs">${t('doc.filtered_by_search')}</span>
                         ` : null}
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -858,9 +865,19 @@ export class DocPage extends LitElement {
                                      }}>
 
                                     <div class="aspect-[3/4] bg-black cursor-pointer relative"
-                                         @click=${() => this.openViewerAt(realIdx)}>
+                                         role="button"
+                                         tabindex="0"
+                                         aria-label=${t('doc.open_page', {count: realIdx + 1})}
+                                         @click=${() => this.openViewerAt(realIdx)}
+                                         @keydown=${(e: KeyboardEvent) => {
+                                             if (e.key === 'Enter' || e.key === ' ') {
+                                                 e.preventDefault();
+                                                 void this.openViewerAt(realIdx);
+                                             }
+                                         }}>
                                         ${this.thumbs[p.id]
                                                 ? html`<img src=${this.thumbs[p.id]}
+                                                            alt=${t('doc.open_page', {count: realIdx + 1})}
                                                             class="w-full h-full object-cover">`
                                                 : html`
                                                     <div class="w-full h-full flex items-center justify-center text-slate-700">
@@ -876,12 +893,14 @@ export class DocPage extends LitElement {
                                         <button type="button"
                                                 class="w-10 h-10 rounded-lg flex items-center justify-center text-slate-300 hover:text-emerald-400 hover:bg-slate-900 active:scale-95 transition-all"
                                                 aria-label=${t('scan.edit_page')}
+                                                title=${t('scan.edit_page')}
                                                 @click=${() => this.editPage(p)}>
                                             ${Icons.Edit('w-5 h-5')}
                                         </button>
                                         <button type="button"
                                                 class="w-10 h-10 rounded-lg flex items-center justify-center text-slate-300 hover:text-red-400 hover:bg-slate-900 active:scale-95 transition-all"
                                                 aria-label=${t('common.delete')}
+                                                title=${t('common.delete')}
                                                 @click=${() => this.deletePage(p.id)}>
                                             ${Icons.Close('w-5 h-5')}
                                         </button>
@@ -889,10 +908,14 @@ export class DocPage extends LitElement {
                                                 class="w-10 h-10 rounded-lg flex items-center justify-center text-slate-300 hover:text-emerald-400 hover:bg-slate-900 active:scale-95 transition-all"
                                                 aria-label=${t('common.share_now')}
                                                 @click=${() => this.exportSingleImage(p.id)}
-                                                title="Share this image">
+                                                title=${t('doc.share_image_title')}>
                                             ${Icons.Share('w-5 h-5')}
                                         </button>
                                         <div class="w-10 h-10 rounded-lg flex items-center justify-center text-slate-300 hover:text-emerald-400 hover:bg-slate-900 cursor-grab active:cursor-grabbing active:scale-95 transition-all"
+                                             role="button"
+                                             tabindex="0"
+                                             aria-label=${t('doc.drag_reorder')}
+                                             title=${t('doc.drag_reorder')}
                                              draggable="true"
                                              style="touch-action:none;"
                                              @pointerdown=${(e: PointerEvent) => this.onHandlePointerDown(e, p.id)}
@@ -935,6 +958,8 @@ export class DocPage extends LitElement {
                                     <span class="text-xs text-emerald-400 font-medium">${t('doc.show_ocr')}</span>
                                 </label>
                                 <button class="p-2 hover:bg-white/10 rounded-full"
+                                        aria-label=${t('doc.viewer_close')}
+                                        title=${t('doc.viewer_close')}
                                         @click=${() => this.viewerOpen = false}>
                                     <svg class="w-6 h-6 text-slate-400" fill="none" stroke="currentColor"
                                          viewBox="0 0 24 24">
@@ -956,7 +981,7 @@ export class DocPage extends LitElement {
                              @touchend=${this.onTouchEnd}>
 
                             ${this.viewerBusy ? html`
-                                <div class="text-slate-500">Loading...</div>` : this.viewerUrl ? html`
+                                <div class="text-slate-500">${t('common.loading')}</div>` : this.viewerUrl ? html`
                                 <div class="relative transition-transform duration-200 ease-out"
                                      style="transform: scale(${this.zoomLevel})"
                                      @dblclick=${this.onDoubleTap}>
@@ -974,6 +999,8 @@ export class DocPage extends LitElement {
                             ` : null}
 
                             <button class="fixed left-4 top-1/2 -translate-y-1/2 p-4 rounded-full bg-black/50 hover:bg-black/80 text-white z-50 transition-colors hidden sm:block"
+                                    aria-label=${t('doc.viewer_prev')}
+                                    title=${t('doc.viewer_prev')}
                                     ?disabled=${this.viewerIndex === 0}
                                     @click=${(e: Event) => {
                                         e.stopPropagation();
@@ -985,6 +1012,8 @@ export class DocPage extends LitElement {
                                 </svg>
                             </button>
                             <button class="fixed right-4 top-1/2 -translate-y-1/2 p-4 rounded-full bg-black/50 hover:bg-black/80 text-white z-50 transition-colors hidden sm:block"
+                                    aria-label=${t('doc.viewer_next')}
+                                    title=${t('doc.viewer_next')}
                                     ?disabled=${this.viewerIndex === this.pages.length - 1}
                                     @click=${(e: Event) => {
                                         e.stopPropagation();

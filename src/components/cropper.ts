@@ -1,5 +1,6 @@
 import {html, LitElement} from 'lit';
 import {customElement, property, query, state} from 'lit/decorators.js';
+import {t} from '../lib/i18n';
 
 @customElement('sl-cropper')
 export class Cropper extends LitElement {
@@ -92,9 +93,9 @@ export class Cropper extends LitElement {
                 >
                     ${this.imgUrl
                             ? html`<img id="img" src=${this.imgUrl}
-                                        class="absolute inset-0 w-full h-full object-contain" alt="Captured"/>`
+                                        class="absolute inset-0 w-full h-full object-contain" alt=${t('cropper.captured_alt')}/>`
                             : html`
-                                <div class="absolute inset-0 grid place-items-center text-slate-400 text-sm">Loading…
+                                <div class="absolute inset-0 grid place-items-center text-slate-400 text-sm">${t('common.loading')}
                                 </div>`}
 
                     ${this.rect
@@ -105,7 +106,7 @@ export class Cropper extends LitElement {
                                 ></div>`
                             : html`
                                 <div class="absolute inset-0 grid place-items-center text-slate-400 text-sm">
-                                    Drag to select crop area (optional)
+                                    ${t('cropper.drag_hint')}
                                 </div>`}
                 </div>
             </div>

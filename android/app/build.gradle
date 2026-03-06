@@ -1,5 +1,21 @@
 apply plugin: 'com.android.application'
 
+def envOrNull = { key ->
+    def v = System.getenv(key)
+    return (v != null && v.toString().trim()) ? v.toString().trim() : null
+}
+
+def envOrDefault = { key, fallback ->
+    def v = envOrNull(key)
+    return v != null ? v : fallback
+}
+
+def releaseStoreFile = envOrNull('OWQ_ANDROID_STORE_FILE')
+def releaseStorePassword = envOrNull('OWQ_ANDROID_STORE_PASSWORD')
+def releaseKeyAlias = envOrNull('OWQ_ANDROID_KEY_ALIAS')
+def releaseKeyPassword = envOrNull('OWQ_ANDROID_KEY_PASSWORD')
+def releaseSigningReady = releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword
+
 android {
     namespace = "org.openwaqf.lens"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +23,8 @@ android {
         applicationId "org.openwaqf.lens"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "0.1.0"
+        versionCode Integer.parseInt(envOrDefault('OWQ_ANDROID_VERSION_CODE', '1'))
+        versionName envOrDefault('OWQ_ANDROID_VERSION_NAME', '0.1.0')
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,9 +32,22 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        if (releaseSigningReady) {
+            release {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
+            if (releaseSigningReady) {
+                signingConfig signingConfigs.release
+            }
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }

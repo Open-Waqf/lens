@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-03-06T18:04:47.704Z",
+  "generatedAt": "2026-03-06T20:13:43.348Z",
   "environment": {
     "browser": "Desktop Chrome (Playwright)",
     "routeBase": "http://localhost:4173"
@@ -15,44 +15,44 @@
     {
       "name": "cold_start_camera_ready",
       "thresholdMs": 2500,
-      "measuredMs": 12,
-      "p95Ms": 42,
+      "measuredMs": 31,
+      "p95Ms": 71,
       "samples": [
-        42,
-        10,
-        12
+        71,
+        29,
+        31
       ],
       "pass": true
     },
     {
       "name": "ocr_single_page",
       "thresholdMs": 30000,
-      "measuredMs": 1258,
-      "p95Ms": 1258,
+      "measuredMs": 2221,
+      "p95Ms": 2221,
       "samples": [
-        1258
+        2221
       ],
       "pass": true
     },
     {
       "name": "search_1000_docs",
       "thresholdMs": 500,
-      "measuredMs": 27,
-      "p95Ms": 127,
+      "measuredMs": 31,
+      "p95Ms": 134,
       "samples": [
-        127,
-        16,
-        27
+        134,
+        31,
+        20
       ],
       "pass": true
     },
     {
       "name": "export_100_docs",
       "thresholdMs": 60000,
-      "measuredMs": 13630,
-      "p95Ms": 13630,
+      "measuredMs": 11078,
+      "p95Ms": 11078,
       "samples": [
-        13630
+        11078
       ],
       "pass": true
     },

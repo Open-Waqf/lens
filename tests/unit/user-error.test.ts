@@ -11,5 +11,9 @@ describe('toUserErrorMessage', () => {
         const msg = toUserErrorMessage(new Error('Something else failed'));
         expect(msg).toBe('Something else failed');
     });
-});
 
+    it('maps camera permission errors to a friendly message', () => {
+        const msg = toUserErrorMessage(new Error('The request is not allowed by the user agent or the platform in the current context.'));
+        expect(msg).toBe('Camera access is blocked. Allow camera permission and try again.');
+    });
+});

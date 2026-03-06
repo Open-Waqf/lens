@@ -1,6 +1,7 @@
 import {css, html, LitElement} from 'lit';
 import {customElement, state} from 'lit/decorators.js';
 import {AuthService} from '../services/auth-service';
+import {t} from '../lib/i18n';
 
 @customElement('auth-lock')
 export class AuthLock extends LitElement {
@@ -71,14 +72,14 @@ export class AuthLock extends LitElement {
     render() {
         return html`
             <div class="overlay">
-                <img src="/icons/icon-192.png" class="logo" alt="Locked">
-                <h2>Sahifah is Locked</h2>
-                <p>Use your device security (Fingerprint, FaceID, or PIN) to unlock.</p>
+                <img src="/icons/icon-192.png" class="logo" alt=${t('auth.locked_alt')}>
+                <h2>${t('auth.locked_title')}</h2>
+                <p>${t('auth.locked_body')}</p>
 
-                <button aria-label="Unlock Vault" @click=${this._tryUnlock}>Unlock Vault</button>
+                <button aria-label=${t('auth.unlock')} @click=${this._tryUnlock}>${t('auth.unlock')}</button>
 
                 ${this.error ? html`
-                    <div class="error-msg">Authentication failed. Try again.</div>` : null}
+                    <div class="error-msg">${t('auth.failed')}</div>` : null}
             </div>
         `;
     }

@@ -59,6 +59,21 @@ control. Read our [Local Privacy Policy](PRIVACY_POLICY.md).
   (`12-byte` random IV per encrypted chunk).
 * **Native:** Capacitor 6+ for high-quality camera access, Biometrics, and native system sharing.
 * **Sensory:** Hybrid Haptic engine for tactile feedback on both Web and Native.
+* **Localization:** Single-file registry in `src/lib/i18n.ts` (locale config + all messages + text direction).
+
+### 🌍 Localization Workflow
+
+To add or update a language, edit only `src/lib/i18n.ts`:
+- add messages in the locale registry
+- set locale metadata (`label`, `dir`)
+- `dir` supports both `ltr` and `rtl`; app root direction is applied automatically via `document.documentElement.dir`
+- current shipped locales: `en` and `ar` (Arabic RTL)
+- all user-visible labels, placeholders, hints, and ARIA text must use translation keys (no hardcoded UI strings)
+
+### ♿ Accessibility i18n Rule
+
+- Every interactive control must have an accessible name (`aria-label` or visible label) sourced from i18n keys.
+- New UI controls should be tested in both `en` and `ar` to verify label readability and direction-aware alignment.
 
 ---
 
@@ -137,6 +152,20 @@ The workflow runs `scripts/android-smoke.ps1` on a self-hosted Windows Android r
 - `screenshot.png`
 - `logcat.txt`
 - `telemetry-report.txt`
+
+### 8. Android Release Build (APK/AAB)
+
+Workflow: `.github/workflows/android-release-build.yml` (manual dispatch)
+
+Optional signing/version env inputs:
+- `OWQ_ANDROID_VERSION_CODE`
+- `OWQ_ANDROID_VERSION_NAME`
+- `OWQ_ANDROID_STORE_FILE` (base64 keystore in GitHub Secret)
+- `OWQ_ANDROID_STORE_PASSWORD`
+- `OWQ_ANDROID_KEY_ALIAS`
+- `OWQ_ANDROID_KEY_PASSWORD`
+
+If signing secrets are not provided, release artifacts are still built (unsigned/default signing behavior).
 
 ---
 

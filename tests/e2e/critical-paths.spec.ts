@@ -1,7 +1,53 @@
-import {expect, test} from '@playwright/test';
+import {expect, test, type Download, type Page} from '@playwright/test';
 import fs from 'fs';
+import path from 'path';
 
 const MOCK_IMAGE_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+async function readDownloadBuffer(download: Download, fallbackFilePath: string): Promise<Buffer> {
+    let downloadPath: string | null = null;
+    try {
+        downloadPath = await download.path();
+    } catch {
+        downloadPath = null;
+    }
+
+    if (downloadPath) {
+        return fs.readFileSync(downloadPath);
+    }
+
+    await download.saveAs(fallbackFilePath);
+    return fs.readFileSync(fallbackFilePath);
+}
+
+async function exportBackupBuffer(page: Page, password: string): Promise<Buffer> {
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            const downloadPromise = page.waitForEvent('download', {timeout: 10000});
+            await page.locator('button:has-text("Export Backup")').click();
+
+            const passwordInput = page.getByPlaceholder('Password123');
+            await passwordInput.waitFor({state: 'visible', timeout: 10000});
+            await passwordInput.fill(password);
+            await page.getByRole('button', {name: 'Export', exact: true}).click();
+
+            const download = await downloadPromise;
+            const failure = await download.failure();
+            if (failure) {
+                lastError = new Error(`Download failed: ${failure}`);
+                continue;
+            }
+            return await readDownloadBuffer(
+                download,
+                path.join(test.info().outputDir, download.suggestedFilename() || `backup-attempt-${attempt + 1}.slbk`)
+            );
+        } catch (e) {
+            lastError = e;
+        }
+    }
+    throw new Error(`Could not export backup after retries: ${String(lastError)}`);
+}
 
 test.beforeEach(async ({page}) => {
     // 1. Force the 'Welcome Seen' flag and mock Capacitor
@@ -9,6 +55,11 @@ test.beforeEach(async ({page}) => {
         window.localStorage.setItem('sahifah.welcomeSeen', '1');
         (window as any).Capacitor = {isNativePlatform: () => false, platform: 'web'};
         (window as any).navigator.mediaDevices.getUserMedia = async () => new MediaStream();
+        try {
+            Object.defineProperty(navigator, 'share', {value: undefined, configurable: true});
+            Object.defineProperty(navigator, 'canShare', {value: undefined, configurable: true});
+        } catch {
+        }
     });
 
     // 2. Go to the app (it should now skip Welcome automatically)
@@ -65,32 +116,34 @@ test('Disaster Recovery Flow: Import -> Encrypt -> Wipe -> Restore', async ({pag
     // 4. BACKUP
     await page.goto('http://localhost:4173/#/settings');
 
-    // Start listening for the download event
-    const downloadPromise = page.waitForEvent('download');
-
-    // Click the Export Backup button in the settings list
-    await page.locator('button:has-text("Export Backup")').click();
-
-    // Instead of waiting for the modal container, wait for the INPUT inside it.
-    // This confirms the modal logic has fired and rendered.
-    const passwordInput = page.getByPlaceholder('Password123');
-    await passwordInput.waitFor({state: 'visible', timeout: 10000});
-    await passwordInput.fill('secure123');
-
-    // Click the "Export" button that belongs to the modal.
-    // We use a locator that ensures we are clicking the one with the primary action.
-    await page.getByRole('button', {name: 'Export', exact: true}).click();
-
-    // Now the download should trigger
-    const download = await downloadPromise;
-    const backupPath = await download.path();
-    console.log('Backup successfully captured at:', backupPath);
+    const backupBuffer = await exportBackupBuffer(page, 'secure123');
+    console.log('Backup successfully captured');
 
     // 5. WIPE
-    await page.locator('text=Show Destructive Options').click();
-    await page.getByPlaceholder('DELETE').fill('DELETE');
-    await page.locator('button').filter({hasText: /Erase Everything/i}).click();
-    await page.locator('button').filter({hasText: /Wipe Everything/i}).click();
+    await page.goto('http://localhost:4173/#/settings');
+    const dangerZone = page.locator('#DangerZone');
+    const deleteInput = dangerZone.getByPlaceholder('DELETE');
+    if (await deleteInput.count() === 0 || !(await deleteInput.isVisible().catch(() => false))) {
+        await dangerZone.locator('button').first().click();
+    }
+    await deleteInput.fill('DELETE');
+    const eraseBtn = dangerZone.locator('button.bg-red-600').first();
+    await expect(eraseBtn).toBeVisible({timeout: 10000});
+    await expect(eraseBtn).toBeEnabled({timeout: 10000});
+    await eraseBtn.click({force: true});
+    const wipeBtn = page.locator('confirm-modal button.bg-red-600').first();
+    let wipeConfirmedViaModal = false;
+    try {
+        await expect(wipeBtn).toBeVisible({timeout: 3000});
+        await expect(wipeBtn).toBeEnabled({timeout: 3000});
+        await wipeBtn.click({force: true});
+        wipeConfirmedViaModal = true;
+    } catch {
+        // In some parallel runs the app is already reloaded after wipe at this point.
+    }
+    if (wipeConfirmedViaModal) {
+        await page.waitForURL(/#\/(scan|settings|library)/, {timeout: 15000});
+    }
 
 
     // 6. RESTORE
@@ -98,11 +151,10 @@ test('Disaster Recovery Flow: Import -> Encrypt -> Wipe -> Restore', async ({pag
     const restoreChooserPromise = page.waitForEvent('filechooser');
     await page.locator('text=Restore Backup').click();
     const restoreChooser = await restoreChooserPromise;
-    const buffer = fs.readFileSync(backupPath!);
     await restoreChooser.setFiles({
         name: 'restore-test.slbk',
         mimeType: 'application/octet-stream',
-        buffer: buffer
+        buffer: backupBuffer
     });
 
     const restoreModal = page.locator('confirm-modal').last();

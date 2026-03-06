@@ -12,13 +12,12 @@ import {shareFile} from '../services/share';
 import {jsonFile, type ZipFileEntry, zipFilesToStream} from '../lib/zip';
 import {decryptStream, encryptStream} from '../lib/crypto/pbe';
 import {OCR_LANG_OPTIONS} from '../lib/ocr';
-import {base64ToBytes, bytesToBlob} from "../lib/bytes";
 import {resetAllStorage} from '../services/reset-storage';
 import {ConfirmModal} from '../components/confirm-modal';
 import pkg from '../../package.json'
 import {settings, type ScanMode} from '../services/settings';
 import {AuthService} from '../services/auth-service';
-import {t} from '../lib/i18n';
+import {i18n, t, type LocaleCode} from '../lib/i18n';
 import {toUserErrorMessage} from '../lib/user-error';
 import {mapRestoreError} from '../lib/restore-error';
 import {deleteOrphanStorageFiles, findOrphanStorageFiles} from '../services/storage-audit';
@@ -36,6 +35,7 @@ import {
     pickMirrorBackupFolder
 } from '../services/mirror-backup';
 import {getPersistenceStatus, type PersistenceStatus} from '../services/storage-persistence';
+import {pickedFileToBlob} from '../services/picked-file';
 
 type RestoreMode = 'merge' | 'replace';
 
@@ -89,9 +89,11 @@ export class SettingsPage extends LitElement {
     @state() private showAdvancedDataTools = false;
     @state() private persistence: PersistenceStatus | null = null;
     @state() private persistenceBusy = false;
+    private readonly onLocaleChanged = () => this.requestUpdate();
 
     async connectedCallback() {
         super.connectedCallback();
+        window.addEventListener('sahifah-locale-changed', this.onLocaleChanged as EventListener);
         await this._refreshSettings();
         this.lastBackupDate = Number(localStorage.getItem('sahifah.lastBackup')) || null;
         void this.loadStorageStats();
@@ -111,6 +113,11 @@ export class SettingsPage extends LitElement {
             this.msg = t('settings.maintenance_enabled');
             this.requestUpdate();
         };
+    }
+
+    disconnectedCallback() {
+        window.removeEventListener('sahifah-locale-changed', this.onLocaleChanged as EventListener);
+        super.disconnectedCallback();
     }
 
     private async runRepair() {
@@ -267,6 +274,11 @@ export class SettingsPage extends LitElement {
         if (mode !== 'quick' && mode !== 'manual') return;
         this.scanMode = mode;
         settings.setScanMode(mode);
+    }
+
+    private setLocale(locale: LocaleCode) {
+        if (!i18n.setLocale(locale)) return;
+        this.requestUpdate();
     }
 
     private toggleClipboardAutoClear() {
@@ -620,16 +632,7 @@ export class SettingsPage extends LitElement {
 
                 if (result.files.length > 0) {
                     const f = result.files[0];
-                    let blob: Blob | null = null;
-                    if (f.blob instanceof Blob) {
-                        blob = f.blob;
-                    } else if (f.path) {
-                        const res = await fetch(f.path);
-                        blob = await res.blob();
-                    } else if (f.data) {
-                        const bytes = await base64ToBytes(f.data);
-                        blob = bytesToBlob(bytes, f.mimeType || 'application/octet-stream');
-                    }
+                    const blob = await pickedFileToBlob(f);
                     if (!blob) {
                         this.err = t('settings.restore_select_valid_file');
                         return;
@@ -983,7 +986,7 @@ export class SettingsPage extends LitElement {
                                           d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
                                 </svg>
                             </div>
-                            <div class="text-left">
+                            <div class="text-start">
                                 <div class="text-slate-200 font-medium">${t('settings.export_backup')}</div>
                                 <div class="text-xs text-slate-500">${t('settings.export_backup_desc')}</div>
                             </div>
@@ -1000,7 +1003,7 @@ export class SettingsPage extends LitElement {
                                           d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m-4 4v12"></path>
                                 </svg>
                             </div>
-                            <div class="text-left">
+                            <div class="text-start">
                                 <div class="text-slate-200 font-medium">${t('settings.restore_backup')}</div>
                                 <div class="text-xs text-slate-500">${t('settings.restore_backup_desc')}</div>
                             </div>
@@ -1019,7 +1022,7 @@ export class SettingsPage extends LitElement {
                         ` : null}
                     </button>
 
-                    <button class="text-xs text-slate-400 hover:text-slate-200 text-left"
+                    <button class="text-xs text-slate-400 hover:text-slate-200 text-start"
                             @click=${() => this.showAdvancedDataTools = !this.showAdvancedDataTools}>
                         ${this.showAdvancedDataTools ? t('settings.hide_advanced_tools') : t('settings.show_advanced_tools')}
                     </button>
@@ -1034,7 +1037,7 @@ export class SettingsPage extends LitElement {
                                               d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path>
                                     </svg>
                                 </div>
-                                <div class="text-left">
+                                <div class="text-start">
                                     <div class="text-indigo-200 font-medium">${t('settings.repair_thumbnails')}</div>
                                     <div class="text-xs text-indigo-400">${t('settings.repair_thumbnails_desc')}</div>
                                 </div>
@@ -1054,7 +1057,7 @@ export class SettingsPage extends LitElement {
                                               d="M4 4v6h6M20 20v-6h-6M5.636 18.364A9 9 0 1020 12"></path>
                                     </svg>
                                 </div>
-                                <div class="text-left">
+                                <div class="text-start">
                                     <div class="text-red-100 font-medium">${t('settings.rebuild_index_cta')}</div>
                                     <div class="text-xs text-red-300/80">${t('settings.rebuild_index_cta_desc')}</div>
                                 </div>
@@ -1074,7 +1077,7 @@ export class SettingsPage extends LitElement {
                                           d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
                                 </svg>
                             </div>
-                            <div class="text-left">
+                            <div class="text-start">
                                 <div class="text-slate-200 font-medium">${t('settings.storage_audit_title')}</div>
                                 <div class="text-xs text-slate-500">${t('settings.storage_audit_desc')}</div>
                             </div>
@@ -1101,7 +1104,7 @@ export class SettingsPage extends LitElement {
         return html`
             <div class="p-3 rounded-xl border border-slate-800 bg-slate-900/60 space-y-2">
                 <div class="flex items-center justify-between gap-3">
-                    <div class="text-left flex-1 min-w-0">
+                    <div class="text-start flex-1 min-w-0">
                         <div class="text-sm text-slate-200 font-medium">${t('settings.mirror_title')}</div>
                         <div class="text-xs text-slate-500">${t('settings.mirror_desc')}</div>
                         <div class="text-[11px] text-slate-500 mt-1">${t('settings.mirror_trigger_note')}</div>
@@ -1156,7 +1159,6 @@ export class SettingsPage extends LitElement {
     }
 
     private renderProcessingSection() {
-        const arabicSelected = this.ocrLang.split('+').includes('ara');
         return html`
             <section class="p-4 rounded-xl border border-slate-700 bg-slate-800/50 space-y-4">
                 <div class="flex items-center gap-2 text-emerald-400 font-semibold text-sm">
@@ -1177,6 +1179,20 @@ export class SettingsPage extends LitElement {
                             @click=${() => this.toggleOcr()}>
                         <span class="absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${this.enableOcr ? 'translate-x-5' : ''}"></span>
                     </button>
+                </div>
+
+                <div class="space-y-2">
+                    <label class="text-[10px] text-slate-500 uppercase tracking-wider">${t('settings.language')}</label>
+                    <select
+                            class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100"
+                            @change=${(e: Event) => this.setLocale((e.target as HTMLSelectElement).value as LocaleCode)}>
+                        ${i18n.getAvailableLocales().map(opt => html`
+                            <option value=${opt.code} ?selected=${opt.code === i18n.getLocale()}>
+                                ${opt.code === 'ar' ? t('settings.language_ar') : t('settings.language_en')}
+                            </option>
+                        `)}
+                    </select>
+                    <div class="text-[11px] text-slate-500">${t('settings.language_help')}</div>
                 </div>
 
                 <div class="space-y-2">
@@ -1202,14 +1218,6 @@ export class SettingsPage extends LitElement {
                             <option value="manual">${t('settings.scan_mode_manual')}</option>
                         </select>
                         <div class="text-[11px] text-slate-500">${t('settings.scan_mode_desc')}</div>
-                    </div>
-                ` : null}
-
-                ${arabicSelected ? html`
-                    <div class="p-3 rounded-lg bg-amber-950/20 border border-amber-900/50 text-xs text-amber-200">
-                        <div class="font-semibold mb-1">${t('settings.ocr_arabic_notice_title')}</div>
-                        <div>${t('settings.ocr_arabic_disclaimer')}</div>
-                        <div class="mt-1 text-amber-300/90">${t('settings.ocr_arabic_disclaimer_verify')}</div>
                     </div>
                 ` : null}
 
