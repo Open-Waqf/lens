@@ -188,7 +188,7 @@ export class PageEditor extends LitElement {
                 window.setTimeout(() => this.queuePreview(), 280);
             }
         } catch (e) {
-            this.err = "Failed to load image";
+            this.err = t('editor.load_failed');
         }
     }
 

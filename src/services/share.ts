@@ -45,7 +45,7 @@ async function writeTempFile(file: File): Promise<{ uri: string, path: string }>
 }
 
 // 2. Main function for Batch Sharing (Multiple Files)
-export async function shareFiles(files: File[], title: string = 'Share'): Promise<void> {
+export async function shareFiles(files: File[], title: string = t('common.share_now')): Promise<void> {
     const tempPaths: string[] = [];
     if (Capacitor.isNativePlatform()) {
         try {

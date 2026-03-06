@@ -213,6 +213,7 @@ const EN_MESSAGES = {
     'editor.final_result': 'Final Result',
     'editor.extract_text': 'Extract Text (OCR)',
     'editor.extract_text_desc': 'Make document searchable',
+    'editor.load_failed': 'Failed to load image',
 
     // Settings / Backup
     'settings.encrypt_backup_title': 'Encrypt Backup',
@@ -578,6 +579,7 @@ const AR_MESSAGES = {
     'editor.rotate_90': 'تدوير 90°',
     'editor.undo': 'تراجع',
     'editor.invalid_selection': 'تحديد غير صالح',
+    'editor.load_failed': 'تعذر تحميل الصورة',
     'editor.filter': 'فلتر',
     'editor.final_result': 'النتيجة النهائية',
     'editor.extract_text': 'استخراج النص (OCR)',
