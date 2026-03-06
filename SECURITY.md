@@ -21,20 +21,6 @@ To protect your privacy, this project does not have:
 
 **If you find a security flaw, you are the only one who knows. Please report it!**
 
----
-
-## 🛡️ Supported Versions
-
-We only provide security updates for the latest version. Please update via the PWA prompt or App Store to ensure you
-have the latest cryptographic fixes.
-
-| Version | Supported |
-|---------|-----------|
-| 0.1.x   | ✅ YES     |
-| < 0.1.0 | ❌ NO      |
-
----
-
 ## 🐛 Reporting a Vulnerability
 
 Do not open a public GitHub Issue. Email **security@openwaqf.org**.
