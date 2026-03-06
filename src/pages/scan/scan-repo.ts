@@ -352,32 +352,100 @@ export class ScanRepo {
         const targetDoc = await db.docs.get(targetId);
         if (!targetDoc) throw new Error("Target document not found");
 
-        await db.transaction('rw', [db.docs, db.pages], async () => {
-            let combinedSearchIndex = targetDoc.searchIndex || '';
-            const combinedPageIds = [...targetDoc.pageIds];
+        const store = getFileStore();
+        type MovePlan = {
+            pageId: string;
+            oldImagePath: string;
+            oldThumbPath: string;
+            newImagePath: string;
+            newThumbPath: string;
+            imageBytes: Uint8Array;
+            thumbBytes: Uint8Array;
+            imageMime: string;
+            thumbMime: string;
+        };
 
-            for (const otherId of others) {
-                const otherDoc = await db.docs.get(otherId);
-                if (!otherDoc) continue;
+        const moves: MovePlan[] = [];
+        const otherDocs: DocRecord[] = [];
+        const combinedPageIds = [...targetDoc.pageIds];
+        for (const otherId of others) {
+            const otherDoc = await db.docs.get(otherId);
+            if (!otherDoc) continue;
+            otherDocs.push(otherDoc);
+            combinedPageIds.push(...otherDoc.pageIds);
 
-                // 1. Move the pages in the DB
-                await db.pages.where('docId').equals(otherId).modify({docId: targetId});
+            const pages = await db.pages.where('docId').equals(otherId).toArray();
+            for (const page of pages) {
+                const imageBytes = await store.get(page.imagePath);
+                const thumbBytes = await store.get(page.thumbPath);
+                const imageExt = pathExt(page.imagePath, '.jpg');
+                const thumbExt = pathExt(page.thumbPath, '.jpg');
+                moves.push({
+                    pageId: page.id,
+                    oldImagePath: page.imagePath,
+                    oldThumbPath: page.thumbPath,
+                    newImagePath: `docs/${targetId}/pages/${page.id}${imageExt}`,
+                    newThumbPath: `docs/${targetId}/thumbs/${page.id}${thumbExt}`,
+                    imageBytes,
+                    thumbBytes,
+                    imageMime: detectImageMime(imageBytes),
+                    thumbMime: detectImageMime(thumbBytes),
+                });
+            }
+        }
 
-                // 2. Aggregate search index and page IDs
-                if (otherDoc.searchIndex) combinedSearchIndex += ' ' + otherDoc.searchIndex;
-                combinedPageIds.push(...otherDoc.pageIds);
-
-                // 3. Delete the old document record (files are now owned by targetId)
-                await db.docs.delete(otherId);
+        const createdPaths: string[] = [];
+        try {
+            for (const move of moves) {
+                await store.put(move.newImagePath, move.imageBytes, move.imageMime);
+                createdPaths.push(move.newImagePath);
+                await store.put(move.newThumbPath, move.thumbBytes, move.thumbMime);
+                createdPaths.push(move.newThumbPath);
             }
 
-            // 4. Update the master document
-            await db.docs.update(targetId, {
-                pageIds: combinedPageIds,
-                searchIndex: combinedSearchIndex.trim(),
-                updatedAt: Date.now()
+            await db.transaction('rw', [db.docs, db.pages], async () => {
+                for (const move of moves) {
+                    await db.pages.update(move.pageId, {
+                        docId: targetId,
+                        imagePath: move.newImagePath,
+                        thumbPath: move.newThumbPath,
+                    });
+                }
+
+                for (const otherDoc of otherDocs) {
+                    await db.docs.delete(otherDoc.id);
+                }
+
+                await db.docs.update(targetId, {
+                    pageIds: combinedPageIds,
+                    updatedAt: Date.now()
+                });
             });
-        });
+        } catch (e) {
+            for (const path of createdPaths) {
+                try {
+                    await store.del(path);
+                } catch {
+                    markStorageCleanupPending();
+                }
+            }
+            throw e;
+        }
+
+        for (const move of moves) {
+            try {
+                await store.del(move.oldImagePath);
+            } catch {
+                markStorageCleanupPending();
+            }
+            try {
+                await store.del(move.oldThumbPath);
+            } catch {
+                markStorageCleanupPending();
+            }
+        }
+
+        await this.rebuildDocIndex(targetId);
 
         return targetId;
     }
@@ -426,4 +494,10 @@ export class ScanRepo {
             ocrQueue.completeJob(pageId, false);
         }
     }
+}
+
+function pathExt(path: string, fallback: string): string {
+    const dot = path.lastIndexOf('.');
+    if (dot <= -1 || dot < path.lastIndexOf('/')) return fallback;
+    return path.slice(dot);
 }
