@@ -11,6 +11,7 @@ describe('PDF OCR text ordering', () => {
 
         const lines = groupWordsIntoLines(words);
         expect(lines).toHaveLength(1);
+        expect(lines[0].rtl).toBe(true);
         expect(lines[0].text).toBe('عليكم سلام');
     });
 
@@ -22,6 +23,7 @@ describe('PDF OCR text ordering', () => {
 
         const lines = groupWordsIntoLines(words);
         expect(lines).toHaveLength(1);
+        expect(lines[0].rtl).toBe(false);
         expect(lines[0].text).toBe('hello world');
     });
 });

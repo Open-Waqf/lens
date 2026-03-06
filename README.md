@@ -40,6 +40,7 @@ control. Read our [Local Privacy Policy](PRIVACY_POLICY.md).
 ### 🔍 Deep Search & OCR
 
 * **On-Device OCR:** Uses **Tesseract.js** in WebWorkers to extract text without internet.
+* **Arabic PDF Robustness:** Arabic OCR text layers require the bundled `public/fonts/noto-arabic.ttf` font; export fails fast if that asset is missing.
 * **Contextual Snippets:** Search results highlight the exact sentence found in OCR text or user notes.
 * **Rich Metadata:** Organize with Folders, Tags, and private searchable Notes.
 * **PDF Generation:** Compile professional, searchable PDFs with invisible text layers locally.

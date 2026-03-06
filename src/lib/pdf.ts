@@ -13,6 +13,25 @@ export interface PdfOptions {
 
 const UNICODE_FONT_URL = '/fonts/noto-arabic.ttf'; // Expected location for Arabic/Unicode support
 const ARABIC_SCRIPT_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+const MIN_FONT_BYTES = 1024;
+
+let cachedUnicodeFontBytes: Uint8Array | null = null;
+
+async function loadBundledArabicFontBytes(): Promise<Uint8Array> {
+    if (cachedUnicodeFontBytes) return cachedUnicodeFontBytes;
+    const fontRes = await fetch(UNICODE_FONT_URL);
+    if (!fontRes.ok) throw new Error(`Failed to load bundled Arabic font (${fontRes.status}).`);
+    const bytes = new Uint8Array(await fontRes.arrayBuffer());
+    if (bytes.byteLength < MIN_FONT_BYTES) {
+        throw new Error('Bundled Arabic font file is invalid or truncated.');
+    }
+    cachedUnicodeFontBytes = bytes;
+    return bytes;
+}
+
+function pageContainsArabic(page: PageRecord): boolean {
+    return !!page.words?.some(w => ARABIC_SCRIPT_RE.test(w.text));
+}
 
 export async function buildPdfForDoc(
     store: FileStore,
@@ -21,18 +40,18 @@ export async function buildPdfForDoc(
 ): Promise<Uint8Array> {
     const pdf = await PDFDocument.create();
     pdf.registerFontkit(fontkit);
+    const needsArabicFont = pages.some(pageContainsArabic);
 
-    // Try to load custom font for Unicode support (Arabic/RTL)
+    // Load bundled Unicode font; Arabic text layers are blocked if unavailable.
     let customFont: any = null;
     try {
-        const fontRes = await fetch(UNICODE_FONT_URL);
-        if (fontRes.ok) {
-            const fontBytes = await fontRes.arrayBuffer();
-            customFont = await pdf.embedFont(fontBytes);
-            console.log("PDF: Custom Unicode font embedded.");
-        }
+        const fontBytes = await loadBundledArabicFontBytes();
+        customFont = await pdf.embedFont(fontBytes);
     } catch (e) {
-        console.warn("PDF: Custom font not found, falling back to standard font (may break Arabic).");
+        if (needsArabicFont) {
+            throw new Error('Arabic OCR text layer requires bundled Arabic font. Please reinstall app assets.');
+        }
+        console.warn('PDF: Custom font not available; continuing with standard font for non-Arabic text.');
     }
 
     const total = pages.length;
@@ -71,16 +90,19 @@ export async function buildPdfForDoc(
                     const ph = firstWord.box[3] * h;
 
                     try {
+                        if (line.rtl && !customFont) {
+                            throw new Error('Arabic line requires embedded Unicode font.');
+                        }
                         page.drawText(line.text, {
                             x: px,
                             y: h - (py + ph),
                             size: fontSize,
-                            font: customFont || undefined, // Fallback to Helvetica
+                            font: customFont || undefined,
                             opacity: 0, 
                             color: rgb(0, 0, 0),
                         });
                     } catch (fontErr) {
-                        // If custom font fails for some chars, fallback to standard
+                        if (line.rtl) throw fontErr;
                         page.drawText(line.text, {
                             x: px, y: h - (py + ph), size: fontSize, opacity: 0, color: rgb(0, 0, 0)
                         });
@@ -97,8 +119,8 @@ export async function buildPdfForDoc(
     return await pdf.save();
 }
 
-export function groupWordsIntoLines(words: OcrWord[]): Array<{ text: string, words: OcrWord[] }> {
-    const lines: Array<{ text: string, words: OcrWord[] }> = [];
+export function groupWordsIntoLines(words: OcrWord[]): Array<{ text: string, words: OcrWord[], rtl: boolean }> {
+    const lines: Array<{ text: string, words: OcrWord[], rtl: boolean }> = [];
     if (words.length === 0) return lines;
 
     const sorted = [...words].sort((a, b) => a.box[1] - b.box[1] || a.box[0] - b.box[0]);
@@ -116,7 +138,8 @@ export function groupWordsIntoLines(words: OcrWord[]): Array<{ text: string, wor
             const orderedWords = [...currentLine].sort((a, b) => rtl ? b.box[0] - a.box[0] : a.box[0] - b.box[0]);
             lines.push({
                 text: orderedWords.map(w => w.text).join(' '),
-                words: orderedWords
+                words: orderedWords,
+                rtl,
             });
             currentLine = [curr];
         }
@@ -125,7 +148,8 @@ export function groupWordsIntoLines(words: OcrWord[]): Array<{ text: string, wor
     const orderedWords = [...currentLine].sort((a, b) => rtl ? b.box[0] - a.box[0] : a.box[0] - b.box[0]);
     lines.push({
         text: orderedWords.map(w => w.text).join(' '),
-        words: orderedWords
+        words: orderedWords,
+        rtl,
     });
     return lines;
 }
