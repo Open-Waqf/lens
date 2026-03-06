@@ -239,9 +239,6 @@ export class ScanRepo {
                 markStorageCleanupPending();
             }
 
-            // Since we cleared words, we should rebuild index immediately to remove old text
-            await this.rebuildDocIndex(docId);
-
         } catch (e) {
             try {
                 await store.del(newImagePath);
@@ -258,6 +255,9 @@ export class ScanRepo {
             const doc = await db.docs.get(docId);
             ocrQueue.addJob(pageId, doc?.title || 'Document');
             this.runBackgroundOcr(pageId, master.bytes, master.width, master.height);
+        } else {
+            // OCR disabled: clear old indexed text immediately and rebuild from current persisted words.
+            await this.rebuildDocIndex(docId);
         }
     }
 
