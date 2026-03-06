@@ -58,6 +58,7 @@ export class PageEditor extends LitElement {
     @query('canvas[data-edges]') private edgesEl!: HTMLCanvasElement;
     private dragIdx: number | null = null;
     private dragPointerId: number | null = null;
+    private scrollLockPrev: { overflow: string; touchAction: string; overscrollBehavior: string } | null = null;
     @query('canvas[data-preview]') private previewEl!: HTMLCanvasElement;
     @query('canvas[data-magnify]') private magnifyEl!: HTMLCanvasElement;
 
@@ -124,6 +125,7 @@ export class PageEditor extends LitElement {
         window.removeEventListener('pointermove', this.onPointerMove);
         window.removeEventListener('pointerup', this.onPointerUp);
         window.removeEventListener('pointercancel', this.onPointerUp);
+        this.unlockPageScroll();
         this.stopWorker();
         if (this._previewTimer) window.clearTimeout(this._previewTimer);
         this._previewTimer = null;
@@ -277,6 +279,7 @@ export class PageEditor extends LitElement {
         window.addEventListener('pointermove', this.onPointerMove, {passive: false});
         window.addEventListener('pointerup', this.onPointerUp, {passive: true});
         window.addEventListener('pointercancel', this.onPointerUp, {passive: true});
+        this.lockPageScroll();
         this.showMagnify = true;
     };
 
@@ -306,9 +309,32 @@ export class PageEditor extends LitElement {
         window.removeEventListener('pointermove', this.onPointerMove);
         window.removeEventListener('pointerup', this.onPointerUp);
         window.removeEventListener('pointercancel', this.onPointerUp);
+        this.unlockPageScroll();
         this.showMagnify = false;
         this.clearMagnifier();
     };
+
+    private lockPageScroll(): void {
+        if (this.scrollLockPrev) return;
+        const bodyStyle = document.body.style;
+        this.scrollLockPrev = {
+            overflow: bodyStyle.overflow || '',
+            touchAction: bodyStyle.touchAction || '',
+            overscrollBehavior: bodyStyle.overscrollBehavior || '',
+        };
+        bodyStyle.overflow = 'hidden';
+        bodyStyle.touchAction = 'none';
+        bodyStyle.overscrollBehavior = 'none';
+    }
+
+    private unlockPageScroll(): void {
+        if (!this.scrollLockPrev) return;
+        const bodyStyle = document.body.style;
+        bodyStyle.overflow = this.scrollLockPrev.overflow;
+        bodyStyle.touchAction = this.scrollLockPrev.touchAction;
+        bodyStyle.overscrollBehavior = this.scrollLockPrev.overscrollBehavior;
+        this.scrollLockPrev = null;
+    }
 
     private clearMagnifier(): void {
         const c = this.magnifyEl;
@@ -709,7 +735,7 @@ export class PageEditor extends LitElement {
                             <div
                                     data-testid="corner-handle-${i}"
                                     class="absolute z-20 -translate-x-1/2 -translate-y-1/2 min-w-[44px] min-h-[44px] w-11 h-11 pointer-events-auto"
-                                    style=${this.getCornerHandleStyle(i)}
+                                    style="${this.getCornerHandleStyle(i)} touch-action:none;"
                                     aria-label=${t('scan.edit_page')}
                                     @pointerdown=${(ev: PointerEvent) => this.onHandlePointerDown(i, ev)}></div>
                         `)}
