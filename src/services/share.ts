@@ -124,8 +124,12 @@ function downloadFileFallback(file: File, filename: string) {
     const a = document.createElement('a');
     a.href = url;
     a.download = filename;
+    a.rel = 'noopener';
+    a.target = '_blank';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    // Firefox (especially mobile/emulated) may resolve blob downloads asynchronously.
+    // Immediate revoke can produce a blob: error page instead of a file save dialog.
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
