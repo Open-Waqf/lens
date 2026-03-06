@@ -58,7 +58,8 @@ export function detectQuadFromRgba(rgba: Uint8ClampedArray, w: number, h: number
     if (count === 0) return {quad: null, confidence: 0, width: w, height: h};
 
     const mean = sumMag / count;
-    const stdDev = Math.sqrt((sumSqMag / count) - (mean * mean));
+    const variance = Math.max(0, (sumSqMag / count) - (mean * mean));
+    const stdDev = Math.sqrt(variance);
     // Slightly lower threshold to visualize more lines
     const edgeThresh = mean + stdDev * 1.0;
 

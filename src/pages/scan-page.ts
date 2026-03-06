@@ -398,6 +398,13 @@ export class ScanPage extends LitElement {
             this.captured = bytesToBlob(bytes, 'image/jpeg');
             this.editingPageId = pageId;
             this.selectedPageId = pageId;
+            if (this.importReviewQueue.length > 0) {
+                const pos = this.importReviewQueue.indexOf(pageId);
+                if (pos >= 0) {
+                    const reviewed = this.importReviewTotal - this.importReviewQueue.length;
+                    this.importReviewIndex = reviewed + pos + 1;
+                }
+            }
             this.session.setStage('edit');
             this.editorKey++;
         } catch (e) {
@@ -437,6 +444,7 @@ export class ScanPage extends LitElement {
         this.busy = true;
         this.error = null;
         this.requestUpdate();
+        const reviewedPageId = this.editingPageId;
 
         try {
             const {master, thumb, extractText} = ev.detail;
@@ -467,19 +475,20 @@ export class ScanPage extends LitElement {
                 showToast(t('storage.reminder.backup'), 'info');
             }
 
-            if (this.editingPageId && this.importReviewQueue.length > 0 && this.importReviewQueue[0] === this.editingPageId) {
-                this.importReviewQueue.shift(); // Remove the one we just saved
-                const nextId = this.importReviewQueue[0]; // Peek next
-
+            if (this.importReviewQueue.length > 0) {
+                // Remove whichever reviewed imported page was saved, even if user reviewed out of order.
+                if (reviewedPageId) {
+                    const savedIdx = this.importReviewQueue.indexOf(reviewedPageId);
+                    if (savedIdx >= 0) this.importReviewQueue.splice(savedIdx, 1);
+                }
+                const nextId = this.importReviewQueue[0];
                 if (nextId) {
                     this.importReviewIndex = this.importReviewTotal - this.importReviewQueue.length + 1;
                     await new Promise(r => setTimeout(r, 50));
                     await this.openExistingPageInEditor(nextId);
-                    return; // RETURN EARLY to prevent falling through to clearEditor
-                } else {
-                    // Queue is done
-                    this.clearImportReview();
+                    return;
                 }
+                this.clearImportReview();
             }
 
             this.clearEditor();
