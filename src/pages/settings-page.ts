@@ -16,7 +16,6 @@ import {ConfirmModal} from '../components/confirm-modal';
 import pkg from '../../package.json'
 import {settings} from '../services/settings';
 import {AuthService} from '../services/auth-service';
-import {OPFSStreamWriter} from '../services/filestore/opfs-store';
 import {t} from '../lib/i18n';
 import {toUserErrorMessage} from '../lib/user-error';
 import {mapRestoreError} from '../lib/restore-error';
@@ -26,6 +25,7 @@ import {repairLibrary} from '../services/repair';
 import {CapacitorFileStore} from "../services/filestore/capacitor-store";
 import {hasIndexLossRiskFlag, runStorageHealthProbe} from '../services/storage-health';
 import {rebuildLibraryIndexFromFiles} from '../services/rebuild-index';
+import {createTempBackupWriter} from '../services/backup-temp-store';
 import {
     getMirrorFolderLabel,
     hasMirrorBackupFolder,
@@ -413,7 +413,7 @@ export class SettingsPage extends LitElement {
         this.err = null;
 
         const tempPath = `exports/backup_${Date.now()}.slbk`;
-        const writer = new OPFSStreamWriter(tempPath);
+        const writer = createTempBackupWriter(tempPath);
 
         try {
             const pw = await ConfirmModal.prompt({
@@ -490,15 +490,7 @@ export class SettingsPage extends LitElement {
             this.err = toUserErrorMessage(e);
             console.error(e);
         } finally {
-            try {
-                await writer.close();
-            } catch {
-            }
-            try {
-                const {opfsRemoveEntry} = await import('../services/filestore/opfs-store');
-                await opfsRemoveEntry(tempPath);
-            } catch {
-            }
+            await writer.cleanup();
 
             this.busy = false;
             this.backupProgress = 0;
@@ -615,9 +607,8 @@ export class SettingsPage extends LitElement {
         this.msg = null;
         this.err = null;
 
-        // Use a temporary file path in OPFS
         const tempPath = `imports/temp_restore_${Date.now()}.zip`;
-        const writer = new OPFSStreamWriter(tempPath);
+        const writer = createTempBackupWriter(tempPath);
 
         try {
             const pw = await ConfirmModal.prompt({
@@ -678,10 +669,7 @@ export class SettingsPage extends LitElement {
                 ? mapped.message
                 : t('settings.restore_failed', {error: mapped.message});
         } finally {
-            try {
-                await writer.close();
-            } catch {
-            }
+            await writer.cleanup();
             this.busy = false;
         }
     }
