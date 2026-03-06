@@ -420,6 +420,11 @@ const EN_MESSAGES = {
     'errors.editor_thumb_missing': 'Processed thumbnail data is missing.',
     'errors.editor_encode_share_failed': 'Failed to encode share image.',
     'errors.editor_share_missing': 'Share image data is missing.',
+    'seo.app_name': 'Sahifah Lens',
+    'seo.default_description': 'Local-first, zero-cloud document scanner with offline OCR and encrypted backups.',
+    'seo.keywords': 'private scanner, offline OCR, local-first, encrypted backup, no cloud',
+    'seo.locale': 'en_US',
+    'seo.locale_alt': 'ar_AR',
     'settings.factory_reset_title': 'Factory Reset?',
     'settings.factory_reset_body': 'This will erase ALL local documents and settings.\nCannot be undone.',
     'settings.factory_reset_confirm': 'Reset Everything',
@@ -773,6 +778,11 @@ const AR_MESSAGES = {
     'errors.editor_thumb_missing': 'بيانات المصغّر المعالجة مفقودة.',
     'errors.editor_encode_share_failed': 'فشل ترميز صورة المشاركة.',
     'errors.editor_share_missing': 'بيانات صورة المشاركة مفقودة.',
+    'seo.app_name': 'عدسة الصحيفة',
+    'seo.default_description': 'ماسح مستندات محلي بالكامل بدون سحابة، مع OCR دون اتصال ونسخ احتياطية مشفّرة.',
+    'seo.keywords': 'ماسح خاص, OCR بدون إنترنت, محلي بالكامل, نسخة احتياطية مشفرة, بدون سحابة',
+    'seo.locale': 'ar_AR',
+    'seo.locale_alt': 'en_US',
 } as const;
 
 type LocaleDefinition = {

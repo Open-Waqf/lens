@@ -101,6 +101,7 @@ export class AppRoot extends LitElement {
         document.addEventListener('visibilitychange', this._onVisibilityChange);
 
         if (!location.hash) location.hash = '#/library';
+        this.updateSeoMeta();
         this.hasStorageRisk = hasIndexLossRiskFlag();
         this.hasStorageCleanupPending = hasStorageCleanupPending();
         this.hidePersistBanner = localStorage.getItem(STORAGE_BANNER_DISMISS_KEY) === '1';
@@ -225,11 +226,65 @@ export class AppRoot extends LitElement {
     private _onHash = () => {
         this.route = parseHash();
         if (this.route.name !== 'scan') this.scanStage = 'idle';
+        this.updateSeoMeta();
     };
 
     private _onLocaleChanged = () => {
+        this.updateSeoMeta();
         this.requestUpdate();
     };
+
+    private updateSeoMeta(): void {
+        if (typeof document === 'undefined') return;
+        const appName = t('seo.app_name');
+        const pageTitle = appName;
+        const description = t('seo.default_description');
+        const keywords = t('seo.keywords');
+        const locale = t('seo.locale');
+        const localeAlt = t('seo.locale_alt');
+        const ogUrl = this.currentPublicUrl();
+
+        document.title = pageTitle;
+        this.setMetaByName('description', description);
+        this.setMetaByName('keywords', keywords);
+        this.setMetaByProperty('og:title', pageTitle);
+        this.setMetaByProperty('og:description', description);
+        this.setMetaByProperty('og:locale', locale);
+        this.setMetaByProperty('og:locale:alternate', localeAlt);
+        this.setMetaByProperty('og:url', ogUrl);
+        this.setMetaByName('twitter:title', pageTitle);
+        this.setMetaByName('twitter:description', description);
+    }
+
+    private currentPublicUrl(): string {
+        try {
+            const url = new URL(window.location.href);
+            // Hash routes are not canonical share URLs for crawlers/social cards.
+            return `${url.origin}${url.pathname}`;
+        } catch {
+            return 'https://lens.open-waqf.org/';
+        }
+    }
+
+    private setMetaByName(name: string, content: string): void {
+        let el = document.querySelector(`meta[name="${name}"]`) as HTMLMetaElement | null;
+        if (!el) {
+            el = document.createElement('meta');
+            el.setAttribute('name', name);
+            document.head.appendChild(el);
+        }
+        el.setAttribute('content', content);
+    }
+
+    private setMetaByProperty(prop: string, content: string): void {
+        let el = document.querySelector(`meta[property="${prop}"]`) as HTMLMetaElement | null;
+        if (!el) {
+            el = document.createElement('meta');
+            el.setAttribute('property', prop);
+            document.head.appendChild(el);
+        }
+        el.setAttribute('content', content);
+    }
 
     private _onScanStageChange = (ev: CustomEvent<{ stage: ScanStage }>) => {
         this.scanStage = ev.detail.stage;
