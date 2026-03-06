@@ -5,6 +5,8 @@ import type {LocaleKey} from './i18n';
 
 let currentWorker: Worker | null = null;
 let currentLang: string | null = null;
+let workerInitPromise: Promise<Worker> | null = null;
+let workerInitLang: string | null = null;
 
 const LANG_MANIFEST: Record<string, string> = {
     'eng': '7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2',
@@ -29,60 +31,87 @@ async function getWorker(lang = 'eng'): Promise<Worker> {
         return currentWorker;
     }
 
-    if (currentWorker) {
+    // If the same language is already being initialized, await that in-flight init.
+    if (workerInitPromise && workerInitLang === lang) {
+        return await workerInitPromise;
+    }
+
+    // If another language is initializing, wait for it to finish first to avoid overlap.
+    if (workerInitPromise && workerInitLang !== lang) {
+        try {
+            await workerInitPromise;
+        } catch {
+            // Ignore failed in-flight init; continue with requested language init.
+        }
+    }
+
+    if (currentWorker && currentLang !== lang) {
         await currentWorker.terminate();
         currentWorker = null;
+        currentLang = null;
     }
 
-    const base = import.meta.env.BASE_URL || '/';
-    const tessPath = `${base}tesseract/`.replace('//', '/');
+    workerInitLang = lang;
+    workerInitPromise = (async () => {
+        const base = import.meta.env.BASE_URL || '/';
+        const tessPath = `${base}tesseract/`.replace('//', '/');
 
-    // 1. Verify Integrity per language pack
-    for (const code of splitLangCodes(lang)) {
-        if (LANG_MANIFEST[code]) {
-            console.log(`OCR: Verifying integrity for ${code}...`);
-            try {
-                const res = await fetch(`${tessPath}${code}.traineddata`);
-                if (!res.ok) throw new Error(`Failed to fetch language pack: ${res.statusText}`);
-                const buffer = await res.arrayBuffer();
-                const hash = await sha256Hex(new Uint8Array(buffer));
+        // 1. Verify Integrity per language pack
+        for (const code of splitLangCodes(lang)) {
+            if (LANG_MANIFEST[code]) {
+                console.log(`OCR: Verifying integrity for ${code}...`);
+                try {
+                    const res = await fetch(`${tessPath}${code}.traineddata`);
+                    if (!res.ok) throw new Error(`Failed to fetch language pack: ${res.statusText}`);
+                    const buffer = await res.arrayBuffer();
+                    const hash = await sha256Hex(new Uint8Array(buffer));
 
-                if (hash !== LANG_MANIFEST[code]) {
-                    console.error(`OCR Integrity Mismatch! Expected ${LANG_MANIFEST[code]}, got ${hash}`);
-                    throw new Error("OCR Data corrupted or modified. Initialization blocked for security.");
+                    if (hash !== LANG_MANIFEST[code]) {
+                        console.error(`OCR Integrity Mismatch! Expected ${LANG_MANIFEST[code]}, got ${hash}`);
+                        throw new Error("OCR Data corrupted or modified. Initialization blocked for security.");
+                    }
+                    console.log(`OCR: ${code} integrity verified.`);
+                } catch (e) {
+                    console.error("OCR Integrity Check Failed", e);
+                    throw e;
                 }
-                console.log(`OCR: ${code} integrity verified.`);
-            } catch (e) {
-                console.error("OCR Integrity Check Failed", e);
-                throw e;
+            } else {
+                console.warn(`OCR: No integrity hash for ${code}. Proceeding without verification.`);
             }
-        } else {
-            console.warn(`OCR: No integrity hash for ${code}. Proceeding without verification.`);
+        }
+
+        console.log(`OCR: Initializing Tesseract (${lang})...`);
+
+        const w = await createWorker(lang, 1, {
+            workerPath: `${tessPath}worker.min.js`,
+            corePath: `${tessPath}tesseract-core.wasm.js`,
+            langPath: tessPath,
+            gzip: false,
+            logger: m => {
+                if (m.status === 'loading tesseract core') console.log('OCR: Loading Core...');
+                if (m.status === 'loading language traineddata') console.log('OCR: Loading Language...');
+            }
+        });
+
+        await w.setParameters({
+            tessedit_pageseg_mode: PSM.AUTO,
+            tessedit_create_tsv: '1',
+            user_defined_dpi: '300',
+        });
+
+        currentWorker = w;
+        currentLang = lang;
+        return w;
+    })();
+
+    try {
+        return await workerInitPromise;
+    } finally {
+        if (workerInitLang === lang) {
+            workerInitPromise = null;
+            workerInitLang = null;
         }
     }
-
-    console.log(`OCR: Initializing Tesseract (${lang})...`);
-
-    const w = await createWorker(lang, 1, {
-        workerPath: `${tessPath}worker.min.js`,
-        corePath: `${tessPath}tesseract-core.wasm.js`,
-        langPath: tessPath,
-        gzip: false,
-        logger: m => {
-            if (m.status === 'loading tesseract core') console.log('OCR: Loading Core...');
-            if (m.status === 'loading language traineddata') console.log('OCR: Loading Language...');
-        }
-    });
-
-    await w.setParameters({
-        tessedit_pageseg_mode: PSM.AUTO,
-        tessedit_create_tsv: '1',
-        user_defined_dpi: '300',
-    });
-
-    currentWorker = w;
-    currentLang = lang;
-    return w;
 }
 
 export async function recognizeText(
@@ -146,6 +175,8 @@ export async function recognizeText(
 }
 
 export function terminateOcr() {
+    workerInitPromise = null;
+    workerInitLang = null;
     if (currentWorker) {
         void currentWorker.terminate();
         currentWorker = null;
