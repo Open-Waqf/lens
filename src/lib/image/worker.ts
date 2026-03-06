@@ -130,13 +130,10 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
             const tW = Math.max(1, Math.round(finalW * tScale));
             const tH = Math.max(1, Math.round(finalH * tScale));
 
-            const tCanvas = new OffscreenCanvas(tW, tH);
-            const tctx = tCanvas.getContext('2d')!;
             const fullCanvas = new OffscreenCanvas(finalW, finalH);
             const fctx = fullCanvas.getContext('2d')!;
             fctx.putImageData(new ImageData(finalRgba as any, finalW, finalH), 0, 0);
-
-            tctx.drawImage(fullCanvas, 0, 0, finalW, finalH, 0, 0, tW, tH);
+            const tCanvas = downscaleProgressive(fullCanvas, tW, tH);
 
             // Encode thumbs as WebP for significantly smaller size at same visual quality.
             const tBlob = await tCanvas.convertToBlob({type: 'image/webp', quality: req.thumbJpegQuality ?? 0.82});
@@ -182,6 +179,35 @@ async function encodeJpeg(rgba: Uint8ClampedArray, w: number, h: number, q: numb
     ctx.putImageData(new ImageData(rgba as any, w, h), 0, 0);
     const blob = await c.convertToBlob({type: 'image/jpeg', quality: q});
     return new Uint8Array(await blob.arrayBuffer());
+}
+
+function downscaleProgressive(source: OffscreenCanvas, targetW: number, targetH: number): OffscreenCanvas {
+    let curr = source;
+    let currW = source.width;
+    let currH = source.height;
+
+    while (currW / 2 >= targetW && currH / 2 >= targetH) {
+        const nextW = Math.max(targetW, Math.floor(currW / 2));
+        const nextH = Math.max(targetH, Math.floor(currH / 2));
+        const next = new OffscreenCanvas(nextW, nextH);
+        const nctx = next.getContext('2d')!;
+        nctx.imageSmoothingEnabled = true;
+        nctx.imageSmoothingQuality = 'high';
+        nctx.drawImage(curr, 0, 0, currW, currH, 0, 0, nextW, nextH);
+        curr = next;
+        currW = nextW;
+        currH = nextH;
+    }
+
+    if (currW !== targetW || currH !== targetH) {
+        const finalCanvas = new OffscreenCanvas(targetW, targetH);
+        const fctx = finalCanvas.getContext('2d')!;
+        fctx.imageSmoothingEnabled = true;
+        fctx.imageSmoothingQuality = 'high';
+        fctx.drawImage(curr, 0, 0, currW, currH, 0, 0, targetW, targetH);
+        return finalCanvas;
+    }
+    return curr;
 }
 
 /**
