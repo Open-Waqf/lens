@@ -15,6 +15,7 @@ import {haptics} from "../services/haptics";
 import {ImpactStyle} from "@capacitor/haptics";
 import {showToast} from "../components/toast-notification";
 import {t} from '../lib/i18n';
+import {pruneSeenDocs} from '../services/seen-docs';
 
 type ViewMode = 'list' | 'gallery';
 
@@ -106,6 +107,7 @@ export class LibraryPage extends LitElement {
         try {
 
             this.allDocsSource = await db.docs.orderBy('updatedAt').reverse().toArray();
+            pruneSeenDocs(this.allDocsSource.map(d => d.id));
             this.allTags = await this.repo.getAllTags();
             this.applyFilters();
         } finally {
