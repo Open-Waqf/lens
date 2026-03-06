@@ -268,14 +268,14 @@ function checkSideZ(p1: Point, p2: Point, w: number, h: number, mags: Uint16Arra
         const t = i / steps;
         const x = Math.round(p1.x + dx * t);
         const y = Math.round(p1.y + dy * t);
+        const sx = Math.max(0, Math.min(w - 1, x));
+        const sy = Math.max(0, Math.min(h - 1, y));
         let hit = false;
-        if (x >= 0 && x < w && y >= 0 && y < h) {
-            const mag = mags[y * w + x];
-            if (mag > minMag) {
-                totalZ += (mag - mean) / safeStd;
-                validSamples++;
-                hit = true;
-            }
+        const mag = mags[sy * w + sx];
+        if (mag > minMag) {
+            totalZ += (mag - mean) / safeStd;
+            validSamples++;
+            hit = true;
         }
         if (hit) currentGap = 0;
         else {
@@ -287,3 +287,7 @@ function checkSideZ(p1: Point, p2: Point, w: number, h: number, mags: Uint16Arra
     if (validSamples === 0) return {score: 0, maxGap: 1.0};
     return {score: (totalZ / validSamples) * (validSamples / (steps + 1)), maxGap: maxGapSequence / (steps + 1)};
 }
+
+export const __detectInternals = {
+    checkSideZ,
+};
