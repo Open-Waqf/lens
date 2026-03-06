@@ -100,9 +100,10 @@ function applyHomography(H: Mat3, x: number, y: number): Point {
 }
 
 function sampleBilinear(src: Uint8ClampedArray, w: number, h: number, x: number, y: number): [number, number, number, number] {
-    if (x < 0 || y < 0 || x >= w - 1 || y >= h - 1) return [0, 0, 0, 255];
-    const x0 = Math.floor(x), y0 = Math.floor(y);
-    const dx = x - x0, dy = y - y0;
+    const cx = Math.max(0, Math.min(w - 1, x));
+    const cy = Math.max(0, Math.min(h - 1, y));
+    const x0 = Math.floor(cx), y0 = Math.floor(cy);
+    const dx = cx - x0, dy = cy - y0;
     const idx = (yy: number, xx: number) => (yy * w + xx) * 4;
 
     const i00 = idx(y0, x0);
@@ -117,3 +118,7 @@ function sampleBilinear(src: Uint8ClampedArray, w: number, h: number, x: number,
 
     return [r | 0, g | 0, b | 0, 255];
 }
+
+export const __warpInternals = {
+    sampleBilinear,
+};
