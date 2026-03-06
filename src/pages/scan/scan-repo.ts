@@ -37,7 +37,7 @@ export class ScanRepo {
             createdAt: now,
             updatedAt: now,
             pageIds: [],
-        } as any;
+        };
 
         await db.docs.add(doc);
         return doc;
@@ -123,7 +123,7 @@ export class ScanRepo {
                     rotation: 0,
                     createdAt: Date.now(),
                     ocrStatus: 'pending', // Mark as needing OCR
-                } as any;
+                };
 
                 await db.pages.add(page);
 
