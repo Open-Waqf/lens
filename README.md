@@ -162,5 +162,5 @@ node scripts/slbk-verify.mjs ./lens-backup-YYYY-MM-DD.slbk
 
 <div align="center">
 <p><em>Built with ❤️ for the Ummah and Humanity.</em></p>
-<p><small>Released under Polyform Noncommercial License 1.0.0</small></p>
+<p><small>Released under <a href="https://www.elastic.co/licensing/elastic-license">Elastic License 2.0 (ELv2)</a> — free for personal, professional, and institutional use. Hosting as a competing managed service is not permitted.</small></p>
 </div>

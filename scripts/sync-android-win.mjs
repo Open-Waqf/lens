@@ -99,6 +99,21 @@ function copyDir(srcAbs, dstAbs) {
   run('cp', ['-a', `${srcAbs}/.`, dstAbs], {stdio: ['ignore', 'inherit', 'inherit']});
 }
 
+function collectPluginNodeModulePathsFromCapacitorSettings() {
+  const gradlePath = path.join(cwd, 'android', 'capacitor.settings.gradle');
+  if (!fs.existsSync(gradlePath)) return [];
+
+  const content = fs.readFileSync(gradlePath, 'utf8');
+  const out = [];
+  const re = /projectDir\s*=\s*new File\('\.\.\/(node_modules\/[^']+)'\)/g;
+  for (const m of content.matchAll(re)) {
+    const rel = m[1]?.replace(/\\/g, '/');
+    if (!rel) continue;
+    if (!out.includes(rel)) out.push(rel);
+  }
+  return out;
+}
+
 function main() {
   const projectName = 'lens';
   const stageName = process.env.OWQ_WIN_STAGE_NAME || `owq-${projectName}-android`;
@@ -108,18 +123,8 @@ function main() {
   const stageRootWsl = path.join(wslTemp, stageName);
   const stageRootWin = toWinPath(stageRootWsl);
 
-  const sources = [
-    'android',
-    'node_modules/@capacitor/android',
-    'node_modules/@capacitor/core',
-    'node_modules/@capacitor/app',
-    'node_modules/@capacitor/filesystem',
-    'node_modules/@capacitor/local-notifications',
-    'node_modules/@capacitor/share',
-    'node_modules/@capacitor/status-bar',
-    'node_modules/@capgo/capacitor-native-biometric',
-    'node_modules/@aparajita/capacitor-secure-storage',
-  ];
+  const pluginSources = collectPluginNodeModulePathsFromCapacitorSettings();
+  const sources = ['android', 'node_modules/@capacitor/core', ...pluginSources];
 
   for (const rel of sources) {
     const src = path.join(cwd, rel);
