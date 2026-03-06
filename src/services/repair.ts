@@ -42,6 +42,17 @@ async function generateThumbnail(originalBytes: Uint8Array): Promise<Uint8Array>
     const width = Math.round(bmp.width * scale);
     const height = Math.round(bmp.height * scale);
 
+    // Worker-safe path: OffscreenCanvas does not require `document`.
+    if (typeof OffscreenCanvas !== 'undefined') {
+        const canvas = new OffscreenCanvas(width, height);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Canvas context failed');
+        ctx.drawImage(bmp, 0, 0, width, height);
+        bmp.close();
+        const outBlob = await canvas.convertToBlob({type: 'image/jpeg', quality: 0.8});
+        return new Uint8Array(await outBlob.arrayBuffer());
+    }
+
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
@@ -52,17 +63,21 @@ async function generateThumbnail(originalBytes: Uint8Array): Promise<Uint8Array>
     bmp.close();
 
     return new Promise<Uint8Array>((resolve, reject) => {
-        canvas.toBlob((blob) => {
-            if (blob) {
+        canvas.toBlob((outBlob) => {
+            if (outBlob) {
                 const reader = new FileReader();
                 reader.onloadend = () => {
                     if (reader.result) resolve(new Uint8Array(reader.result as ArrayBuffer));
                     else reject(new Error('Blob read failed'));
                 };
-                reader.readAsArrayBuffer(blob);
+                reader.readAsArrayBuffer(outBlob);
             } else {
                 reject(new Error('Thumbnail generation failed'));
             }
         }, 'image/jpeg', 0.8);
     });
 }
+
+export const __repairInternals = {
+    generateThumbnail,
+};
