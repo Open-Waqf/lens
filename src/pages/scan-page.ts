@@ -1,7 +1,7 @@
 import {html, LitElement} from 'lit';
 import {customElement, query, state} from 'lit/decorators.js';
 import {keyed} from 'lit/directives/keyed.js';
-import {Capacitor} from '@capacitor/core';
+import {Capacitor, type PluginListenerHandle} from '@capacitor/core';
 import {FilePicker} from '@capawesome/capacitor-file-picker';
 import {DocumentScanner} from '@capacitor-mlkit/document-scanner';
 import {Haptics, ImpactStyle} from '@capacitor/haptics';
@@ -110,6 +110,8 @@ export class ScanPage extends LitElement {
     private detectLoopToken = 0;
     private lastAnnouncedStage: ScanStage | null = null;
     private autoCaptureSettleTimer: number | null = null;
+    private appBackListener: PluginListenerHandle | null = null;
+    private appStateListener: PluginListenerHandle | null = null;
 
     async connectedCallback(): Promise<void> {
         super.connectedCallback();
@@ -135,7 +137,7 @@ export class ScanPage extends LitElement {
         ocrQueue.addEventListener('change', this.onOcrQueueChange);
 
         if (Capacitor.isNativePlatform()) {
-            App.addListener('backButton', () => {
+            void App.addListener('backButton', () => {
                 if (this.session.stage === 'edit') {
                     void this.onEditorCancel();
                 } else if (this.session.stage === 'camera') {
@@ -143,10 +145,10 @@ export class ScanPage extends LitElement {
                 } else if (location.hash !== '#/library') {
                     location.hash = '#/library';
                 }
-            });
+            }).then(h => this.appBackListener = h);
 
             // PAUSE CV ON BACKGROUND
-            App.addListener('appStateChange', (state) => {
+            void App.addListener('appStateChange', (state) => {
                 if (!state.isActive) {
                     console.log('[ScanPage] App backgrounded, pausing detector');
                     this.stopDetector();
@@ -154,7 +156,7 @@ export class ScanPage extends LitElement {
                     console.log('[ScanPage] App resumed, restarting detector');
                     this.startDetector();
                 }
-            });
+            }).then(h => this.appStateListener = h);
         }
     }
 
@@ -215,6 +217,10 @@ export class ScanPage extends LitElement {
         this.revokeStrip();
         this.clearImportReview();
         ocrQueue.removeEventListener('change', this.onOcrQueueChange);
+        void this.appBackListener?.remove();
+        void this.appStateListener?.remove();
+        this.appBackListener = null;
+        this.appStateListener = null;
         this.dispatchStageChange('idle');
         super.disconnectedCallback();
     }
@@ -519,7 +525,7 @@ export class ScanPage extends LitElement {
             const file = format === 'pdf'
                 ? new File([bytesToBlob(await this.buildSinglePagePdf(master.bytes), 'application/pdf')], filename, {type: 'application/pdf'})
                 : new File([bytesToBlob(master.bytes, 'image/jpeg')], filename, {type: 'image/jpeg'});
-            AuthService.ignoreNextResumeForExternalAction('share-scan-quick');
+            AuthService.ignoreNextResumeForExternalAction('share-scan-quick', 120_000);
             await shareFile(file, filename);
         } catch (e) {
             this.error = toUserErrorMessage(e);
@@ -603,7 +609,14 @@ export class ScanPage extends LitElement {
                 if (explicit) {
                     this.error = toUserErrorMessage(e);
                     this.showPermissionError = true;
+                    if (this.caps.isCapacitor && this.scanMode === 'manual') {
+                        this.error = t('scan.manual_camera_failed_fallback');
+                    }
                     this.session.setStage('idle');
+                    if (this.caps.isCapacitor && this.scanMode === 'manual') {
+                        this.setScanMode('quick');
+                        void this.invokeNativeScanner();
+                    }
                 } else {
                     console.warn("Camera auto-start failed (likely permission), fallback to idle.");
                     this.session.setStage('idle');
@@ -615,7 +628,7 @@ export class ScanPage extends LitElement {
     private async invokeNativeScanner(): Promise<void> {
         this.busy = true;
         this.error = null;
-        AuthService.ignoreNextResumeForExternalAction('native-doc-scanner');
+        AuthService.ignoreNextResumeForExternalAction('native-doc-scanner', 120_000);
         try {
             const limit = this.replacePageId ? 1 : 24;
             const {scannedImages} = await DocumentScanner.scanDocument({pageLimit: limit});
@@ -719,7 +732,7 @@ export class ScanPage extends LitElement {
                 this.busy = true;
                 this.requestUpdate();
 
-                AuthService.ignoreNextResumeForExternalAction('scan-file-picker-native');
+                AuthService.ignoreNextResumeForExternalAction('scan-file-picker-native', 120_000);
                 const result = await FilePicker.pickFiles({
                     limit: opts.multiple ? 0 : 1,
                     types: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
@@ -772,7 +785,7 @@ export class ScanPage extends LitElement {
 
         input.multiple = opts.multiple;
         input.value = '';
-        AuthService.ignoreNextResumeForExternalAction('scan-file-picker-web');
+        AuthService.ignoreNextResumeForExternalAction('scan-file-picker-web', 120_000);
 
         return new Promise((resolve) => {
             const handler = async () => {
@@ -1158,47 +1171,6 @@ export class ScanPage extends LitElement {
         `;
     }
 
-    private renderPermissionUI() {
-        return html`
-            <div class="flex flex-col items-center justify-center py-10 px-6 text-center space-y-8 min-h-full">
-                <div class="w-20 h-20 bg-red-900/20 text-red-500 rounded-full flex items-center justify-center shadow-inner">
-                    <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                    </svg>
-                </div>
-
-                <div class="space-y-2">
-                    <h2 class="text-2xl font-bold text-slate-100">${t('scan.permission_title')}</h2>
-                    <p class="text-slate-400 text-sm leading-relaxed">
-                        ${t('scan.permission_body')}
-                    </p>
-                </div>
-
-                <div class="flex flex-col gap-3 w-full max-w-xs">
-                    <button class="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold transition-all"
-                            @click=${() => this.beginCameraFromGesture(true)}>
-                        ${t('scan.try_again')}
-                    </button>
-
-                    <button class="w-full py-3 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded-xl font-bold transition-all"
-                            ?disabled=${this.busy}
-                            @click=${() => this.pickFiles({multiple: !this.replacePageId})}>
-                        ${t('scan.import_files')}
-                    </button>
-
-                    <button class="w-full py-3 text-slate-500 hover:text-slate-300 font-medium transition-all"
-                            @click=${() => {
-                                this.showPermissionError = false;
-                                this.session.setStage('idle');
-                            }}>
-                        ${t('scan.go_back')}
-                    </button>
-                </div>
-            </div>
-        `;
-    }
-
     render() {
         return html`
             ${this.renderHiddenInput()}
@@ -1208,7 +1180,6 @@ export class ScanPage extends LitElement {
 
     renderContent() {
         if (this.showWelcome) return this.renderWelcome();
-        if (this.showPermissionError) return this.renderPermissionUI();
 
         const stage = this.session.stage;
         return html`
@@ -1264,6 +1235,23 @@ export class ScanPage extends LitElement {
                                             aria-pressed=${this.scanMode === 'manual'}>
                                         ${t('scan.mode_manual')}
                                     </button>
+                                </div>
+                            ` : null}
+                            ${this.showPermissionError ? html`
+                                <div class="p-3 rounded-xl border border-amber-900/40 bg-amber-950/20 text-amber-200 space-y-2">
+                                    <div class="text-sm font-semibold">${t('scan.permission_title')}</div>
+                                    <div class="text-xs text-amber-100/90">${t('scan.permission_body')}</div>
+                                    <div class="flex gap-2 pt-1">
+                                        <button class="flex-1 py-2 rounded-lg bg-amber-600/90 hover:bg-amber-500 text-slate-950 text-sm font-semibold min-h-[44px]"
+                                                @click=${() => this.beginCameraFromGesture(true)}>
+                                            ${t('scan.try_again')}
+                                        </button>
+                                        <button class="flex-1 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 text-sm font-semibold min-h-[44px]"
+                                                ?disabled=${this.busy}
+                                                @click=${() => this.pickFiles({multiple: !this.replacePageId})}>
+                                            ${t('scan.import_files')}
+                                        </button>
+                                    </div>
                                 </div>
                             ` : null}
                             <button class="w-full py-5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 rounded-[1.5rem] font-bold text-xl shadow-lg shadow-emerald-900/20 transition-all active:scale-95"

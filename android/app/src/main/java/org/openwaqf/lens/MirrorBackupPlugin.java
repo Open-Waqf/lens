@@ -7,8 +7,8 @@ import android.net.Uri;
 import android.util.Base64;
 
 import androidx.documentfile.provider.DocumentFile;
+import androidx.activity.result.ActivityResult;
 
-import com.getcapacitor.ActivityResult;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -72,7 +72,11 @@ public class MirrorBackupPlugin extends Plugin {
         }
 
         Uri uri = result.getData().getData();
-        int flags = result.getData().getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        int grantedFlags = result.getData().getFlags();
+        int flags = Intent.FLAG_GRANT_READ_URI_PERMISSION;
+        if ((grantedFlags & Intent.FLAG_GRANT_WRITE_URI_PERMISSION) != 0) {
+            flags |= Intent.FLAG_GRANT_WRITE_URI_PERMISSION;
+        }
         try {
             getContext().getContentResolver().takePersistableUriPermission(uri, flags);
         } catch (Exception ignored) {

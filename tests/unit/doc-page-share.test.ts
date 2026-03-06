@@ -30,7 +30,7 @@ describe('DocPage editor share', () => {
             }
         }));
 
-        expect(mockIgnoreNextResume).toHaveBeenCalledWith('share-doc-editor');
+        expect(mockIgnoreNextResume).toHaveBeenCalledWith('share-doc-editor', 120000);
         expect(mockShareFile).toHaveBeenCalledTimes(1);
         const filename = mockShareFile.mock.calls[0]?.[1] as string;
         expect(filename.endsWith('.jpg')).toBe(true);

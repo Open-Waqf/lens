@@ -46,6 +46,7 @@ function parseHash(): Route {
 
 type Fatal = { message: string; detail?: string };
 const STORAGE_BANNER_DISMISS_KEY = 'sahifah.storageBanner.dismissed';
+const PWA_UPDATE_BANNER_DISMISS_KEY = 'sahifah.pwaUpdateBanner.dismissed';
 
 @customElement('app-root')
 export class AppRoot extends LitElement {
@@ -64,6 +65,9 @@ export class AppRoot extends LitElement {
     @state() private hasStorageCleanupPending = false;
     @state() private hidePersistBanner = false;
     @state() private scanStage: ScanStage = 'idle';
+    @state() private hasPwaUpdate = false;
+    @state() private hidePwaUpdateBanner = false;
+    private pwaApplyUpdate: (() => void) | null = null;
 
     connectedCallback(): void {
         super.connectedCallback();
@@ -99,6 +103,8 @@ export class AppRoot extends LitElement {
         this.hasStorageRisk = hasIndexLossRiskFlag();
         this.hasStorageCleanupPending = hasStorageCleanupPending();
         this.hidePersistBanner = localStorage.getItem(STORAGE_BANNER_DISMISS_KEY) === '1';
+        this.hidePwaUpdateBanner = localStorage.getItem(PWA_UPDATE_BANNER_DISMISS_KEY) === '1';
+        window.addEventListener('sahifah:pwa-update-available', this._onPwaUpdateAvailable as EventListener);
 
         void (async () => {
             try {
@@ -200,6 +206,7 @@ export class AppRoot extends LitElement {
         window.removeEventListener('error', this._onGlobalError);
         window.removeEventListener('unhandledrejection', this._onUnhandled);
         document.removeEventListener('visibilitychange', this._onVisibilityChange);
+        window.removeEventListener('sahifah:pwa-update-available', this._onPwaUpdateAvailable as EventListener);
         App.removeAllListeners();
         super.disconnectedCallback();
     }
@@ -240,6 +247,12 @@ export class AppRoot extends LitElement {
         if (document.visibilityState === 'hidden') {
             AuthService.lock();
         }
+    };
+
+    private _onPwaUpdateAvailable = (ev: CustomEvent<{ applyUpdate?: () => void }>) => {
+        this.hasPwaUpdate = true;
+        this.hidePwaUpdateBanner = false;
+        this.pwaApplyUpdate = typeof ev.detail?.applyUpdate === 'function' ? ev.detail.applyUpdate : null;
     };
 
     private async resetAndReload(): Promise<void> {
@@ -344,6 +357,40 @@ export class AppRoot extends LitElement {
         `;
     }
 
+    private renderPwaUpdateBanner() {
+        if (Capacitor.isNativePlatform()) return null;
+        if (!this.hasPwaUpdate || this.hidePwaUpdateBanner) return null;
+        if (this.route.name === 'scan' && (this.scanStage === 'camera' || this.scanStage === 'edit')) return null;
+        return html`
+            <div class="mb-4 p-3 rounded-xl border border-emerald-900 bg-emerald-950/30 text-emerald-100 flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                    <div class="text-sm font-medium">${t('app.update_title')}</div>
+                    <div class="text-xs text-emerald-200/80">${t('app.update_body')}</div>
+                </div>
+                <div class="shrink-0 flex items-center gap-2">
+                    <button class="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-sm font-semibold"
+                            @click=${() => {
+                                this.hasPwaUpdate = false;
+                                this.hidePwaUpdateBanner = false;
+                                const apply = this.pwaApplyUpdate;
+                                this.pwaApplyUpdate = null;
+                                if (apply) apply();
+                                else location.reload();
+                            }}>
+                        ${t('app.update_now')}
+                    </button>
+                    <button class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
+                            @click=${() => {
+                                this.hidePwaUpdateBanner = true;
+                                localStorage.setItem(PWA_UPDATE_BANNER_DISMISS_KEY, '1');
+                            }}>
+                        ${t('app.update_later')}
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+
     render() {
         if (this._isLoading) {
             return html`
@@ -379,6 +426,7 @@ export class AppRoot extends LitElement {
                     ${this.renderStorageRiskBanner()}
                     ${this.renderStorageCleanupPendingBanner()}
                     ${this.renderPersistenceBanner()}
+                    ${this.renderPwaUpdateBanner()}
                     ${r.name === 'library' ? html`
                         <library-page></library-page>` : null}
                     ${r.name === 'scan' ? html`

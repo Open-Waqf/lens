@@ -100,7 +100,7 @@ export class DocPage extends LitElement {
             const pageNum = this.pages.indexOf(page) + 1;
             const name = `${safeName(this.doc.title)} - Page ${pageNum}.jpg`;
             const file = new File([blob], name, {type: 'image/jpeg'});
-            AuthService.ignoreNextResumeForExternalAction('share-single');
+            AuthService.ignoreNextResumeForExternalAction('share-single', 120_000);
             await shareFile(file, name); // Uses the native-safe service
         } catch (e) {
             this.error = (e as Error).message;
@@ -126,7 +126,7 @@ export class DocPage extends LitElement {
                 files.push(new File([blob], name, {type: 'image/jpeg'}));
             }
 
-            AuthService.ignoreNextResumeForExternalAction('share-multi');
+            AuthService.ignoreNextResumeForExternalAction('share-multi', 120_000);
             // Share multiple files via service
             await shareFiles(files, this.doc.title);
         } catch (e) {
@@ -372,7 +372,7 @@ export class DocPage extends LitElement {
             const file = format === 'pdf'
                 ? new File([bytesToBlob(await this.buildSinglePagePdf(master.bytes), 'application/pdf')], filename, {type: 'application/pdf'})
                 : new File([bytesToBlob(master.bytes, 'image/jpeg')], filename, {type: 'image/jpeg'});
-            AuthService.ignoreNextResumeForExternalAction('share-doc-editor');
+            AuthService.ignoreNextResumeForExternalAction('share-doc-editor', 120_000);
             await shareFile(file, filename);
         } catch (e) {
             this.error = (e as Error).message;
@@ -478,7 +478,7 @@ export class DocPage extends LitElement {
             const filename = `${safeName(this.doc.title)}.pdf`;
             const blob = bytesToBlob(pdfBytes, 'application/pdf');
             const pdfFile = new File([blob], filename, {type: 'application/pdf'});
-            AuthService.ignoreNextResumeForExternalAction('share-pdf');
+            AuthService.ignoreNextResumeForExternalAction('share-pdf', 120_000);
             // UPDATED: Use service
             await shareFile(pdfFile, filename);
 
@@ -517,7 +517,7 @@ export class DocPage extends LitElement {
             const zipBlob = bytesToBlob(zip, 'application/zip');
             const zipFilename = `${safeName(this.doc.title)}-images.zip`;
             const zipFile = new File([zipBlob], zipFilename, {type: 'application/zip'});
-            AuthService.ignoreNextResumeForExternalAction('share-zip');
+            AuthService.ignoreNextResumeForExternalAction('share-zip', 120_000);
             await shareFile(zipFile, zipFilename);
         } catch (e) {
             this.error = (e as Error).message;

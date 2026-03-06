@@ -44,7 +44,7 @@ export class AuthService {
 
         // Skip exactly one lock transition for known user-initiated external flows
         // (share sheet, file picker, export intents). Token auto-expires to avoid leakage.
-        if (this._consumeResumeBypassToken()) {
+        if (this._hasActiveResumeBypassToken()) {
             return;
         }
 
@@ -178,11 +178,9 @@ export class AuthService {
         return Uint8Array.from(atob(base64), c => c.charCodeAt(0)).buffer;
     }
 
-    private static _consumeResumeBypassToken(): boolean {
+    private static _hasActiveResumeBypassToken(): boolean {
         const now = Date.now();
         this._resumeBypassTokens = this._resumeBypassTokens.filter(t => t.expiresAt > now);
-        if (this._resumeBypassTokens.length === 0) return false;
-        this._resumeBypassTokens.shift();
-        return true;
+        return this._resumeBypassTokens.length > 0;
     }
 }

@@ -2,11 +2,36 @@ import {expect, test} from '@playwright/test';
 
 async function seedDocWithOcr(page: import('@playwright/test').Page): Promise<void> {
     await page.evaluate(async () => {
-        const req = indexedDB.open('sahifah-lens');
-        const db = await new Promise<IDBDatabase>((resolve, reject) => {
-            req.onerror = () => reject(req.error ?? new Error('DB open failed'));
-            req.onsuccess = () => resolve(req.result);
-        });
+        async function openDb(version?: number): Promise<IDBDatabase> {
+            const req = version ? indexedDB.open('sahifah-lens', version) : indexedDB.open('sahifah-lens');
+            return await new Promise<IDBDatabase>((resolve, reject) => {
+                req.onerror = () => reject(req.error ?? new Error('DB open failed'));
+                req.onupgradeneeded = () => {
+                    const d = req.result;
+                    if (!d.objectStoreNames.contains('docs')) {
+                        const docs = d.createObjectStore('docs', {keyPath: 'id'});
+                        docs.createIndex('updatedAt', 'updatedAt', {unique: false});
+                        docs.createIndex('createdAt', 'createdAt', {unique: false});
+                        docs.createIndex('title', 'title', {unique: false});
+                        docs.createIndex('tags', 'tags', {unique: false, multiEntry: true});
+                        docs.createIndex('folder', 'folder', {unique: false});
+                    }
+                    if (!d.objectStoreNames.contains('pages')) {
+                        const pages = d.createObjectStore('pages', {keyPath: 'id'});
+                        pages.createIndex('docId', 'docId', {unique: false});
+                        pages.createIndex('createdAt', 'createdAt', {unique: false});
+                    }
+                };
+                req.onsuccess = () => resolve(req.result);
+            });
+        }
+
+        let db = await openDb();
+        if (!db.objectStoreNames.contains('docs') || !db.objectStoreNames.contains('pages')) {
+            const nextVersion = db.version + 1;
+            db.close();
+            db = await openDb(nextVersion);
+        }
 
         await new Promise<void>((resolve, reject) => {
             const tx = db.transaction(['docs', 'pages'], 'readwrite');

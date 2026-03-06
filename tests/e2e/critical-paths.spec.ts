@@ -98,19 +98,16 @@ test('Disaster Recovery Flow: Import -> Encrypt -> Wipe -> Restore', async ({pag
     const restoreChooserPromise = page.waitForEvent('filechooser');
     await page.locator('text=Restore Backup').click();
     const restoreChooser = await restoreChooserPromise;
-    await restoreChooser.setFiles(backupPath!);
-
     const buffer = fs.readFileSync(backupPath!);
-
-    // Set the files while forcing the .slbk extension
     await restoreChooser.setFiles({
         name: 'restore-test.slbk',
         mimeType: 'application/octet-stream',
         buffer: buffer
     });
 
-    await page.getByPlaceholder('Password').fill('secure123');
-    await page.getByRole('button', {name: 'Restore', exact: true}).click();
+    const restoreModal = page.locator('confirm-modal').last();
+    await restoreModal.getByPlaceholder(/Password/i).fill('secure123');
+    await restoreModal.getByRole('button', {name: 'Restore', exact: true}).click();
 
     // Handle Merge/Replace modal
     const confirmInput = page.getByPlaceholder('MERGE or REPLACE');

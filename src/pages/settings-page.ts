@@ -484,7 +484,7 @@ export class SettingsPage extends LitElement {
                 this.msg = t('settings.mirror_needs_setup_after_export');
             }
 
-            AuthService.ignoreNextResumeForExternalAction('export-backup-share');
+            AuthService.ignoreNextResumeForExternalAction('export-backup-share', 120_000);
             await shareFile(namedFile, finalName);
 
             const now = Date.now();
@@ -611,7 +611,7 @@ export class SettingsPage extends LitElement {
     private async pickRestoreFile() {
         if (this.caps.isCapacitor) {
             try {
-                AuthService.ignoreNextResumeForExternalAction('restore-file-picker-native');
+                AuthService.ignoreNextResumeForExternalAction('restore-file-picker-native', 120_000);
                 const result = await FilePicker.pickFiles({
                     limit: 1,
                     types: ['application/zip', 'application/octet-stream', '.slbk', '.zip'],
@@ -652,7 +652,7 @@ export class SettingsPage extends LitElement {
             return;
         }
         input.value = '';
-        AuthService.ignoreNextResumeForExternalAction('restore-file-picker-web');
+        AuthService.ignoreNextResumeForExternalAction('restore-file-picker-web', 120_000);
         input.click();
     }
 
@@ -830,7 +830,8 @@ export class SettingsPage extends LitElement {
     private renderAlerts() {
         return html`
             ${(this.msg || this.err) ? html`
-                <div class="fixed top-3 left-1/2 -translate-x-1/2 z-40 w-[min(92vw,44rem)] pointer-events-none">
+                <div class="fixed left-1/2 -translate-x-1/2 z-40 w-[min(92vw,44rem)] pointer-events-none"
+                     style="top: calc(env(safe-area-inset-top, 0px) + 0.75rem);">
                     ${this.msg ? html`
                         <div class="pointer-events-auto p-4 rounded-lg bg-slate-800 text-emerald-300 border border-emerald-900/50 flex items-start justify-between gap-3 shadow-lg">
                             <div class="font-medium">${this.msg}</div>
@@ -1100,12 +1101,12 @@ export class SettingsPage extends LitElement {
         return html`
             <div class="p-3 rounded-xl border border-slate-800 bg-slate-900/60 space-y-2">
                 <div class="flex items-center justify-between gap-3">
-                    <div class="text-left">
+                    <div class="text-left flex-1 min-w-0">
                         <div class="text-sm text-slate-200 font-medium">${t('settings.mirror_title')}</div>
                         <div class="text-xs text-slate-500">${t('settings.mirror_desc')}</div>
                         <div class="text-[11px] text-slate-500 mt-1">${t('settings.mirror_trigger_note')}</div>
                     </div>
-                    <button class="relative h-6 w-11 rounded-full transition-colors ${this.mirrorBackupEnabled ? 'bg-emerald-600' : 'bg-slate-700'}"
+                    <button class="relative h-6 w-11 rounded-full transition-colors shrink-0 ${this.mirrorBackupEnabled ? 'bg-emerald-600' : 'bg-slate-700'}"
                             aria-label=${t('settings.mirror_title')}
                             ?disabled=${this.busy}
                             @click=${() => this.toggleMirrorBackupEnabled()}>

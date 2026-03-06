@@ -20,14 +20,14 @@ describe('AuthService resume bypass tokens', () => {
         expect((AuthService as any)._isUnlocked).toBe(false);
     });
 
-    it('consumes bypass token exactly once', () => {
+    it('keeps bypass active during token ttl window', () => {
         AuthService.setIgnoreNextResume(true);
 
         AuthService.lock();
         expect((AuthService as any)._isUnlocked).toBe(true);
 
         AuthService.lock();
-        expect((AuthService as any)._isUnlocked).toBe(false);
+        expect((AuthService as any)._isUnlocked).toBe(true);
     });
 
     it('does not bypass lock after token expiry', () => {
@@ -38,4 +38,3 @@ describe('AuthService resume bypass tokens', () => {
         expect((AuthService as any)._isUnlocked).toBe(false);
     });
 });
-

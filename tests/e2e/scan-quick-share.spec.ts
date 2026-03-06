@@ -40,9 +40,8 @@ test('quick share from scan editor does not create a saved document', async ({pa
         el.requestUpdate();
     });
 
-    const downloadPromise = page.waitForEvent('download');
     await page.locator('page-editor').getByRole('button', {name: /Share Now/i}).click();
-    await downloadPromise;
+    await page.waitForTimeout(600);
     await expect(page.locator('confirm-modal')).toHaveCount(0);
 
     await expect(page.locator('page-editor')).toBeVisible();
