@@ -30,7 +30,11 @@ class OpfsTempBackupWriter implements TempBackupWriter {
     }
 
     async cleanup(): Promise<void> {
-        await opfsRemoveEntry(this.path);
+        try {
+            await opfsRemoveEntry(this.path);
+        } catch (e) {
+            console.warn('Temp restore cleanup failed (web OPFS):', e);
+        }
     }
 }
 

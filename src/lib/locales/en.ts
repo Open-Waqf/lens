@@ -29,6 +29,11 @@ export const en = {
     'scan.building_doc': 'Building document',
     'scan.retake_mode': 'Retake Mode',
     'scan.retake_body': 'Capture will replace the selected page',
+    'scan.pick_images': 'Photo Gallery',
+    'scan.pick_files': 'Files',
+    'scan.picker_title': 'Import from',
+    'scan.picker_error': 'Could not open picker: {{error}}',
+    'scan.picker_cancelled': 'Import cancelled',
 
     // Overlay / Guidance
     'scan.guide_align': 'Align document here',
@@ -280,6 +285,7 @@ export const en = {
     'settings.restore_backup': 'Restore Backup',
     'settings.restore_backup_desc': 'Merge or replace library',
     'settings.restore_select_valid_file': 'Please select a .slbk or .zip file.',
+    'settings.restore_picker_error': 'Could not open file picker: {{error}}',
     'settings.repair_thumbnails': 'Repair Thumbnails',
     'settings.repair_thumbnails_desc': 'Regenerate missing preview images',
     'settings.rebuild_index_cta': 'Rebuild Library Index',

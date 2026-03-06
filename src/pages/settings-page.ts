@@ -4,6 +4,7 @@ import {haptics} from '../services/haptics';
 
 import JSZip from 'jszip';
 import {db} from '../services/db';
+import {FilePicker} from '@capawesome/capacitor-file-picker';
 import {getPlatformCaps} from '../services/platform';
 import {tryPersistStorage} from '../services/persist';
 import {getFileStore} from '../services/filestore';
@@ -11,6 +12,7 @@ import {shareFile} from '../services/share';
 import {jsonFile, type ZipFileEntry, zipFilesToStream} from '../lib/zip';
 import {decryptStream, encryptStream} from '../lib/crypto/pbe';
 import {OCR_LANG_OPTIONS} from '../lib/ocr';
+import {base64ToBytes, bytesToBlob} from "../lib/bytes";
 import {resetAllStorage} from '../services/reset-storage';
 import {ConfirmModal} from '../components/confirm-modal';
 import pkg from '../../package.json'
@@ -36,6 +38,8 @@ import {
 import {getPersistenceStatus, type PersistenceStatus} from '../services/storage-persistence';
 
 type RestoreMode = 'merge' | 'replace';
+
+const magicLength = 4;
 
 @customElement('settings-page')
 export class SettingsPage extends LitElement {
@@ -602,7 +606,55 @@ export class SettingsPage extends LitElement {
         }
     }
 
-    private async importBackup(file: File): Promise<void> {
+    private async pickRestoreFile() {
+        if (this.caps.isCapacitor) {
+            try {
+                AuthService.ignoreNextResumeForExternalAction('restore-file-picker-native');
+                const result = await FilePicker.pickFiles({
+                    limit: 1,
+                    types: ['application/zip', 'application/octet-stream', '.slbk', '.zip'],
+                    readData: true
+                });
+
+                if (result.files.length > 0) {
+                    const f = result.files[0];
+                    let blob: Blob | null = null;
+                    if (f.blob instanceof Blob) {
+                        blob = f.blob;
+                    } else if (f.path) {
+                        const res = await fetch(f.path);
+                        blob = await res.blob();
+                    } else if (f.data) {
+                        const bytes = await base64ToBytes(f.data);
+                        blob = bytesToBlob(bytes, f.mimeType || 'application/octet-stream');
+                    }
+                    if (!blob) {
+                        this.err = t('settings.restore_select_valid_file');
+                        return;
+                    }
+                    await this.importBackup(blob);
+                }
+            } catch (e: any) {
+                if (e?.message?.toLowerCase().includes('cancel') || e?.code === 'USER_CANCELLED') {
+                    console.log('User cancelled restore picker');
+                } else {
+                    this.err = t('settings.restore_picker_error', {error: toUserErrorMessage(e)});
+                }
+            }
+            return;
+        }
+
+        const input = this.renderRoot.querySelector('#restore-input') as HTMLInputElement | null;
+        if (!input) {
+            this.err = t('settings.restore_picker_error', {error: t('scan.import_unavailable')});
+            return;
+        }
+        input.value = '';
+        AuthService.ignoreNextResumeForExternalAction('restore-file-picker-web');
+        input.click();
+    }
+
+    private async importBackup(file: Blob): Promise<void> {
         this.busy = true;
         this.msg = null;
         this.err = null;
@@ -636,7 +688,7 @@ export class SettingsPage extends LitElement {
                     await writer.write(chunk);
                 }
             } else {
-                const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+                const head = new Uint8Array(await file.slice(0, magicLength).arrayBuffer());
                 const magic = new TextDecoder().decode(head);
                 if (magic === 'SLBK') {
                     throw new Error(t('settings.restore_password_required'));
@@ -658,7 +710,7 @@ export class SettingsPage extends LitElement {
             this.requestUpdate();
 
             // Pass the disk-backed file to your existing zip handler
-            await this.restoreFromZip(decryptedFile);
+            await this.restoreFromZip(decryptedFile as File);
 
             this.msg = t('settings.restore_complete');
 
@@ -669,7 +721,11 @@ export class SettingsPage extends LitElement {
                 ? mapped.message
                 : t('settings.restore_failed', {error: mapped.message});
         } finally {
-            await writer.cleanup();
+            try {
+                await writer.cleanup();
+            } catch (cleanupError) {
+                console.warn('Restore temp cleanup failed:', cleanupError);
+            }
             this.busy = false;
         }
     }
@@ -924,7 +980,9 @@ export class SettingsPage extends LitElement {
                         </div>
                     </button>
 
-                    <label class="flex items-center justify-between p-4 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors cursor-pointer">
+                    <button class="flex items-center justify-between p-4 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors"
+                            ?disabled=${this.busy}
+                            @click=${() => this.pickRestoreFile()}>
                         <div class="flex items-center gap-3">
                             <div class="p-2 rounded-lg bg-blue-900/30 text-blue-400">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -937,23 +995,19 @@ export class SettingsPage extends LitElement {
                                 <div class="text-xs text-slate-500">${t('settings.restore_backup_desc')}</div>
                             </div>
                         </div>
-                        <input class="hidden" type="file"
-                               accept="*/*"
-                               ?disabled=${this.busy}
-                               @click=${() => AuthService.ignoreNextResumeForExternalAction('restore-file-picker')}
-                               @change=${(e: Event) => {
-                                   const input = e.target as HTMLInputElement;
-                                   const f = input.files?.[0];
-                                   if (f) {
-                                       if (f.name.endsWith('.slbk') || f.name.endsWith('.zip') || f.type.includes('zip') || f.type.includes('octet')) {
-                                           void this.importBackup(f);
-                                       } else {
-                                           this.err = t('settings.restore_select_valid_file');
-                                       }
-                                   }
-                                   input.value = '';
-                               }}/>
-                    </label>
+                        ${!this.caps.isCapacitor ? html`
+                            <input id="restore-input" class="hidden" type="file"
+                                   accept=".slbk,.zip,application/zip"
+                                   ?disabled=${this.busy}
+                                   @click=${(e: Event) => e.stopPropagation()}
+                                   @change=${(e: Event) => {
+                                       const input = e.target as HTMLInputElement;
+                                       const f = input.files?.[0];
+                                       if (f) void this.importBackup(f);
+                                       input.value = '';
+                                   }}/>
+                        ` : null}
+                    </button>
 
                     <button class="text-xs text-slate-400 hover:text-slate-200 text-left"
                             @click=${() => this.showAdvancedDataTools = !this.showAdvancedDataTools}>

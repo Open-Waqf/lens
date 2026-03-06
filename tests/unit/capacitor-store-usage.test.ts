@@ -1,6 +1,6 @@
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {CapacitorFileStore} from '../../src/services/filestore/capacitor-store';
-import {Directory, Filesystem} from '@capacitor/filesystem';
+import {Filesystem} from '@capacitor/filesystem';
 
 vi.mock('@capacitor/filesystem', () => ({
     Directory: {Data: 'DATA'},
@@ -18,20 +18,6 @@ describe('CapacitorFileStore Usage Accuracy', () => {
     });
 
     it('should recursively calculate size of all files in Directory.Data', async () => {
-        // Mocking the filesystem:
-        // root:
-        //  - pages/ (dir)
-        //  - docs/ (dir)
-        //  - exports/ (dir)
-        // pages/:
-        //  - p1.jpg (100)
-        //  - p2.jpg (200)
-        //  - thumbnails/ (dir)
-        // thumbnails/:
-        //  - t1.jpg (10)
-        // exports/:
-        //  - export1.pdf (500)
-
         vi.mocked(Filesystem.readdir).mockImplementation(async ({path}) => {
             if (path === '' || path === '/') {
                 return {
@@ -68,8 +54,6 @@ describe('CapacitorFileStore Usage Accuracy', () => {
         });
 
         const total = await store.getUsageEstimate();
-
-        // Expected total: 100 + 200 + 10 + 500 = 810
         expect(total).toBe(810);
     });
 });

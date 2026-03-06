@@ -2,6 +2,7 @@ import {html, LitElement} from 'lit';
 import {customElement, query, state} from 'lit/decorators.js';
 import {keyed} from 'lit/directives/keyed.js';
 import {Capacitor} from '@capacitor/core';
+import {FilePicker} from '@capawesome/capacitor-file-picker';
 import {DocumentScanner} from '@capacitor-mlkit/document-scanner';
 import {Haptics, ImpactStyle} from '@capacitor/haptics';
 
@@ -9,7 +10,7 @@ import type {DetectedQuad, Point, Quad} from '../lib/scan/quad';
 import {lerpQuad, quadArea} from '../lib/scan/quad';
 
 import {takePendingImport} from '../services/pending-import';
-import {bytesToBlob} from '../lib/bytes';
+import {base64ToBytes, bytesToBlob} from '../lib/bytes';
 import {processPhoto} from '../lib/image/pipeline';
 import {DetectGovernor} from '../lib/scan/detect-governor';
 import {getPlatformCaps} from '../services/platform';
@@ -674,36 +675,77 @@ export class ScanPage extends LitElement {
     private async pickFiles(opts: { multiple: boolean }): Promise<void> {
         this.error = null;
 
-        // Use the input rendered in the DOM for better reliability
-        const input = this.renderRoot.querySelector('#import-input') as HTMLInputElement;
+        if (this.caps.isCapacitor) {
+            try {
+                this.busy = true;
+                this.requestUpdate();
 
+                AuthService.ignoreNextResumeForExternalAction('scan-file-picker-native');
+                const result = await FilePicker.pickFiles({
+                    limit: opts.multiple ? 0 : 1,
+                    types: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
+                    readData: true
+                });
+
+                if (result.files.length === 0) return;
+
+                const files: File[] = [];
+                for (const f of result.files) {
+                    let blob: Blob | null = null;
+                    if (f.blob instanceof Blob) {
+                        blob = f.blob;
+                    } else if (f.path) {
+                        const res = await fetch(f.path);
+                        blob = await res.blob();
+                    } else if (f.data) {
+                        const bytes = await base64ToBytes(f.data);
+                        blob = bytesToBlob(bytes, f.mimeType || 'application/octet-stream');
+                    }
+                    if (!blob) continue;
+                    files.push(new File([blob], f.name, {type: f.mimeType || blob.type || 'application/octet-stream'}));
+                }
+
+                if (files.length === 0) {
+                    this.error = t('scan.import_unavailable');
+                    return;
+                }
+                if (files.length === 1) await this.openNewBlobInEditor(files[0]);
+                else await this.batchImport(files);
+            } catch (e: any) {
+                // Graceful cancel handling
+                if (e?.message?.toLowerCase().includes('cancel') || e?.code === 'USER_CANCELLED') {
+                    console.log('User cancelled picker');
+                } else {
+                    this.error = t('scan.picker_error', {error: toUserErrorMessage(e)});
+                }
+            } finally {
+                this.busy = false;
+            }
+            return;
+        }
+
+        // WEB FALLBACK
+        const input = this.renderRoot.querySelector('#import-input') as HTMLInputElement;
         if (!input) {
             this.error = t('scan.import_unavailable');
             return;
         }
 
         input.multiple = opts.multiple;
-        input.value = ''; // Reset value to allow selecting same file twice
+        input.value = '';
+        AuthService.ignoreNextResumeForExternalAction('scan-file-picker-web');
 
-        AuthService.ignoreNextResumeForExternalAction('scan-file-picker');
-        // We use a one-time promise wrapper for the change event
         return new Promise((resolve) => {
             const handler = async () => {
-                input.removeEventListener('change', handler); // Cleanup
+                input.removeEventListener('change', handler);
                 const files = input.files ? Array.from(input.files) : [];
-
-                if (files.length === 0) {
-                    resolve();
-                    return;
+                if (files.length > 0) {
+                    this.showPermissionError = false;
+                    if (files.length === 1) await this.openNewBlobInEditor(files[0]);
+                    else await this.batchImport(files);
                 }
-
-                this.showPermissionError = false;
-
-                if (files.length === 1) await this.openNewBlobInEditor(files[0]);
-                else await this.batchImport(files);
                 resolve();
             };
-
             input.addEventListener('change', handler);
             input.click();
         });

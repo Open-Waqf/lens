@@ -18,6 +18,10 @@ function isNotFound(err: unknown): boolean {
     return err instanceof DOMException && err.name === 'NotFoundError';
 }
 
+function isNoModificationAllowed(err: unknown): boolean {
+    return err instanceof DOMException && err.name === 'NoModificationAllowedError';
+}
+
 let rootDirPromise: Promise<FileSystemDirectoryHandle> | null = null;
 
 async function getRootDir(): Promise<FileSystemDirectoryHandle> {
@@ -83,7 +87,7 @@ export class OPFSFileStore implements FileStore {
             const dir = await ensureDir(root, parts, false);
             await dir.removeEntry(fileName);
         } catch (e) {
-            if (isNotFound(e)) return;
+            if (isNotFound(e) || isNoModificationAllowed(e)) return;
             throw e;
         }
     }
@@ -153,7 +157,7 @@ export async function opfsRemoveEntry(path: string, opts?: { recursive?: boolean
         const dir = await ensureDir(root, parts, false);
         await dir.removeEntry(name, {recursive: !!opts?.recursive});
     } catch (e) {
-        if (isNotFound(e)) return;
+        if (isNotFound(e) || isNoModificationAllowed(e)) return;
         throw e;
     }
 }
