@@ -256,19 +256,28 @@ export class PageEditor extends LitElement {
         if (!canvas || !this.baseCanvas || !this.quad) return;
         const maxW = canvas.parentElement?.clientWidth ?? 320;
         const scale = Math.min(1, maxW / this.baseW);
-        const w = Math.max(1, Math.round(this.baseW * scale));
-        const h = Math.max(1, Math.round(this.baseH * scale));
-        canvas.width = w;
-        canvas.height = h;
+        const cssW = Math.max(1, Math.round(this.baseW * scale));
+        const cssH = Math.max(1, Math.round(this.baseH * scale));
+
+        // Use DPR for sharpness on mobile screens
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.round(cssW * dpr);
+        canvas.height = Math.round(cssH * dpr);
+        canvas.style.width = `${cssW}px`;
+        canvas.style.height = `${cssH}px`;
+
         const ctx = canvas.getContext('2d')!;
-        ctx.clearRect(0, 0, w, h);
-        ctx.drawImage(this.baseCanvas, 0, 0, w, h);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(this.baseCanvas, 0, 0, canvas.width, canvas.height);
+
         const q = this.quad;
-        const sx = w / this.baseW;
-        const sy = h / this.baseH;
+        const sx = canvas.width / this.baseW;
+        const sy = canvas.height / this.baseH;
 
         const isValid = isQuadConvex(q);
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 3 * dpr;
         ctx.strokeStyle = isValid ? 'rgba(16,185,129,0.95)' : 'rgba(239,68,68,0.95)';
         ctx.fillStyle = isValid ? 'rgba(16,185,129,0.95)' : 'rgba(239,68,68,0.95)';
 
@@ -279,10 +288,11 @@ export class PageEditor extends LitElement {
         ctx.lineTo(q[3].x * sx, q[3].y * sy);
         ctx.closePath();
         ctx.stroke();
+
         for (let i = 0; i < 4; i++) {
             const p = q[i];
             ctx.beginPath();
-            ctx.arc(p.x * sx, p.y * sy, 8, 0, Math.PI * 2);
+            ctx.arc(p.x * sx, p.y * sy, 8 * dpr, 0, Math.PI * 2);
             ctx.fill();
             ctx.stroke();
         }
@@ -536,7 +546,7 @@ export class PageEditor extends LitElement {
 
             // 5. Ask worker for a buffer that matches this resolution (or capped max)
             // We request a slightly larger buffer if possible to ensure downscaling is crisp
-            const maxWorkerDim = 1600;
+            const maxWorkerDim = 2048;
             const scale = Math.min(1, maxWorkerDim / Math.max(out.width, out.height));
 
             // We can ask worker to render at exact target scale if we pass outW/outH appropriately
@@ -561,6 +571,8 @@ export class PageEditor extends LitElement {
             if (!res.bitmap) throw new Error(t('errors.editor_bitmap_missing'));
 
             const ctx = out.getContext('2d')!;
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
             ctx.clearRect(0, 0, out.width, out.height);
             // Draw result to fill the calculated space
             ctx.drawImage(res.bitmap, 0, 0, out.width, out.height);
@@ -839,7 +851,8 @@ export class PageEditor extends LitElement {
                 <div class="flex flex-col gap-3">
                     <div class="text-xs font-bold text-slate-500 uppercase tracking-widest px-1">${t('editor.final_result')}</div>
                     <div class="relative w-full flex justify-center bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 group">
-                        <canvas data-preview class="block max-w-full object-contain"></canvas>
+                        <canvas data-preview class="block max-w-full object-contain"
+                                style="image-rendering: high-quality; backface-visibility: hidden;"></canvas>
                         ${!this.sourceBitmap ? html`
                             <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-500 min-h-[200px]">
                                 <div class="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
