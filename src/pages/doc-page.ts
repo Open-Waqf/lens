@@ -25,6 +25,7 @@ import {writeClipboardWithAutoClear} from '../services/clipboard';
 import {showToast} from '../components/toast-notification';
 import {PDFDocument} from 'pdf-lib';
 import {Icons} from '../components/icons';
+import {getTextDirection} from '../lib/text-direction';
 
 @customElement('doc-page')
 export class DocPage extends LitElement {
@@ -751,6 +752,7 @@ export class DocPage extends LitElement {
                                 <div class="text-[10px] text-slate-500">${t('doc.edit_ocr_help')}</div>
                                 <textarea
                                         class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors min-h-[120px] resize-y"
+                                        style="direction: ${getTextDirection(this.correctedTextDraft)}; text-align: start;"
                                         placeholder=${t('doc.ocr_text_placeholder')}
                                         .value=${this.correctedTextDraft}
                                         @input=${(e: Event) => this.correctedTextDraft = (e.target as HTMLTextAreaElement).value}
@@ -772,7 +774,8 @@ export class DocPage extends LitElement {
                                 ${this.doc?.correctedOcrText?.trim() ? html`
                                     <div class="space-y-1">
                                         <div class="text-xs text-slate-500 font-bold uppercase tracking-wider">${t('doc.edit_ocr_text')}</div>
-                                        <div class="text-sm text-slate-300 whitespace-pre-wrap select-text bg-black/50 p-3 rounded-lg border border-slate-800/50">
+                                        <div class="text-sm text-slate-300 whitespace-pre-wrap select-text bg-black/50 p-3 rounded-lg border border-slate-800/50"
+                                             style="direction: ${getTextDirection(this.doc.correctedOcrText)}; text-align: start;">
                                             ${this.doc.correctedOcrText}
                                         </div>
                                     </div>
@@ -783,7 +786,8 @@ export class DocPage extends LitElement {
                                         <div class="space-y-1">
                                             <div class="text-xs text-slate-500 font-bold uppercase tracking-wider">${t('doc.page_label', {count: i + 1})}
                                             </div>
-                                            <div class="text-sm text-slate-300 whitespace-pre-wrap select-text bg-black/50 p-3 rounded-lg border border-slate-800/50">
+                                            <div class="text-sm text-slate-300 whitespace-pre-wrap select-text bg-black/50 p-3 rounded-lg border border-slate-800/50"
+                                                 style="direction: ${getTextDirection(text)}; text-align: start;">
                                                 ${text}
                                             </div>
                                         </div>
