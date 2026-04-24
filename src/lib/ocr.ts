@@ -156,11 +156,12 @@ export async function recognizeText(
             }
         }
 
-        if (words.length === 0 && data.text?.length > 0) {
+        const fallbackText = data.text?.trim();
+        if (words.length === 0 && fallbackText && fallbackText.length > 0) {
             words.push({
-                text: data.text,
-                box: [0, 0, 1, 1],
-                confidence: 100
+                text: fallbackText,
+                box: [0.1, 0.1, 0.9, 0.9],
+                confidence: 30
             });
         }
 
