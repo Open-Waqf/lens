@@ -86,6 +86,8 @@ export class LibraryPage extends LitElement {
         for (const url of this.thumbnails.values()) URL.revokeObjectURL(url);
         ocrQueue.removeEventListener('change', this._onOcrChange);
         this.loadMoreObserver?.disconnect();
+        this.selectionMode = false;
+        this.selectedIds = new Set();
     }
 
     private setupIntersectionObserver() {
