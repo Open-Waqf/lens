@@ -89,6 +89,7 @@ export class SettingsPage extends LitElement {
     @state() private showAdvancedDataTools = false;
     @state() private persistence: PersistenceStatus | null = null;
     @state() private persistenceBusy = false;
+    @state() private persistenceDenied = false;
     private readonly onLocaleChanged = () => this.requestUpdate();
 
     async connectedCallback() {
@@ -252,10 +253,12 @@ export class SettingsPage extends LitElement {
             this.persistence = status;
             if (status.persisted && status.grantedThisCall) {
                 this.msg = t('settings.persistence_granted');
+                this.persistenceDenied = false;
             } else if (status.persisted) {
                 this.msg = t('settings.persistence_already');
+                this.persistenceDenied = false;
             } else {
-                this.msg = t('settings.persistence_denied');
+                this.persistenceDenied = true;
             }
         } catch (e) {
             this.err = t('settings.persistence_failed', {error: toUserErrorMessage(e)});
@@ -951,11 +954,15 @@ export class SettingsPage extends LitElement {
                                             : t('settings.persistence_inactive')}
                         </div>
                         ${persistence?.supported && !persistence.persisted ? html`
-                            <button class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 min-h-[44px]"
-                                    ?disabled=${this.persistenceBusy}
-                                    @click=${() => this.requestPersistentStorage()}>
-                                ${this.persistenceBusy ? t('settings.persistence_requesting') : t('settings.persistence_request')}
-                            </button>
+                            ${this.persistenceDenied ? html`
+                                <p class="text-[11px] text-amber-400/80">${t('settings.persistence_denied_hint')}</p>
+                            ` : html`
+                                <button class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 min-h-[44px]"
+                                        ?disabled=${this.persistenceBusy}
+                                        @click=${() => this.requestPersistentStorage()}>
+                                    ${this.persistenceBusy ? t('settings.persistence_requesting') : t('settings.persistence_request')}
+                                </button>
+                            `}
                         ` : null}
                     </div>
                 `}
