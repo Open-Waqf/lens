@@ -81,7 +81,7 @@ async function ensureWritePermission(handle: FileSystemDirectoryHandle): Promise
     }
 }
 
-function buildMirrorFilename(baseName: string): string {
+export function buildMirrorFilename(baseName: string): string {
     const now = new Date();
     const y = now.getFullYear();
     const m = String(now.getMonth() + 1).padStart(2, '0');
@@ -89,8 +89,9 @@ function buildMirrorFilename(baseName: string): string {
     const hh = String(now.getHours()).padStart(2, '0');
     const mm = String(now.getMinutes()).padStart(2, '0');
     const ss = String(now.getSeconds()).padStart(2, '0');
+    const rnd = Math.random().toString(36).slice(2, 5);
     const core = baseName.replace(/\.slbk$/i, '');
-    return `${core}-${y}${m}${d}-${hh}${mm}${ss}.slbk`;
+    return `${core}-${y}${m}${d}-${hh}${mm}${ss}-${rnd}.slbk`;
 }
 
 function persistMirrorFolderLabel(label: string): void {

@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {shouldMirrorAfterExport} from '../../src/services/mirror-backup';
+import {buildMirrorFilename, shouldMirrorAfterExport} from '../../src/services/mirror-backup';
 
 describe('mirror backup policy', () => {
     it('enables auto mirror only when enabled + after_export mode', () => {
@@ -21,5 +21,18 @@ describe('mirror backup policy', () => {
             mirrorBackupEnabled: true,
             mirrorBackupMode: 'manual'
         })).toBe(false);
+    });
+});
+
+describe('buildMirrorFilename', () => {
+    it('produces unique filenames when called multiple times within the same second', () => {
+        // Regression: previously timestamp-only names collided if two backups ran within 1s.
+        const names = new Set(Array.from({length: 20}, () => buildMirrorFilename('backup')));
+        expect(names.size).toBe(20);
+    });
+
+    it('preserves the base name and .slbk extension', () => {
+        const name = buildMirrorFilename('my-backup.slbk');
+        expect(name).toMatch(/^my-backup-\d{8}-\d{6}-[a-z0-9]{3}\.slbk$/);
     });
 });
