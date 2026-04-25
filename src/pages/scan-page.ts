@@ -704,8 +704,12 @@ export class ScanPage extends LitElement {
                 ];
             }
 
-            // CRITICAL FIX: If no document found (e.g. face), force FULL IMAGE crop
             if (!detectedQuadForEditor) {
+                // Show hint only when a quad was visible (confidence 0.35–0.49) but didn't
+                // pass the post-capture gate — user saw the overlay and will wonder why it reset.
+                if (det?.quad && q) {
+                    showToast(t('scan.edges_unclear'), 'info');
+                }
                 detectedQuadForEditor = [
                     {x: 0, y: 0}, {x: w, y: 0},
                     {x: w, y: h}, {x: 0, y: h}

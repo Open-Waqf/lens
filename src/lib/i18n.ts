@@ -48,6 +48,7 @@ const EN_MESSAGES = {
     'scan.page_count': '{{count}} page(s)',
     'scan.thumbnail_alt': 'Page thumbnail {{index}}',
     'scan.capture': 'Capture',
+    'scan.edges_unclear': 'Document edges unclear — adjust the crop manually',
 
     // Overlay / Guidance
     'scan.guide_align': 'Align document here',
@@ -520,6 +521,7 @@ const AR_MESSAGES = {
     'scan.page_count': '{{count}} صفحة',
     'scan.thumbnail_alt': 'صورة مصغرة للصفحة {{index}}',
     'scan.capture': 'التقاط',
+    'scan.edges_unclear': 'حواف المستند غير واضحة — اضبط الاقتصاص يدويًا',
 
     // Library
     'library.title': 'المكتبة',
