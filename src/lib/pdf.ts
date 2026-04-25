@@ -10,6 +10,7 @@ export type PdfQuality = 'original' | 'email';
 export interface PdfOptions {
     quality: PdfQuality;
     onProgress?: (curr: number, total: number) => void;
+    signal?: AbortSignal;
 }
 
 const UNICODE_FONT_URL = '/fonts/noto-arabic.ttf'; // Expected location for Arabic/Unicode support
@@ -58,6 +59,7 @@ export async function buildPdfForDoc(
     const total = pages.length;
 
     for (let i = 0; i < total; i++) {
+        opts.signal?.throwIfAborted();
         const p = pages[i];
         if (opts.onProgress) opts.onProgress(i + 1, total);
 

@@ -46,6 +46,7 @@ export class DocPage extends LitElement {
     @state() private pdfQuality: PdfQuality = 'original';
     @state() private exportProgress = 0;
     @state() private exportTotal = 0;
+    private _exportAbort: AbortController | null = null;
 
     // Viewer States
     @state() private viewerOpen = false;
@@ -460,6 +461,7 @@ export class DocPage extends LitElement {
     private async exportPdf(): Promise<void> {
         if (!this.doc) return;
 
+        this._exportAbort = new AbortController();
         this.busy = true;
         this.exportProgress = 0;
         this.exportTotal = this.pages.length;
@@ -469,6 +471,7 @@ export class DocPage extends LitElement {
 
             const pdfBytes = await buildPdfForDoc(store, this.pages, {
                 quality: this.pdfQuality,
+                signal: this._exportAbort.signal,
                 onProgress: (curr, total) => {
                     this.exportProgress = curr;
                     this.exportTotal = total;
@@ -479,8 +482,7 @@ export class DocPage extends LitElement {
             const filename = `${safeName(this.doc.title)}.pdf`;
             const blob = bytesToBlob(pdfBytes, 'application/pdf');
             const pdfFile = new File([blob], filename, {type: 'application/pdf'});
-            AuthService.ignoreNextResumeForExternalAction('share-pdf', 120_000);
-            // UPDATED: Use service
+            AuthService.ignoreNextResumeForExternalAction('share-pdf', AuthService.SHARE_BYPASS_TTL_MS);
             await shareFile(pdfFile, filename);
 
             const pdfPath = `docs/${this.doc.id}/exports/${Date.now()}.pdf`;
@@ -488,8 +490,11 @@ export class DocPage extends LitElement {
             await this.saveMeta({pdfPath});
 
         } catch (e) {
-            this.error = (e as Error).message;
+            if ((e as Error).name !== 'AbortError') {
+                this.error = (e as Error).message;
+            }
         } finally {
+            this._exportAbort = null;
             this.busy = false;
             this.exportProgress = 0;
         }
@@ -591,6 +596,12 @@ export class DocPage extends LitElement {
                     </div>
                     <div class="h-2 bg-slate-800 rounded-full overflow-hidden">
                         <div class="h-full bg-emerald-500 transition-all duration-200" style="width: ${pct}%"></div>
+                    </div>
+                    <div class="text-center">
+                        <button class="text-xs text-slate-400 hover:text-slate-200 underline underline-offset-2"
+                                @click=${() => this._exportAbort?.abort()}>
+                            ${t('common.cancel')}
+                        </button>
                     </div>
                 </div>
             </div>
