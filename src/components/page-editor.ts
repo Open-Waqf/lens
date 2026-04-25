@@ -52,7 +52,7 @@ export class PageEditor extends LitElement {
 
     private _previewTimer: number | null = null;
     private _previewToken = 0;
-    private _previewRetryBudget = 0;
+    private _containerObserver: ResizeObserver | null = null;
     private worker: Worker | null = null;
 
     @query('canvas[data-edges]') private edgesEl!: HTMLCanvasElement;
@@ -154,6 +154,8 @@ export class PageEditor extends LitElement {
         this.stopWorker();
         if (this._previewTimer) window.clearTimeout(this._previewTimer);
         this._previewTimer = null;
+        this._containerObserver?.disconnect();
+        this._containerObserver = null;
         if (this.sourceBitmap) {
             this.sourceBitmap.close();
             this.sourceBitmap = null;
@@ -196,7 +198,6 @@ export class PageEditor extends LitElement {
         this.quad = null;
         this.rotation = 0;
         this.history = [];
-        this._previewRetryBudget = 6;
         try {
             if (this.sourceBitmap) this.sourceBitmap.close();
             this.sourceBitmap = await createImageBitmap(this.blob);
@@ -493,6 +494,25 @@ export class PageEditor extends LitElement {
         this._previewTimer = window.setTimeout(() => void this.updatePreview(), 120);
     }
 
+    private _waitForContainerWidth(out: HTMLCanvasElement): Promise<number> {
+        return new Promise(resolve => {
+            const container = out.parentElement;
+            if (!container) { resolve(0); return; }
+            const cw = container.clientWidth;
+            if (cw >= 12) { resolve(cw); return; }
+            this._containerObserver?.disconnect();
+            this._containerObserver = new ResizeObserver(() => {
+                const w = container.clientWidth;
+                if (w >= 12) {
+                    this._containerObserver?.disconnect();
+                    this._containerObserver = null;
+                    resolve(w);
+                }
+            });
+            this._containerObserver.observe(container);
+        });
+    }
+
     private async updatePreview(): Promise<void> {
         if (!this.sourceBitmap || !this.quad) return;
         const token = ++this._previewToken;
@@ -501,25 +521,11 @@ export class PageEditor extends LitElement {
             const mappedQuad = this.mapQuadToSource(this.quad);
             const outSize = computeOutputSize(mappedQuad);
             const out = this.previewEl;
-            if (!out) {
-                if (this._previewRetryBudget > 0) {
-                    this._previewRetryBudget--;
-                    window.setTimeout(() => this.queuePreview(), 120);
-                }
-                return;
-            }
+            if (!out) return;
 
-            // FIX: Dynamic Sizing to match Android/Mobile viewports
-            // 1. Determine available width (container) and safe max height
-            const container = out.parentElement;
-            const cw = container?.clientWidth || window.innerWidth;
-            if (!cw || cw < 12) {
-                if (this._previewRetryBudget > 0) {
-                    this._previewRetryBudget--;
-                    window.setTimeout(() => this.queuePreview(), 180);
-                }
-                return;
-            }
+            // Wait for container to have a real layout width — fires instantly if already laid out.
+            const cw = await this._waitForContainerWidth(out);
+            if (!cw) return;
             const maxH = window.innerHeight * 0.65; // Matches Crop view constraint
 
             // 2. Calculate aspect-ratio preserving dimensions
@@ -577,12 +583,9 @@ export class PageEditor extends LitElement {
             // Draw result to fill the calculated space
             ctx.drawImage(res.bitmap, 0, 0, out.width, out.height);
             res.bitmap.close();
-            this._previewRetryBudget = 0;
         } catch (e) {
-            if (this._previewRetryBudget > 0) {
-                this._previewRetryBudget--;
-                window.setTimeout(() => this.queuePreview(), 160);
-            }
+            // worker task failed — queue one retry in case it was transient
+            window.setTimeout(() => this.queuePreview(), 160);
         } finally {
             if (token === this._previewToken) this.busy = false;
         }
