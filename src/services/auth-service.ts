@@ -160,12 +160,12 @@ export class AuthService {
                     }],
                     userVerification: "required"
                 }
-            });
+            }) as PublicKeyCredential | null;
 
-            if (credential) {
-                this._isUnlocked = true;
-                return true;
-            }
+            if (!credential) return false;
+
+            const response = credential.response as AuthenticatorAssertionResponse;
+            return verifyWebAuthnClientData(response.clientDataJSON, challenge);
         } catch (e) {
             console.warn("WebAuthn Verify Failed", e);
         }
@@ -194,4 +194,25 @@ export class AuthService {
         this._resumeBypassTokens = this._resumeBypassTokens.filter(t => t.expiresAt > now);
         return this._resumeBypassTokens.length > 0;
     }
+}
+
+// Exported for unit testing. Verifies the clientDataJSON fields we can validate
+// without a server: type, challenge, and origin. Full signature verification
+// requires the stored public key and is not possible in a fully offline PWA.
+export function verifyWebAuthnClientData(clientDataJSON: ArrayBuffer, expectedChallenge: Uint8Array): boolean {
+    try {
+        const clientData = JSON.parse(new TextDecoder().decode(clientDataJSON));
+        if (clientData.type !== 'webauthn.get') return false;
+        if (clientData.challenge !== bufferToBase64Url(expectedChallenge)) return false;
+        if (clientData.origin !== window.location.origin) return false;
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function bufferToBase64Url(buf: Uint8Array): string {
+    let binary = '';
+    for (let i = 0; i < buf.length; i++) binary += String.fromCharCode(buf[i]);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 }
