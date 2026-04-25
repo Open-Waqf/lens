@@ -526,7 +526,7 @@ export class ScanPage extends LitElement {
             const file = format === 'pdf'
                 ? new File([bytesToBlob(await this.buildSinglePagePdf(master.bytes), 'application/pdf')], filename, {type: 'application/pdf'})
                 : new File([bytesToBlob(master.bytes, 'image/jpeg')], filename, {type: 'image/jpeg'});
-            AuthService.ignoreNextResumeForExternalAction('share-scan-quick', 120_000);
+            AuthService.ignoreNextResumeForExternalAction('share-scan-quick', AuthService.SHARE_BYPASS_TTL_MS);
             await shareFile(file, filename);
         } catch (e) {
             this.error = toUserErrorMessage(e);

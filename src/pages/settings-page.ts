@@ -490,7 +490,7 @@ export class SettingsPage extends LitElement {
                 this.msg = t('settings.mirror_needs_setup_after_export');
             }
 
-            AuthService.ignoreNextResumeForExternalAction('export-backup-share', 120_000);
+            AuthService.ignoreNextResumeForExternalAction('export-backup-share', AuthService.SHARE_BYPASS_TTL_MS);
             await shareFile(namedFile, finalName);
 
             const now = Date.now();

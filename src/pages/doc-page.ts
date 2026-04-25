@@ -101,7 +101,7 @@ export class DocPage extends LitElement {
             const pageNum = this.pages.indexOf(page) + 1;
             const name = `${safeName(this.doc.title)} - Page ${pageNum}.jpg`;
             const file = new File([blob], name, {type: 'image/jpeg'});
-            AuthService.ignoreNextResumeForExternalAction('share-single', 120_000);
+            AuthService.ignoreNextResumeForExternalAction('share-single', AuthService.SHARE_BYPASS_TTL_MS);
             await shareFile(file, name); // Uses the native-safe service
         } catch (e) {
             this.error = (e as Error).message;

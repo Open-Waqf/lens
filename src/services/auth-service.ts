@@ -11,6 +11,10 @@ export class AuthService {
     private static _resumeBypassTokens: Array<{ expiresAt: number; reason: string }> = [];
 
     private static readonly DEFAULT_BYPASS_TTL_MS = 30_000;
+    // Share sheets can take time (composing email, uploading to cloud, slow connection)
+    static readonly SHARE_BYPASS_TTL_MS = 300_000; // 5 minutes
+    // File pickers are typically quick interactions
+    static readonly PICKER_BYPASS_TTL_MS = 120_000; // 2 minutes
 
     static ignoreNextResumeForExternalAction(reason = 'external-action', ttlMs = this.DEFAULT_BYPASS_TTL_MS) {
         const safeTtl = Number.isFinite(ttlMs) ? Math.max(1000, Math.floor(ttlMs)) : this.DEFAULT_BYPASS_TTL_MS;
