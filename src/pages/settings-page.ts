@@ -1016,6 +1016,24 @@ export class SettingsPage extends LitElement {
                         ` : null}
                     </button>
 
+                    ${this.hasIndexRisk ? html`
+                        <button class="flex items-center justify-between p-4 rounded-xl bg-amber-950/40 border border-amber-500/50 hover:bg-amber-900/40 transition-colors w-full text-start"
+                                ?disabled=${this.busy} @click=${() => this.rebuildIndex()}>
+                            <div class="flex items-center gap-3">
+                                <div class="p-2 rounded-lg bg-amber-900/50 text-amber-300 shrink-0">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                              d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"></path>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <div class="text-amber-200 font-medium">${t('settings.repair_library')}</div>
+                                    <div class="text-xs text-amber-400/80">${t('settings.repair_library_desc')}</div>
+                                </div>
+                            </div>
+                        </button>
+                    ` : null}
+
                     <button class="text-xs text-slate-400 hover:text-slate-200 text-start"
                             @click=${() => this.showAdvancedDataTools = !this.showAdvancedDataTools}>
                         ${this.showAdvancedDataTools ? t('settings.hide_advanced_tools') : t('settings.show_advanced_tools')}
