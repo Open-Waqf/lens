@@ -338,23 +338,17 @@ export class SettingsPage extends LitElement {
     private async toggleAuth() {
         void haptics.selection();
 
-        // Optimistic update: Flip it first
         const nextState = !this.requireAuth;
-        this.requireAuth = nextState;
 
         if (nextState === true) {
-            // Trying to ENABLE
             const success = await AuthService.setupAuth();
             if (!success) {
-                // Failed! Revert immediately
-                this.requireAuth = false;
                 this.msg = t('settings.auth_setup_unavailable');
-                this.requestUpdate(); // Force UI re-render to uncheck box
                 return;
             }
         }
 
-        // Only save if success (or if disabling)
+        this.requireAuth = nextState;
         await settings.setAuth(nextState);
     }
 
