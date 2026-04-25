@@ -68,6 +68,7 @@ export class SettingsPage extends LitElement {
     // Progress State
     @state() private backupProgress = 0;
     @state() private backupTotal = 0;
+    @state() private backupPhase: 'collecting' | 'encrypting' = 'collecting';
 
     @state() private showRepairTool = false;
     @state() private repairProgress = '';
@@ -84,6 +85,7 @@ export class SettingsPage extends LitElement {
     @state() private mirrorBackupMode: 'manual' | 'after_export' = 'manual';
     @state() private mirrorBackupReady = false;
     @state() private mirrorFolderLabel: string | null = null;
+    @state() private mirrorNeedsReselect = false;
     @state() private showMirrorAdvanced = false;
     @state() private showPrivacyDetails = false;
     @state() private showAdvancedDataTools = false;
@@ -458,18 +460,19 @@ export class SettingsPage extends LitElement {
                 }
             });
 
+            this.backupPhase = 'encrypting';
+            this.requestUpdate();
+
             let chunkCount = 0;
             for await (const chunk of finalStream) {
                 await writer.write(chunk);
                 chunkCount++;
-
-                // FIX THE 76% FREEZE:
-                // Give the UI more time to breathe every few chunks.
-                // This prevents the Capacitor bridge from choking.
                 if (chunkCount % 5 === 0) {
                     await new Promise(r => setTimeout(r, 25));
                 }
             }
+
+            this.backupPhase = 'collecting';
 
             const file = await writer.close();
             const nowDate = new Date();
@@ -489,8 +492,10 @@ export class SettingsPage extends LitElement {
             const mirror = await maybeMirrorBackupAfterExport(namedFile);
             if (mirror.status === 'mirrored') {
                 this.msg = t('settings.mirror_auto_saved', {file: mirror.filename || finalName});
+                this.mirrorNeedsReselect = false;
             } else if (mirror.status === 'needs_setup') {
-                this.msg = t('settings.mirror_needs_setup_after_export');
+                this.err = t('settings.mirror_needs_setup_reselect');
+                this.mirrorNeedsReselect = true;
             }
 
             AuthService.ignoreNextResumeForExternalAction('export-backup-share', AuthService.SHARE_BYPASS_TTL_MS);
@@ -510,6 +515,7 @@ export class SettingsPage extends LitElement {
             this.busy = false;
             this.backupProgress = 0;
             this.backupTotal = 0;
+            this.backupPhase = 'collecting';
         }
     }
 
@@ -776,20 +782,27 @@ export class SettingsPage extends LitElement {
 
     private renderProgressOverlay() {
         if (!this.busy || this.backupTotal === 0) return null;
-        const pct = Math.round((this.backupProgress / this.backupTotal) * 100);
+        const encrypting = this.backupPhase === 'encrypting';
+        const pct = encrypting ? 100 : Math.round((this.backupProgress / this.backupTotal) * 100);
 
         return html`
             <div class="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
                 <div class="bg-slate-900 border border-slate-700 p-6 rounded-2xl w-full max-w-sm space-y-4 shadow-2xl">
                     <div class="flex items-center justify-between">
                         <div class="font-bold text-slate-100">${t('settings.backup_creating')}</div>
-                        <div class="text-sm text-emerald-400 font-mono">${pct}%</div>
+                        ${encrypting
+                            ? html`<div class="text-sm text-emerald-400 animate-pulse">${t('settings.backup_encrypting')}</div>`
+                            : html`<div class="text-sm text-emerald-400 font-mono">${pct}%</div>`}
                     </div>
                     <div class="h-2 bg-slate-800 rounded-full overflow-hidden">
-                        <div class="h-full bg-emerald-500 transition-all duration-200" style="width: ${pct}%"></div>
+                        ${encrypting
+                            ? html`<div class="h-full bg-emerald-500 animate-pulse w-full"></div>`
+                            : html`<div class="h-full bg-emerald-500 transition-all duration-200" style="width: ${pct}%"></div>`}
                     </div>
                     <div class="text-xs text-slate-400 text-center">
-                        ${t('settings.backup_processing_item', {current: this.backupProgress, total: this.backupTotal})}
+                        ${encrypting
+                            ? t('settings.backup_encrypting_desc')
+                            : t('settings.backup_processing_item', {current: this.backupProgress, total: this.backupTotal})}
                     </div>
                 </div>
             </div>
@@ -842,10 +855,22 @@ export class SettingsPage extends LitElement {
                     ` : null}
                     ${this.err ? html`
                         <div class="pointer-events-auto mt-2 p-4 rounded-lg bg-red-950/50 text-red-100 border border-red-900 flex items-start justify-between gap-3 shadow-lg">
-                            <div class="font-medium">${this.err}</div>
-                            <button class="text-red-300 hover:text-red-100 text-sm"
+                            <div class="flex-1">
+                                <div class="font-medium">${this.err}</div>
+                                ${this.mirrorNeedsReselect ? html`
+                                    <button class="mt-2 px-3 py-1.5 rounded-lg bg-red-900/60 hover:bg-red-800/60 text-xs text-red-100 border border-red-700/50"
+                                            @click=${async () => {
+                                                this.err = null;
+                                                this.mirrorNeedsReselect = false;
+                                                await this.pickMirrorBackupFolder();
+                                            }}>
+                                        ${t('settings.mirror_reselect')}
+                                    </button>
+                                ` : null}
+                            </div>
+                            <button class="text-red-300 hover:text-red-100 text-sm shrink-0"
                                     aria-label=${t('common.cancel')}
-                                    @click=${() => this.err = null}>✕</button>
+                                    @click=${() => { this.err = null; this.mirrorNeedsReselect = false; }}>✕</button>
                         </div>
                     ` : null}
                 </div>
