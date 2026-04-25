@@ -26,4 +26,31 @@ describe('PDF OCR text ordering', () => {
         expect(lines[0].rtl).toBe(false);
         expect(lines[0].text).toBe('hello world');
     });
+
+    it('preserves visual order on mixed Arabic/English lines without reversing Latin words', () => {
+        // Regression: previously all words sorted RTL when any Arabic word present,
+        // causing "Hello مرحبا" to export as "مرحبا Hello" in the PDF text layer.
+        const words: OcrWord[] = [
+            {text: 'Hello', box: [0.05, 0.10, 0.10, 0.05], confidence: 90},
+            {text: 'مرحبا', box: [0.50, 0.10, 0.10, 0.05], confidence: 90},
+        ];
+
+        const lines = groupWordsIntoLines(words);
+        expect(lines).toHaveLength(1);
+        expect(lines[0].rtl).toBe(true); // Arabic font still required
+        expect(lines[0].text).toBe('Hello مرحبا'); // visual LTR order preserved
+    });
+
+    it('still sorts pure Arabic line right-to-left', () => {
+        const words: OcrWord[] = [
+            {text: 'الأول', box: [0.60, 0.10, 0.10, 0.05], confidence: 90},
+            {text: 'الثاني', box: [0.30, 0.10, 0.10, 0.05], confidence: 90},
+            {text: 'الثالث', box: [0.05, 0.10, 0.10, 0.05], confidence: 90},
+        ];
+
+        const lines = groupWordsIntoLines(words);
+        expect(lines).toHaveLength(1);
+        expect(lines[0].rtl).toBe(true);
+        expect(lines[0].text).toBe('الأول الثاني الثالث');
+    });
 });

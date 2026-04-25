@@ -120,6 +120,19 @@ export async function buildPdfForDoc(
     return await pdf.save();
 }
 
+function buildLine(lineWords: OcrWord[]): { text: string, words: OcrWord[], rtl: boolean } {
+    const hasArabic = lineWords.some(w => ARABIC_SCRIPT_RE.test(w.text));
+    const hasLatin = lineWords.some(w => !ARABIC_SCRIPT_RE.test(w.text) && w.text.trim().length > 0);
+    const pureRtl = hasArabic && !hasLatin;
+    // Mixed lines: sort by visual x position (LTR). Pure Arabic lines: sort RTL.
+    const orderedWords = [...lineWords].sort((a, b) => pureRtl ? b.box[0] - a.box[0] : a.box[0] - b.box[0]);
+    return {
+        text: orderedWords.map(w => w.text).join(' '),
+        words: orderedWords,
+        rtl: hasArabic,
+    };
+}
+
 export function groupWordsIntoLines(words: OcrWord[]): Array<{ text: string, words: OcrWord[], rtl: boolean }> {
     const lines: Array<{ text: string, words: OcrWord[], rtl: boolean }> = [];
     if (words.length === 0) return lines;
@@ -135,23 +148,11 @@ export function groupWordsIntoLines(words: OcrWord[]): Array<{ text: string, wor
         if (verticalOverlap) {
             currentLine.push(curr);
         } else {
-            const rtl = currentLine.some(w => ARABIC_SCRIPT_RE.test(w.text));
-            const orderedWords = [...currentLine].sort((a, b) => rtl ? b.box[0] - a.box[0] : a.box[0] - b.box[0]);
-            lines.push({
-                text: orderedWords.map(w => w.text).join(' '),
-                words: orderedWords,
-                rtl,
-            });
+            lines.push(buildLine(currentLine));
             currentLine = [curr];
         }
     }
-    const rtl = currentLine.some(w => ARABIC_SCRIPT_RE.test(w.text));
-    const orderedWords = [...currentLine].sort((a, b) => rtl ? b.box[0] - a.box[0] : a.box[0] - b.box[0]);
-    lines.push({
-        text: orderedWords.map(w => w.text).join(' '),
-        words: orderedWords,
-        rtl,
-    });
+    lines.push(buildLine(currentLine));
     return lines;
 }
 
