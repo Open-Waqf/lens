@@ -53,4 +53,19 @@ describe('PDF OCR text ordering', () => {
         expect(lines[0].rtl).toBe(true);
         expect(lines[0].text).toBe('الأول الثاني الثالث');
     });
+
+    it('keeps an Arabic line with numbers right-to-left (digits are not Latin)', () => {
+        // Regression (Nov 2026): "المبلغ: 1250 درهم" counted the digits as Latin, treated the
+        // line as mixed and reversed its word order, in the PDF text layer and in copied text.
+        const words: OcrWord[] = [
+            {text: 'المبلغ:', box: [0.70, 0.10, 0.10, 0.05], confidence: 90},
+            {text: '1250', box: [0.50, 0.10, 0.08, 0.05], confidence: 90},
+            {text: 'درهم.', box: [0.30, 0.10, 0.08, 0.05], confidence: 90},
+        ];
+
+        const lines = groupWordsIntoLines(words);
+        expect(lines).toHaveLength(1);
+        expect(lines[0].rtl).toBe(true);
+        expect(lines[0].text).toBe('المبلغ: 1250 درهم.');
+    });
 });

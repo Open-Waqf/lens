@@ -15,6 +15,7 @@ export interface PdfOptions {
 
 const UNICODE_FONT_URL = '/fonts/noto-arabic.ttf'; // Expected location for Arabic/Unicode support
 const ARABIC_SCRIPT_RE = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+const LATIN_LETTER_RE = /[A-Za-z\u00C0-\u024F]/;
 const MIN_FONT_BYTES = 1024;
 
 let cachedUnicodeFontBytes: Uint8Array | null = null;
@@ -124,7 +125,9 @@ export async function buildPdfForDoc(
 
 function buildLine(lineWords: OcrWord[]): { text: string, words: OcrWord[], rtl: boolean } {
     const hasArabic = lineWords.some(w => ARABIC_SCRIPT_RE.test(w.text));
-    const hasLatin = lineWords.some(w => !ARABIC_SCRIPT_RE.test(w.text) && w.text.trim().length > 0);
+    // Only Latin letters make a line "mixed". Digits and punctuation are neutral: an Arabic
+    // line with an amount or a date stays right-to-left.
+    const hasLatin = lineWords.some(w => !ARABIC_SCRIPT_RE.test(w.text) && LATIN_LETTER_RE.test(w.text));
     const pureRtl = hasArabic && !hasLatin;
     // Mixed lines: sort by visual x position (LTR). Pure Arabic lines: sort RTL.
     const orderedWords = [...lineWords].sort((a, b) => pureRtl ? b.box[0] - a.box[0] : a.box[0] - b.box[0]);
