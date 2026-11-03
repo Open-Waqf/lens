@@ -57,6 +57,21 @@ export async function closeShareSheet() {
     throw new Error(`The share sheet did not close (in front: ${topActivity()})`);
 }
 
+/**
+ * A real finger swipe on something in the page, through Android's input (not a browser
+ * event). The WebView's place on the screen comes from uiautomator; the page's CSS pixels
+ * are scaled by the device pixel ratio.
+ */
+export async function swipeOnPage(page: Page, from: {x: number; y: number}, dx: number, dy: number, ms = 400) {
+    adb('shell', 'uiautomator', 'dump', '/sdcard/lens-ui.xml');
+    const xml = adb('shell', 'cat', '/sdcard/lens-ui.xml');
+    const web = xml.match(/<node[^>]*class="android.webkit.WebView"[^>]*bounds="\[(\d+),(\d+)\]/);
+    if (!web) throw new Error('The WebView is not on the phone screen');
+    const dpr = await page.evaluate(() => window.devicePixelRatio);
+    const x = Math.round(Number(web[1]) + from.x * dpr), y = Math.round(Number(web[2]) + from.y * dpr);
+    adb('shell', 'input', 'swipe', String(x), String(y), String(Math.round(x + dx * dpr)), String(Math.round(y + dy * dpr)), String(ms));
+}
+
 /** App memory (PSS) in MB, as Android reports it. */
 export function appMemoryMb(): number {
     const m = adb('shell', 'dumpsys', 'meminfo', APP_ID).match(/TOTAL PSS:\s+(\d+)/);
@@ -88,8 +103,13 @@ async function attach(): Promise<{browser: Browser; page: Page}> {
  */
 export const test = base.extend<{app: {page: Page; requests: string[]}}>({
     app: async ({}, use) => {
-        adb('shell', 'pm', 'clear', APP_ID);
+        // Go home first: a failed test can leave the share sheet or Google's scanner on top
+        // of Lens. Clearing the data under it leaves Android with a dead Lens screen (the
+        // splash, forever) and the next start never runs (seen Nov 2026).
         adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
+        adb('shell', 'input', 'keyevent', 'KEYCODE_HOME');
+        adb('shell', 'am', 'force-stop', APP_ID);
+        adb('shell', 'pm', 'clear', APP_ID);
         adb('shell', 'am', 'start', '-W', '-n', ACTIVITY);
         const {browser, page} = await attach();
         const requests: string[] = [];

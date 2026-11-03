@@ -382,7 +382,8 @@ export class DocPage extends LitElement {
         try {
             const {master, format} = ev.detail;
             const pageIndex = this.editingPage ? this.pages.findIndex(p => p.id === this.editingPage!.id) + 1 : 0;
-            const baseName = `${safeName(this.doc?.title || t('scan.title'))}-Page-${Math.max(pageIndex, 1)}`;
+            const own = this.editingPage ? await this.repo.pageTitle(this.editingPage.id) : null;
+            const baseName = safeName(own || `${this.doc?.title || t('scan.title')} p${Math.max(pageIndex, 1)}`);
             const filename = format === 'pdf' ? `${baseName}.pdf` : `${baseName}.jpg`;
             const file = format === 'pdf'
                 ? new File([bytesToBlob(await this.buildSinglePagePdf(master.bytes), 'application/pdf')], filename, {type: 'application/pdf'})
@@ -707,7 +708,7 @@ export class DocPage extends LitElement {
                         <button class="${tool} text-slate-200 hover:bg-slate-900" data-testid="btn-add-pages"
                                 @click=${() => {
                                     localStorage.setItem('sahifah.appendToDocId', this.doc!.id);
-                                    location.hash = '#/scan';
+                                    location.hash = '#/scan?scan=1';
                                 }}>
                             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
                             <span>${t('doc.add_pages')}</span>

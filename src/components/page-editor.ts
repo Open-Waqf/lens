@@ -108,9 +108,9 @@ export class PageEditor extends LitElement {
     @state() private magnifyY = 0;
 
     private getCornerHandleStyle(index: number): string {
-        if (!this.quad || !this.edgesEl) return 'display:none';
+        if (!this.quad || !this.edgesEl) return 'display:none;';
         const p = this.quad[index];
-        if (!p) return 'display:none';
+        if (!p) return 'display:none;';
         // Use rendered CSS size, not backing store pixels.
         // Canvas can be visually scaled by max-h constraints; using width/height here
         // causes handles (especially bottom corners) to drift away from visible corners.
@@ -124,16 +124,10 @@ export class PageEditor extends LitElement {
         // handles sit exactly over rendered corner points.
         const ox = this.edgesEl.offsetLeft || 0;
         const oy = this.edgesEl.offsetTop || 0;
-        // Per-corner anchoring keeps hit boxes inside the canvas without shifting
-        // the perceived grab direction differently per corner.
+        // The hit box is centred on the dot: the finger goes on the dot, not beside it.
+        // At a canvas edge part of the box is clipped; the dot stays inside it.
         const hit = 60;
-        let left = ox + rawX;
-        let top = oy + rawY;
-        if (index === 1 || index === 2) left -= hit; // right-side corners
-        if (index === 2 || index === 3) top -= hit;  // bottom-side corners
-        left = clamp(left, ox, ox + Math.max(0, cssW - hit));
-        top = clamp(top, oy, oy + Math.max(0, cssH - hit));
-        return `left:${left}px;top:${top}px;`;
+        return `left:${ox + rawX - hit / 2}px;top:${oy + rawY - hit / 2}px;`;
     }
 
     private pushHistory(): void {
@@ -180,8 +174,14 @@ export class PageEditor extends LitElement {
         if (ch.has('blob')) this.loading = this.loadBlob();
         if (ch.has('filter')) this.queuePreview();
         if (ch.has('cropMode')) {
-            if (this.cropMode) this.drawEdges();
-            else this.queuePreview();
+            if (this.cropMode) {
+                // The crop canvas is only made for crop mode, so the handles were laid out
+                // before it existed. Draw it, then lay them out again over its corners.
+                this.drawEdges();
+                this.requestUpdate();
+            } else {
+                this.queuePreview();
+            }
         }
     }
 

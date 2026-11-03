@@ -253,9 +253,10 @@ export class ScanPage extends LitElement {
 
         if (params.get('import') === '1') {
             setTimeout(() => void this.pickFiles({multiple: !this.replacePageId}), 0);
-        } else if (this.caps.isCapacitor && !takenPending) {
-            // Android: "+" (and "Add pages", "Retake") open Google's scanner at once. The scan
-            // screen before it only held one button: a tap for nothing (Nov 2026).
+        } else if (this.caps.isCapacitor && !takenPending && params.get('scan') === '1') {
+            // Android: "+" and "Add pages" open Google's scanner at once (their links carry
+            // scan=1). The scan screen before it only held one button: a tap for nothing.
+            // Any other way onto this screen just shows it (Nov 2026).
             this.autoLaunched = true;
             setTimeout(() => void this.invokeNativeScanner(), 0);
         }
@@ -470,7 +471,12 @@ export class ScanPage extends LitElement {
 
         try {
             const {master, format} = ev.detail;
-            const safeTitle = safeFileName(this.docTitle || t('scan.title'));
+            // One page shared alone is named from its own text once OCR has read it; before
+            // that it carries the document's name and, in a document of several pages, its number.
+            const own = this.editingPageId ? await this.repo.pageTitle(this.editingPageId) : null;
+            const pageNo = this.editingPageId && this.session.pageCount > 1
+                    ? this.strip.findIndex(it => it.id === this.editingPageId) + 1 : 0;
+            const safeTitle = safeFileName(own || `${this.docTitle || t('scan.title')}${pageNo > 0 ? ` p${pageNo}` : ''}`);
             const filename = format === 'pdf' ? `${safeTitle}.pdf` : `${safeTitle}.jpg`;
             const file = format === 'pdf'
                 ? new File([bytesToBlob(await this.buildSinglePagePdf(master.bytes), 'application/pdf')], filename, {type: 'application/pdf'})
@@ -1012,13 +1018,14 @@ export class ScanPage extends LitElement {
         if (!this.strip.length) return null;
         const selected = this.editingPageId || this.selectedPageId;
         return html`
-            <div class="grid gap-3 ${this.strip.length === 1 ? 'grid-cols-1 max-w-[12rem] mx-auto w-full' : 'grid-cols-2'}" data-testid="scan-strip">
+            <!-- Every page tile has the same size, one page or ten, and shows the whole page. -->
+            <div class="flex flex-wrap justify-center gap-3" data-testid="scan-strip">
                 ${this.strip.map((it, idx) => html`
-                    <div class="relative">
-                        <button class="relative block w-full aspect-[3/4] rounded-xl border-2 ${selected === it.id ? 'border-emerald-500' : 'border-slate-800'} overflow-hidden bg-black active:scale-95 transition-transform"
+                    <div class="relative w-[calc(50%-0.375rem)]">
+                        <button class="relative block w-full aspect-[3/4] rounded-xl border-2 ${selected === it.id ? 'border-emerald-500' : 'border-slate-800'} overflow-hidden bg-slate-900 active:scale-95 transition-transform"
                                 title=${t('scan.edit_page')} aria-label=${t('scan.edit_page')}
                                 @click=${() => void this.openExistingPageInEditor(it.id)}>
-                            <img src=${it.url} class="w-full h-full object-cover" alt=${t('scan.thumbnail_alt', {index: idx + 1})}/>
+                            <img src=${it.url} class="w-full h-full object-contain" alt=${t('scan.thumbnail_alt', {index: idx + 1})}/>
                             <div class="absolute bottom-1 left-1 text-[11px] font-bold text-white bg-black/60 px-1.5 py-0.5 rounded">${idx + 1}</div>
                         </button>
                         <button class="absolute -top-2 -right-2 w-8 h-8 bg-slate-800 text-slate-100 rounded-full flex items-center justify-center shadow-md border border-slate-600 active:scale-90 transition-transform"
@@ -1058,7 +1065,7 @@ export class ScanPage extends LitElement {
                             .initialQuad=${this.editorInitialQuad}
                             .source=${this.editorSource}
                             .reviewLabel=${review}
-                            ?disableAutoDetect=${!!this.editingPageId || !!this.editorInitialQuad}
+                            ?disableAutoDetect=${(!!this.editingPageId && this.importReviewQueue.length === 0) || !!this.editorInitialQuad}
                             @page-editor-save=${this.onEditorSave}
                             @page-editor-share=${this.onEditorShare}
                             @page-editor-cancel=${this.onEditorCancel}

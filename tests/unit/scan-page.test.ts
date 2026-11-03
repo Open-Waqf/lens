@@ -150,6 +150,14 @@ describe('ScanPage Component', () => {
 
     });
 
+    /** Sets the link and waits for its change event, so it does not reach the mounted page. */
+    async function goTo(hash: string) {
+        if (location.hash === hash) return;
+        const changed = new Promise(r => window.addEventListener('hashchange', r, {once: true}));
+        location.hash = hash;
+        await changed;
+    }
+
     async function mountPage(welcomeSeen = false) {
         if (welcomeSeen) {
             localStorage.setItem('sahifah.welcomeSeen', '1');
@@ -182,6 +190,7 @@ describe('ScanPage Component', () => {
 
     it('on Android, arriving on the scan screen opens the native scanner at once (no extra tap)', async () => {
         mockState.isNativePlatform = true;
+        await goTo('#/scan?new=1&scan=1'); // the "+" link
         element = await mountPage(true);
         await new Promise(r => setTimeout(r, 30));
         expect(mockState.mockScanDocument).toHaveBeenCalledTimes(1);
@@ -193,6 +202,7 @@ describe('ScanPage Component', () => {
         // A user who had picked "Manual" before Nov 2026 gets the native scanner.
         mockState.isNativePlatform = true;
         localStorage.setItem('sahifah.scanMode', 'manual');
+        await goTo('#/scan?new=1&scan=1'); // the "+" link
         element = await mountPage(true);
         await new Promise(r => setTimeout(r, 30));
 

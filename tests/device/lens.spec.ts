@@ -1,7 +1,7 @@
 // lens.spec.ts: the main flows on a real phone. Run with `npm run test:android`.
 // Only what a real phone can show: Playwright on the computer covers the rest (npm run check).
 import path from 'node:path';
-import {adb, APP_ID, appMemoryMb, closeShareSheet, expect, importPhoto, pressPhoneBack, screenTexts, test, topActivity, waitForOcr} from './phone';
+import {adb, APP_ID, appMemoryMb, closeShareSheet, expect, importPhoto, pressPhoneBack, screenTexts, swipeOnPage, test, topActivity, waitForOcr} from './phone';
 
 const PHOTOS = path.resolve('tests/fixtures/photos');
 
@@ -71,12 +71,13 @@ test('P.6 Backup made on the phone restores on the phone with the same password'
     await page.getByRole('button', {name: 'Export', exact: true}).click();
     await expect.poll(topActivity, {timeout: 30_000}).toContain('intentresolver');
     // Read the exported file from the app's private storage before the share sheet closes.
-    const name = adb('shell', 'run-as', APP_ID, 'ls', 'files/exports').trim().split(/\s+/)[0];
-    expect(name).toMatch(/\.slbk$/);
-    const base64 = adb('shell', 'run-as', APP_ID, 'base64', '-w', '0', `files/exports/${name}`).trim();
+    // The backup is streamed into the share folder (cache/share/<time>/), then shared.
+    const file = adb('shell', 'run-as', APP_ID, 'find', 'cache/share', '-name', '*.slbk').trim().split(/\s+/)[0];
+    expect(file).toMatch(/\.slbk$/);
+    const base64 = adb('shell', 'run-as', APP_ID, 'base64', '-w', '0', file).trim();
     await closeShareSheet();
     // Closing the share sheet deletes the temporary copies (checked on the phone, Nov 2026).
-    await expect.poll(() => adb('shell', 'run-as', APP_ID, 'ls', 'cache/share', 'files/exports').trim().split(/\s+/).filter((l) => /\.(pdf|slbk)$/.test(l))).toEqual([]);
+    await expect.poll(() => adb('shell', 'run-as', APP_ID, 'find', 'cache/share', 'files', '-name', '*.slbk', '-o', '-name', '*.pdf').trim().split(/\s+/).filter(Boolean)).toEqual([]);
 
     // Restore it (through the app's restore code; the system picker cannot be scripted).
     await page.evaluate(async (b64) => {
@@ -94,4 +95,17 @@ test('P.6 Backup made on the phone restores on the phone with the same password'
         req.onsuccess = () => { const c = req.result.transaction(['pages']).objectStore('pages').count(); c.onsuccess = () => resolve(c.result); };
     }));
     expect(pages).toBe(1);
+});
+
+test('P.7 A finger drags a crop corner, and the corner follows', async ({app: {page}}) => {
+    await importPhoto(page, path.join(PHOTOS, 'french-invoice.jpg'));
+    await page.getByRole('button', {name: 'Crop'}).click();
+    const handle = page.getByTestId('corner-handle-0');
+    await expect(handle).toBeVisible();
+    const quadBefore = await page.evaluate(() => (document.querySelector('page-editor') as any).quad[0]);
+    const box = (await handle.boundingBox())!;
+    await swipeOnPage(page, {x: box.x + box.width / 2, y: box.y + box.height / 2}, 120, 120);
+    const quadAfter = await page.evaluate(() => (document.querySelector('page-editor') as any).quad[0]);
+    expect(quadAfter.x - quadBefore.x, 'the corner moved right').toBeGreaterThan(50);
+    expect(quadAfter.y - quadBefore.y, 'the corner moved down').toBeGreaterThan(50);
 });

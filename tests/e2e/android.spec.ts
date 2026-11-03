@@ -12,7 +12,7 @@ test.beforeEach(async ({page}) => {
 
 /** "+": Google's scanner opens by itself, and its page is saved straight away. */
 async function scanOnePage(page: import('./support/test').Page) {
-    await page.goto('/#/scan?new=1');
+    await page.goto('/#/scan?new=1&scan=1');
     await expect(page.getByTestId('btn-share-pdf')).toBeVisible();
 }
 
@@ -28,6 +28,15 @@ test.describe('A. Android app (fake Android bridge) @phone', () => {
         expect((await nativeCalls(page, 'DocumentScanner')).map((c) => c.method)).toEqual(['scanDocument']);
         await expect(page.locator('page-editor')).toHaveCount(0);
         await expect(page.locator('[data-testid=scan-strip] img')).toHaveCount(2);
+    });
+
+    test('A.19 Opening the scan screen any other way does not start the camera', async ({page}) => {
+        // Only "+" and "Add pages" (links with scan=1) open the scanner by themselves.
+        await fakeAndroid(page, {scan: [PAGE1]});
+        await page.goto('/#/scan?new=1');
+        await expect(page.getByRole('button', {name: 'Start Scanner'})).toBeVisible();
+        await page.waitForTimeout(300);
+        expect(await nativeCalls(page, 'DocumentScanner')).toHaveLength(0);
     });
 
     test('A.2 Cancelling the scanner right after "+" goes back to the library, with no error', async ({page}) => {

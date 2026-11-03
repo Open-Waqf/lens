@@ -22,6 +22,7 @@ describe('DocPage editor share', () => {
         (el as any).doc = {title: 'My Doc'};
         (el as any).pages = [{id: 'p1'}];
         (el as any).editingPage = {id: 'p1'};
+        (el as any).repo = {pageTitle: async () => null}; // OCR has not read the page yet
 
         await (el as any).onEditorShare(new CustomEvent('page-editor-share', {
             detail: {
@@ -33,6 +34,6 @@ describe('DocPage editor share', () => {
         expect(mockIgnoreNextResume).toHaveBeenCalledWith('share-doc-editor', 120000);
         expect(mockShareFile).toHaveBeenCalledTimes(1);
         const filename = mockShareFile.mock.calls[0]?.[1] as string;
-        expect(filename.endsWith('.jpg')).toBe(true);
+        expect(filename).toBe('My Doc p1.jpg'); // the document's name and the page number
     });
 });

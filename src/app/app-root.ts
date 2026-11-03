@@ -496,7 +496,7 @@ export class AppRoot extends LitElement {
                                 </svg>
                                 <span class="text-[10px] font-medium">${t('nav.library')}</span>
                             </a>
-                            <a id="MainScanBtn" href="#/scan?new=1"
+                            <a id="MainScanBtn" href="#/scan?new=1&scan=1"
                                aria-label=${t('nav.new_scan')}
                                class="flex flex-col items-center justify-center -mt-6 p-1 rounded-full bg-slate-950 border-4 border-slate-950 relative group">
                                 <div class="w-14 h-14 rounded-full bg-emerald-500 text-slate-950 flex items-center justify-center shadow-lg shadow-emerald-500/20 group-active:scale-95 transition-transform">
