@@ -1,20 +1,15 @@
 apply plugin: 'com.android.application'
 
-def envOrNull = { key ->
-    def v = System.getenv(key)
-    return (v != null && v.toString().trim()) ? v.toString().trim() : null
+// Release signing reads android/keystore.properties (git-ignored; the key itself lives in
+// the Cryptomator vault). Without that file, release builds stay unsigned, so a fresh
+// clone, CI and Android Studio all keep working. `npm run android:release` creates the file
+// for one build if needed. (Before Nov 2026 signing came from OWQ_ANDROID_* variables.)
+def keystorePropsFile = rootProject.file("keystore.properties")
+def hasSigningConfig = keystorePropsFile.exists()
+def keystoreProps = new Properties()
+if (hasSigningConfig) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
 }
-
-def envOrDefault = { key, fallback ->
-    def v = envOrNull(key)
-    return v != null ? v : fallback
-}
-
-def releaseStoreFile = envOrNull('OWQ_ANDROID_STORE_FILE')
-def releaseStorePassword = envOrNull('OWQ_ANDROID_STORE_PASSWORD')
-def releaseKeyAlias = envOrNull('OWQ_ANDROID_KEY_ALIAS')
-def releaseKeyPassword = envOrNull('OWQ_ANDROID_KEY_PASSWORD')
-def releaseSigningReady = releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword
 
 android {
     namespace = "org.openwaqf.lens"
@@ -23,8 +18,9 @@ android {
         applicationId "org.openwaqf.lens"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode Integer.parseInt(envOrDefault('OWQ_ANDROID_VERSION_CODE', '1'))
-        versionName envOrDefault('OWQ_ANDROID_VERSION_NAME', '0.5.0')
+        // Set by `npm run release` (versionCode +1 each release). Do not edit by hand.
+        versionCode 1
+        versionName "0.5.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -33,12 +29,14 @@ android {
         }
     }
     signingConfigs {
-        if (releaseSigningReady) {
-            release {
-                storeFile file(releaseStoreFile)
-                storePassword releaseStorePassword
-                keyAlias releaseKeyAlias
-                keyPassword releaseKeyPassword
+        release {
+            if (hasSigningConfig) {
+                // Tolerate a path wrapped in quotes or padded with spaces.
+                def storePath = (keystoreProps['storeFile'] ?: '').trim().replaceAll(/^"(.*)"$/, '$1')
+                storeFile file(storePath)
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
             }
         }
     }
@@ -51,9 +49,7 @@ android {
         }
         release {
             minifyEnabled false
-            if (releaseSigningReady) {
-                signingConfig signingConfigs.release
-            }
+            if (hasSigningConfig) signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
