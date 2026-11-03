@@ -4,7 +4,7 @@
 > A high-performance, local-first document scanner and vault. No accounts, no ads, no cloud.
 
 <div align="center">
-<a href="https://lens.openwaqf.org">
+<a href="https://lens.open-waqf.org">
 <img src="public/icons/icon-512.png" alt="Sahifah Lens Logo" width="100" height="100" style="border-radius: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
 </a>
 </div>
@@ -19,9 +19,11 @@ control. Read our [Local Privacy Policy](PRIVACY_POLICY.md).
 
 ### 🛡️ Privacy & Sovereignty
 
-* **Zero-Cloud Architecture:** Documents are stored in the **Origin Private File System (OPFS)**, isolated from other
-  websites.
-* **Biometric App Lock:** Immediate re-locking upon app multitasking/resume to prevent unauthorized physical access.
+* **Zero-Cloud Architecture:** Documents stay in the app's private storage on the phone (Android app), or in the
+  browser's private storage (OPFS and IndexedDB) on the web. Nothing is uploaded; every test fails if the app tries to
+  reach the network.
+* **App Lock (Android):** Optional fingerprint or face unlock (Android's own biometric prompt) when the app opens and
+  when it comes back from the background.
 * **Clipboard Auto-Clear (Opt-in):** Clears app-copied text from clipboard after 60 seconds.
 * **Stream-Encrypted Backups:** Export your library as a `.slbk` vault using AES-256-GCM with a chunked streaming
   protocol (Magic: `SLBK`).
@@ -32,9 +34,10 @@ control. Read our [Local Privacy Policy](PRIVACY_POLICY.md).
 
 ### 📸 Intelligent Scanning & Editing
 
-* **Dual Native Scan Modes:** On Android/iOS, choose `Quick Scan` (native ML scanner, default) or `Manual Scan` (live camera + edge overlay).
-* **Native Capture Stabilization:** In manual native mode, capture performs a best-effort AE/AF lock + short settle before shutter to reduce flicker/soft frames.
-* **Edge Detection:** Real-time boundary detection via Computer Vision workers.
+* **Quick Scan (Android):** Google's document scanner (ML Kit, part of Google Play services) finds the page edges and
+  straightens the page. It runs on the phone; it needs Google Play services on the phone.
+* **Camera Scan (web):** In the browser, a live camera view with edge detection in a Web Worker.
+* **Import:** Photos, images and PDFs from the phone or computer.
 * **Visual Filter Picker:** Real-time thumbnail previews for Magic Color, B&W, and Whiteboard filters.
 * **Quality Presets:** `Archive`, `Share`, and `Original` output policies balance readability, file size, and processing cost. `Original` disables auto-sharpening.
 * **Thumb Encoding Policy:** Library/editor thumbnails are encoded as WebP for smaller storage while master pages remain JPEG for compatibility.
@@ -54,10 +57,10 @@ control. Read our [Local Privacy Policy](PRIVACY_POLICY.md).
 ## 🏗️ Technical Architecture
 
 * **UI:** TypeScript + Lit (Web Components) + Tailwind CSS.
-* **Persistence:** Dexie.js (IndexedDB) for metadata; OPFS for high-performance binary storage.
+* **Persistence:** Dexie.js (IndexedDB) for metadata; page images in the app's private files on Android, OPFS on the web.
 * **Crypto:** Web Crypto API using PBKDF2-SHA-256 (`600,000` iterations, `16-byte` random salt) and AES-256-GCM
   (`12-byte` random IV per encrypted chunk).
-* **Native:** Capacitor 6+ for high-quality camera access, Biometrics, and native system sharing.
+* **Native:** Capacitor 8 (Android): document scanner, biometric lock, files and the system share sheet.
 * **Sensory:** Hybrid Haptic engine for tactile feedback on both Web and Native.
 * **Localization:** Single-file registry in `src/lib/i18n.ts` (locale config + all messages + text direction).
 
@@ -79,9 +82,10 @@ To add or update a language, edit only `src/lib/i18n.ts`:
 
 ## 📱 Minimum Platform Targets
 
-* **Android:** API 26+ (8.0), reference performance target tested on mid-range Android class devices (3GB RAM).
-* **Web/PWA:** Chrome 86+, Firefox 111+, Safari 15.2+.
-* **iOS (Capacitor):** iOS 15+ recommended baseline.
+* **Android:** Android 11 (API 30) or newer. Tested on a moto g75 5G (Android 16). Quick Scan needs Google Play
+  services.
+* **Web/PWA:** current Chrome, Firefox and Safari (OPFS required).
+* **iOS:** not built yet.
 
 These are product support targets for release validation (performance and compatibility gates), not a guarantee of
 identical performance on all hardware tiers.

@@ -23,7 +23,7 @@ To protect your privacy, this project does not have:
 
 ## 🐛 Reporting a Vulnerability
 
-Do not open a public GitHub Issue. Email **security@openwaqf.org**.
+Do not open a public GitHub Issue. Email **security@open-waqf.org**.
 Include:
 
 * Steps to reproduce (PoC).
