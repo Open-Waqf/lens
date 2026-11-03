@@ -128,7 +128,7 @@ export async function editorSettled(page: Page) {
 }
 
 /** OCR text of the newest page, once OCR is done (null if it did not finish in time). */
-export async function waitForOcr(page: Page, timeoutMs = 60_000): Promise<{status: string; text: string; words: number} | null> {
+export async function waitForOcr(page: Page, timeoutMs = 60_000): Promise<{status: string; text: string; words: number; distinctBoxes: number} | null> {
     const end = Date.now() + timeoutMs;
     while (Date.now() < end) {
         const last = await page.evaluate(() => new Promise<any>((resolve) => {
@@ -138,7 +138,13 @@ export async function waitForOcr(page: Page, timeoutMs = 60_000): Promise<{statu
                 all.onsuccess = () => {
                     const pages = (all.result as any[]).sort((a, b) => a.createdAt - b.createdAt);
                     const p = pages[pages.length - 1];
-                    resolve(p && {status: p.ocrStatus, text: (p.words || []).map((w: any) => w.text).join(' '), words: (p.words || []).length});
+                    const words = (p?.words || []) as Array<{text: string; box: number[]}>;
+                    resolve(p && {
+                        status: p.ocrStatus,
+                        text: words.map((w) => w.text).join(' '),
+                        words: words.length,
+                        distinctBoxes: new Set(words.map((w) => w.box.map((n) => n.toFixed(3)).join(','))).size,
+                    });
                 };
             };
         }));

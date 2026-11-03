@@ -22,6 +22,9 @@ test('P.2 A French page: save, then OCR reads it on the phone', async ({app: {pa
     expect(ocr?.status).toBe('done');
     expect(ocr?.text).toContain('Facture');
     expect(ocr?.text).toContain('Paris');
+    // Every word keeps its own position (PDF text layer, "Show OCR" boxes): not one block.
+    expect(ocr!.words).toBeGreaterThan(40);
+    expect(ocr!.distinctBoxes).toBe(ocr!.words);
     expect(appMemoryMb()).toBeLessThan(400);
 });
 
@@ -32,6 +35,8 @@ test('P.3 An Arabic page: OCR reads Arabic on the phone', async ({app: {page}}) 
     const ocr = await waitForOcr(page);
     expect(ocr?.status).toBe('done');
     expect(ocr?.text).toContain('بسم الله الرحمن الرحيم');
+    expect(ocr!.words).toBeGreaterThan(40);
+    expect(ocr!.distinctBoxes).toBe(ocr!.words);
 });
 
 test('P.4 Export PDF opens the Android share sheet with the PDF', async ({app: {page}}) => {

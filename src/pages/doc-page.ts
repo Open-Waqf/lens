@@ -26,6 +26,7 @@ import {showToast} from '../components/toast-notification';
 import {PDFDocument} from 'pdf-lib';
 import {Icons} from '../components/icons';
 import {getTextDirection} from '../lib/text-direction';
+import {pageText} from '../lib/ocr-text';
 
 @customElement('doc-page')
 export class DocPage extends LitElement {
@@ -285,7 +286,7 @@ export class DocPage extends LitElement {
 
     private getRawExtractedTextContent(): string {
         return this.pages
-            .map((p) => p.words?.map(w => w.text).join(' ').trim() || '')
+            .map((p) => pageText(p.words))
             .filter(Boolean)
             .join('\n\n');
     }
@@ -579,7 +580,8 @@ export class DocPage extends LitElement {
         if (!q) return this.pages;
         return this.pages.filter(p => {
             if (!p.words) return false;
-            return p.words.some(w => w.text.toLowerCase().includes(q));
+            // Search the page's text, not single words, so a phrase like "rue de la" matches.
+            return pageText(p.words).replace(/\s+/g, ' ').toLowerCase().includes(q.replace(/\s+/g, ' '));
         });
     }
 
@@ -791,7 +793,7 @@ export class DocPage extends LitElement {
                                         </div>
                                     </div>
                                 ` : this.pages.map((p, i) => {
-                                    const text = p.words?.map(w => w.text).join(' ').trim();
+                                    const text = pageText(p.words);
                                     if (!text) return null;
                                     return html`
                                         <div class="space-y-1">

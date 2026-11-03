@@ -126,7 +126,9 @@ export async function recognizeText(
         url = URL.createObjectURL(imageBlob);
 
         console.log(`OCR: Recognizing... (${width}x${height}) [${lang}]`);
-        const ret = await w.recognize(url);
+        // tesseract.js 7 returns word positions (TSV) only when asked here. The worker
+        // parameter `tessedit_create_tsv` alone does nothing.
+        const ret = await w.recognize(url, {}, {text: true, tsv: true});
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const data = ret.data as any;
