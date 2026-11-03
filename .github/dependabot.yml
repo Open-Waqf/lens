@@ -1,0 +1,34 @@
+# Dependabot: one small batch of update pull requests per month, not a stream.
+# Each pull request runs the checks on GitHub. Nothing is merged automatically.
+# Why some packages are held back: docs/DEPENDENCIES.md.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    target-branch: develop
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      # Capacitor core, android, cli and the plugins must stay on the same minor.
+      capacitor:
+        patterns: ["@capacitor/*", "@capacitor-mlkit/*", "@capawesome/*", "@capgo/*"]
+      # All other minor and patch updates together, in one pull request.
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # TypeScript 7 ships no tsserver, so IntelliJ loses type checking.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      # The OCR worker and core are copied into public/tesseract and must match the
+      # package version: upgrade by hand, following docs/DEPENDENCIES.md.
+      - dependency-name: tesseract.js
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    target-branch: develop
+    schedule:
+      interval: monthly
+    groups:
+      github-actions:
+        patterns: ["*"]
