@@ -403,7 +403,6 @@ test('PERF-RESET-001 nuclear reset 500-doc vault <= 3s @perf', async ({page}) =>
     await page.reload();
 
     await page.getByRole('button', {name: 'Show Destructive Options'}).click();
-    await page.locator('input[placeholder="DELETE"]').fill('DELETE');
 
     const t0 = Date.now();
     await page.getByRole('button', {name: 'Erase Everything'}).click();

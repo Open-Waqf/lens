@@ -122,11 +122,7 @@ test('Disaster Recovery Flow: Import -> Encrypt -> Wipe -> Restore', async ({pag
     // 5. WIPE
     await page.goto('/#/settings');
     const dangerZone = page.locator('#DangerZone');
-    const deleteInput = dangerZone.getByPlaceholder('DELETE');
-    if (await deleteInput.count() === 0 || !(await deleteInput.isVisible().catch(() => false))) {
-        await dangerZone.locator('button').first().click();
-    }
-    await deleteInput.fill('DELETE');
+    await dangerZone.getByRole('button', {name: 'Show Destructive Options'}).click();
     const eraseBtn = dangerZone.locator('button.bg-red-600').first();
     await expect(eraseBtn).toBeVisible({timeout: 10000});
     await expect(eraseBtn).toBeEnabled({timeout: 10000});
@@ -161,15 +157,10 @@ test('Disaster Recovery Flow: Import -> Encrypt -> Wipe -> Restore', async ({pag
     await restoreModal.getByPlaceholder(/Password/i).fill('secure123');
     await restoreModal.getByRole('button', {name: 'Restore', exact: true}).click();
 
-    // Handle Merge/Replace modal
-    const confirmInput = page.getByPlaceholder('MERGE or REPLACE');
-
-    // Use a longer timeout here because decryption/unzipping can be slow
-    await expect(confirmInput).toBeVisible({timeout: 15000});
-
-    // --- STEP C: Handle Merge/Replace Modal ---
-    await confirmInput.fill('REPLACE');
-    await page.locator('button').filter({hasText: /Continue/i}).click();
+    // Add to or replace the library: one button each (decryption can be slow)
+    const replaceBtn = page.getByRole('button', {name: 'Replace my library'});
+    await expect(replaceBtn).toBeVisible({timeout: 15000});
+    await replaceBtn.click();
 
     // 7. VERIFY
     await expect(page.locator('text=Restore complete!')).toBeVisible({timeout: 10000});

@@ -115,3 +115,24 @@ test('SLBK restore rejects unsupported future version backup', async ({page}) =>
     await page.goto('/#/library');
     await expect(page.getByText('No scans yet')).toBeVisible({timeout: 10000});
 });
+
+for (const [label, metadata] of [['empty metadata', '{}'], ['metadata that is not JSON', 'not json {']] as const) {
+    test(`SLBK restore of a damaged backup (${label}) says so clearly and changes nothing`, async ({page}) => {
+        // Regression (Nov 2026): a backup without docs/pages lists failed with a raw
+        // "Cannot read properties of undefined (reading 'length')".
+        const JSZip = (await import('jszip')).default;
+        const zip = new JSZip();
+        zip.file('metadata.json', metadata);
+        const buffer = await zip.generateAsync({type: 'nodebuffer'});
+
+        const chooserPromise = page.waitForEvent('filechooser');
+        await page.locator('text=Restore Backup').click();
+        await (await chooserPromise).setFiles({name: 'damaged.zip', mimeType: 'application/zip', buffer});
+        // A plain .zip backup has no password: leave the field empty.
+        await page.getByRole('button', {name: 'Restore', exact: true}).click({timeout: 10000});
+
+        await expect(page.getByText('Invalid backup: missing metadata.', {exact: false})).toBeVisible({timeout: 10000});
+        await expect(page.getByText(/Cannot read properties|JSON|Unexpected token/)).toHaveCount(0);
+        await expect(page.getByRole('button', {name: 'Add to my library'})).toHaveCount(0);
+    });
+}

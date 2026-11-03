@@ -17,6 +17,8 @@ export class ConfirmModal extends LitElement {
     @property({type: Boolean}) input = false; // Is this a prompt?
     @property({type: String}) inputValue = '';
     @property({type: String}) inputPlaceholder = '';
+    // A choice between several actions (one button each), instead of typing a word.
+    @property({attribute: false}) choices: Array<{value: string; label: string; destructive?: boolean}> = [];
 
     @query('input') inputEl!: HTMLInputElement;
 
@@ -43,6 +45,18 @@ export class ConfirmModal extends LitElement {
     }): Promise<string | null> {
         const modal = document.createElement('confirm-modal') as ConfirmModal;
         modal.input = true;
+        document.body.appendChild(modal);
+        return modal.show(opts) as Promise<string | null>;
+    }
+
+    /** One button per choice, plus Cancel. Resolves with the chosen value, or null. */
+    static async choose(opts: {
+        title: string;
+        description?: string;
+        choices: Array<{value: string; label: string; destructive?: boolean}>;
+    }): Promise<string | null> {
+        const modal = document.createElement('confirm-modal') as ConfirmModal;
+        modal.choices = opts.choices;
         document.body.appendChild(modal);
         return modal.show(opts) as Promise<string | null>;
     }
@@ -78,8 +92,8 @@ export class ConfirmModal extends LitElement {
     }
 
     private onCancel() {
-        this.resolve?.(null); // For prompt, null means cancel. For confirm, it's false-ish.
-        if (!this.input) this.resolve?.(false);
+        if (this.input || this.choices.length) this.resolve?.(null);
+        else this.resolve?.(false);
     }
 
     render() {
@@ -105,6 +119,21 @@ export class ConfirmModal extends LitElement {
                         />
                     ` : null}
 
+                    ${this.choices.length ? html`
+                        <div class="grid gap-3 pt-2">
+                            ${this.choices.map((c) => html`
+                                <button class="px-4 py-3 rounded-xl font-bold text-white transition-colors min-h-[44px] ${c.destructive ? 'bg-red-600 hover:bg-red-500' : 'bg-emerald-600 hover:bg-emerald-500'}"
+                                        data-choice=${c.value}
+                                        @click=${() => this.resolve?.(c.value)}>
+                                    ${c.label}
+                                </button>
+                            `)}
+                            <button class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition-colors min-h-[44px]"
+                                    @click=${() => this.onCancel()}>
+                                ${this.cancelLabel}
+                            </button>
+                        </div>
+                    ` : html`
                     <div class="grid grid-cols-2 gap-3 pt-2">
                         <button class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition-colors"
                                 @click=${() => this.onCancel()}>
@@ -115,6 +144,7 @@ export class ConfirmModal extends LitElement {
                             ${this.confirmLabel}
                         </button>
                     </div>
+                    `}
                 </div>
             </div>
         `;

@@ -87,9 +87,7 @@ test('P.6 Backup made on the phone restores on the phone with the same password'
     const restore = page.evaluate(() => (document.querySelector('settings-page') as any).importBackup((window as any).__restoreFile));
     await page.getByPlaceholder(/password/i).last().fill('test-1234');
     await page.getByRole('button', {name: 'Restore', exact: true}).click();
-    await page.getByText(/REPLACE/).first().waitFor();
-    await page.locator('input').last().fill('REPLACE');
-    await page.getByRole('button', {name: /Continue|Confirm|Apply/}).last().click();
+    await page.getByRole('button', {name: 'Replace my library'}).click({timeout: 30_000});
     await restore;
     await expect(page.getByText('Restore complete', {exact: false})).toBeVisible();
     const pages = await page.evaluate(() => new Promise<number>((resolve) => {

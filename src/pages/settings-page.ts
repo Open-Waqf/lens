@@ -36,6 +36,7 @@ import {
 } from '../services/mirror-backup';
 import {getPersistenceStatus, type PersistenceStatus} from '../services/storage-persistence';
 import {pickedFileToBlob} from '../services/picked-file';
+import type {DocRecord, PageRecord} from '../domain/types';
 
 type RestoreMode = 'merge' | 'replace';
 
@@ -53,7 +54,6 @@ export class SettingsPage extends LitElement {
     @state() private err: string | null = null;
 
     @state() private showDangerZone = false;
-    @state() private deleteConfirmation = '';
 
     @state() private storageUsed = 0;
     @state() private storageQuota = 0;
@@ -543,10 +543,18 @@ export class SettingsPage extends LitElement {
         if (!metaFile) throw new Error(t('settings.restore_invalid_backup'));
 
         const metaStr = await metaFile.async('string');
-        const backupData = JSON.parse(metaStr);
+        // A damaged or foreign file must give a clear message, never a raw TypeError, and
+        // must be refused before anything in the library is touched.
+        let backupData: {docs: unknown[]; pages: unknown[]};
+        try {
+            backupData = JSON.parse(metaStr);
+        } catch {
+            throw new Error(t('settings.restore_invalid_backup'));
+        }
+        if (!isBackupMetadata(backupData)) throw new Error(t('settings.restore_invalid_backup'));
 
         // 2. Ask User for Mode
-        const mode = await this.askRestoreMode(backupData.pages.length);
+        const mode = await this.askRestoreMode(backupData.docs.length);
         if (!mode) return;
 
         if (mode === 'replace') {
@@ -584,8 +592,8 @@ export class SettingsPage extends LitElement {
 
         // 5. Restore Database Records
         await db.transaction('rw', db.docs, db.pages, async () => {
-            for (const doc of backupData.docs) await db.docs.put(doc);
-            for (const page of backupData.pages) await db.pages.put(page);
+            for (const doc of backupData.docs as DocRecord[]) await db.docs.put(doc);
+            for (const page of backupData.pages as PageRecord[]) await db.pages.put(page);
         });
 
         this.msg = t('settings.restore_complete_processed', {count: this.backupProgress});
@@ -739,26 +747,18 @@ export class SettingsPage extends LitElement {
     }
 
     private async askRestoreMode(count: number): Promise<RestoreMode | null> {
-        const res = await ConfirmModal.prompt({
+        const res = await ConfirmModal.choose({
             title: t('settings.restore_mode_title'),
             description: t('settings.restore_mode_desc', {count}),
-            placeholder: t('settings.restore_mode_placeholder'),
-            confirm: t('settings.restore_mode_confirm')
+            choices: [
+                {value: 'merge', label: t('settings.restore_mode_merge')},
+                {value: 'replace', label: t('settings.restore_mode_replace'), destructive: true},
+            ],
         });
-
-        if (!res) return null;
-        const v = res.trim().toUpperCase();
-        if (v === 'MERGE') return 'merge';
-        if (v === 'REPLACE') return 'replace';
-        return null;
+        return res === 'merge' || res === 'replace' ? res : null;
     }
 
     private async nukeEverything() {
-        if (this.deleteConfirmation !== 'DELETE') {
-            this.msg = t('settings.delete_confirm_required');
-            return;
-        }
-
         const ok = await ConfirmModal.ask({
             title: t('settings.nuke_final_title'),
             description: t('settings.nuke_final_desc'),
@@ -1296,17 +1296,8 @@ export class SettingsPage extends LitElement {
                             <p class="font-bold mb-1">${t('settings.erase_all_title')}</p>
                             <p class="opacity-80">${t('settings.erase_all_body')}</p>
                         </div>
-                        <div class="space-y-2">
-                            <label class="text-xs text-red-400">${t('settings.erase_all_confirm_label')}</label>
-                            <input type="text"
-                                   class="w-full bg-slate-950 border border-red-900/50 rounded-lg px-3 py-2 text-red-100 focus:outline-none"
-                                   placeholder=${t('settings.delete_keyword')}
-                                   .value=${this.deleteConfirmation}
-                                   @input=${(e: Event) => this.deleteConfirmation = (e.target as HTMLInputElement).value}
-                            />
-                        </div>
                         <button class="w-full py-3 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold disabled:opacity-50"
-                                ?disabled=${this.deleteConfirmation !== 'DELETE' || this.busy}
+                                ?disabled=${this.busy}
                                 @click=${() => this.nukeEverything()}>
                             ${this.busy ? t('settings.erasing') : t('settings.erase_everything')}
                         </button>
@@ -1351,4 +1342,11 @@ function sanitizePath(unsafePath: string): string {
         throw new Error(`Security Warning: Skipping unauthorized file path: ${unsafePath}`);
     }
     return relative;
+}
+
+function isBackupMetadata(v: unknown): v is {docs: unknown[]; pages: unknown[]} {
+    const m = v as {docs?: unknown; pages?: unknown} | null;
+    if (!m || !Array.isArray(m.docs) || !Array.isArray(m.pages)) return false;
+    const hasId = (x: unknown) => !!x && typeof (x as {id?: unknown}).id === 'string';
+    return m.docs.every(hasId) && m.pages.every(hasId);
 }

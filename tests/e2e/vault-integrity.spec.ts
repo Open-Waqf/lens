@@ -17,9 +17,9 @@ test('Vault Integrity: Danger Zone reveal works', async ({page}) => {
     const dangerZone = page.locator('#DangerZone');
     await expect(dangerZone).toBeVisible();
 
-    // Verify Input exists
-    const input = page.locator('input[placeholder="DELETE"]');
-    await expect(input).toBeVisible();
+    // One red button; the final warning dialog is the confirmation (no word to type).
+    await expect(dangerZone.getByRole('button', {name: 'Erase Everything'})).toBeEnabled();
+    await expect(dangerZone.locator('input')).toHaveCount(0);
 });
 
 test('Vault Integrity: app-level storage audit cleans orphan detection', async ({page}) => {

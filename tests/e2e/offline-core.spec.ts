@@ -140,7 +140,6 @@ test('core flow works offline and does not attempt external network', async ({pa
     const backupBuffer = await exportBackupBuffer(page, 'offline123');
 
     await page.getByRole('button', {name: 'Show Destructive Options'}).click();
-    await page.locator('input[placeholder="DELETE"]').fill('DELETE');
     await page.getByRole('button', {name: 'Erase Everything'}).click();
     await page.getByRole('button', {name: 'Wipe Everything', exact: true}).click();
 
@@ -160,9 +159,7 @@ test('core flow works offline and does not attempt external network', async ({pa
     await expect(page.getByPlaceholder('Password')).toBeVisible({timeout: 10000});
     await page.getByPlaceholder('Password').fill('offline123');
     await page.getByRole('button', {name: 'Restore', exact: true}).click();
-    await expect(page.getByPlaceholder('MERGE or REPLACE')).toBeVisible({timeout: 10000});
-    await page.getByPlaceholder('MERGE or REPLACE').fill('MERGE');
-    await page.getByRole('button', {name: 'Continue', exact: true}).click();
+    await page.getByRole('button', {name: 'Add to my library'}).click({timeout: 10000});
     await expect(page.getByText('Restore complete! You can return to the Library.')).toBeVisible({timeout: 30000});
 
     await page.goto('/#/library');
