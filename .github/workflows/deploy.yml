@@ -120,3 +120,43 @@ jobs:
           git-config-name: "Open Waqf Bot"
           git-config-email: "bot@open-waqf.org"
           commit-message: "deploy: update lens (automated)"
+
+  # The Android app, built in parallel with the checks above. It catches what the web tests
+  # cannot: a Capacitor or plugin update (Dependabot) that breaks the Gradle build, or a
+  # dependency that brings an analytics or crash-reporting SDK into the app. The signed
+  # bundle for Google Play is still made on your computer (`npm run release`).
+  android-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build Web Assets and Sync Android
+        run: |
+          npm run build
+          npx cap sync android
+
+      - name: Build the Android App (debug)
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
+
+      - name: Scan for Telemetry SDKs
+        run: npm run test:no-telemetry
