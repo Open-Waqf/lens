@@ -45,7 +45,7 @@
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
-    "@capacitor/assets": "3.0.5",
+    "@capacitor/assets": "4.0.0",
     "@capacitor/cli": "^8.6.0",
     "@playwright/test": "1.64.1",
     "@tailwindcss/vite": "^4.3.4",
