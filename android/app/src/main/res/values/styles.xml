@@ -16,7 +16,12 @@
     </style>
 
 
+    <!-- Launch screen. Lens has only a dark design, so the splash is dark in the phone's
+         light mode too (Android 12+ otherwise draws it white in light mode). -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="android:windowSplashScreenBackground">@color/splash_background</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
     </style>
 </resources>

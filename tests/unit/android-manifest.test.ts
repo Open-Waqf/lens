@@ -27,3 +27,14 @@ describe('Android manifest: documents never leave the device', () => {
         expect(manifest).not.toMatch(/permission\.(CAMERA|READ_EXTERNAL_STORAGE|WRITE_EXTERNAL_STORAGE|ACCESS_FINE_LOCATION)/);
     });
 });
+
+describe('Android launch screen', () => {
+    it('is dark in the phone light mode too (the app has only a dark design)', () => {
+        // Regression (Nov 2026): Android 12+ drew the splash white when the phone was in light mode.
+        const styles = fs.readFileSync('android/app/src/main/res/values/styles.xml', 'utf8');
+        const launch = styles.match(/<style name="AppTheme.NoActionBarLaunch"[\s\S]*?<\/style>/)?.[0] || '';
+        expect(launch).toContain('<item name="windowSplashScreenBackground">@color/splash_background</item>');
+        const colors = fs.readFileSync('android/app/src/main/res/values/splash.xml', 'utf8');
+        expect(colors).toContain('<color name="splash_background">#0F172A</color>');
+    });
+});
