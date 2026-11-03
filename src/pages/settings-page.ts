@@ -15,27 +15,20 @@ import {OCR_LANG_OPTIONS} from '../lib/ocr';
 import {resetAllStorage} from '../services/reset-storage';
 import {ConfirmModal} from '../components/confirm-modal';
 import pkg from '../../package.json'
-import {settings, type ScanMode} from '../services/settings';
+import {settings} from '../services/settings';
 import {AuthService} from '../services/auth-service';
 import {i18n, t, type LocaleCode} from '../lib/i18n';
 import {toUserErrorMessage} from '../lib/user-error';
 import {mapRestoreError} from '../lib/restore-error';
 import {deleteOrphanStorageFiles, findOrphanStorageFiles} from '../services/storage-audit';
 
-import {repairLibrary} from '../services/repair';
 import {CapacitorFileStore} from "../services/filestore/capacitor-store";
 import {hasIndexLossRiskFlag, runStorageHealthProbe} from '../services/storage-health';
 import {rebuildLibraryIndexFromFiles} from '../services/rebuild-index';
 import {createTempBackupWriter} from '../services/backup-temp-store';
-import {
-    getMirrorFolderLabel,
-    hasMirrorBackupFolder,
-    isMirrorBackupSupported,
-    maybeMirrorBackupAfterExport,
-    pickMirrorBackupFolder
-} from '../services/mirror-backup';
 import {getPersistenceStatus, type PersistenceStatus} from '../services/storage-persistence';
 import {pickedFileToBlob} from '../services/picked-file';
+import {syncPrivacyScreen} from '../services/privacy-screen';
 import type {DocRecord, PageRecord} from '../domain/types';
 
 type RestoreMode = 'merge' | 'replace';
@@ -61,32 +54,21 @@ export class SettingsPage extends LitElement {
 
     // Initialize with defaults, update in connectedCallback
     @state() private requireAuth = false;
-    @state() private defaultVault = false;
 
-    private showAdvancedSecurity = false;
 
     // Progress State
     @state() private backupProgress = 0;
     @state() private backupTotal = 0;
     @state() private backupPhase: 'collecting' | 'encrypting' = 'collecting';
 
-    @state() private showRepairTool = false;
-    @state() private repairProgress = '';
 
     @state() private enableOcr = true;
     @state() private ocrLang = 'ara+eng';
-    @state() private scanMode: ScanMode = 'manual';
     @state() private clearClipboardAfter60s = false;
     @state() private hasIndexRisk = false;
     @state() private storageAuditBusy = false;
     @state() private storageAuditFound = 0;
     @state() private storageAuditDeleted = 0;
-    @state() private mirrorBackupEnabled = false;
-    @state() private mirrorBackupMode: 'manual' | 'after_export' = 'manual';
-    @state() private mirrorBackupReady = false;
-    @state() private mirrorFolderLabel: string | null = null;
-    @state() private mirrorNeedsReselect = false;
-    @state() private showMirrorAdvanced = false;
     @state() private showPrivacyDetails = false;
     @state() private showAdvancedDataTools = false;
     @state() private persistence: PersistenceStatus | null = null;
@@ -105,42 +87,11 @@ export class SettingsPage extends LitElement {
         if (!this.caps.isCapacitor) {
             await this.refreshPersistence(false);
         }
-        if (location.hash.includes('repair=1')) {
-            this.showRepairTool = true;
-        }
-
-        // 3. SECRET COMMAND: Expose a global function for manual trigger
-        // Usage: Type 'sahifahRepair()' in DevTools Console
-        (window as any).sahifahRepair = () => {
-            this.showRepairTool = true;
-            this.msg = t('settings.maintenance_enabled');
-            this.requestUpdate();
-        };
     }
 
     disconnectedCallback() {
         window.removeEventListener('sahifah-locale-changed', this.onLocaleChanged as EventListener);
         super.disconnectedCallback();
-    }
-
-    private async runRepair() {
-        this.busy = true;
-        try {
-            await this.runThumbnailRepairFlow();
-            this.msg = t('settings.repair_complete');
-        } catch (e) {
-            this.err = t('settings.repair_failed', {error: String(e)});
-        } finally {
-            this.busy = false;
-        }
-    }
-
-    private async runThumbnailRepairFlow() {
-        this.repairProgress = t('settings.repair_starting');
-        await repairLibrary((_curr, _total, msg) => {
-            this.repairProgress = msg;
-            this.requestUpdate();
-        });
     }
 
     private async rebuildIndex() {
@@ -161,16 +112,6 @@ export class SettingsPage extends LitElement {
             await this.refreshStorageRisk();
             this.msg = t('settings.rebuild_index_done', {docs: result.docsRecovered, pages: result.pagesRecovered});
 
-            const runRepairNow = await ConfirmModal.ask({
-                title: t('settings.repair_prompt_title'),
-                description: t('settings.repair_prompt_desc'),
-                confirm: t('settings.repair_prompt_confirm'),
-            });
-            if (runRepairNow) {
-                this.msg = t('settings.repair_running');
-                await this.runThumbnailRepairFlow();
-                this.msg = t('settings.repair_recovery_done');
-            }
         } catch (e) {
             this.err = t('settings.rebuild_index_failed', {error: String(e)});
         } finally {
@@ -181,15 +122,9 @@ export class SettingsPage extends LitElement {
     private async _refreshSettings() {
         const s = await settings.get();
         this.requireAuth = s.requireAuth;
-        this.defaultVault = s.defaultVault;
         this.enableOcr = s.enableOcr;
         this.ocrLang = s.ocrLang || 'ara+eng';
-        this.scanMode = s.scanMode || 'manual';
         this.clearClipboardAfter60s = s.clearClipboardAfter60s;
-        this.mirrorBackupEnabled = s.mirrorBackupEnabled;
-        this.mirrorBackupMode = s.mirrorBackupMode || 'manual';
-        this.mirrorBackupReady = await hasMirrorBackupFolder();
-        this.mirrorFolderLabel = getMirrorFolderLabel();
     }
 
     private async refreshStorageRisk() {
@@ -275,12 +210,6 @@ export class SettingsPage extends LitElement {
         settings.setOcrLang(lang);
     }
 
-    private setScanMode(mode: ScanMode) {
-        if (mode !== 'quick' && mode !== 'manual') return;
-        this.scanMode = mode;
-        settings.setScanMode(mode);
-    }
-
     private setLocale(locale: LocaleCode) {
         if (!i18n.setLocale(locale)) return;
         this.requestUpdate();
@@ -289,55 +218,6 @@ export class SettingsPage extends LitElement {
     private toggleClipboardAutoClear() {
         this.clearClipboardAfter60s = !this.clearClipboardAfter60s;
         settings.setClipboardAutoClear(this.clearClipboardAfter60s);
-    }
-
-    private async toggleMirrorBackupEnabled() {
-        const next = !this.mirrorBackupEnabled;
-        if (next && !isMirrorBackupSupported()) {
-            this.mirrorBackupEnabled = false;
-            settings.setMirrorBackupEnabled(false);
-            this.msg = t('settings.mirror_unsupported');
-            return;
-        }
-        this.mirrorBackupEnabled = next;
-        settings.setMirrorBackupEnabled(next);
-        if (next && !this.mirrorBackupReady) {
-            if (this.mirrorBackupMode !== 'after_export') {
-                this.mirrorBackupMode = 'after_export';
-                settings.setMirrorBackupMode('after_export');
-            }
-            this.msg = t('settings.mirror_pick_required');
-        }
-    }
-
-    private async pickMirrorBackupFolder() {
-        try {
-            const res = await pickMirrorBackupFolder();
-            this.mirrorBackupReady = res.ok;
-            if (!res.ok) {
-                if (res.reason === 'permission_denied') {
-                    this.err = t('settings.mirror_permission_denied');
-                } else if (res.reason === 'cancelled') {
-                    this.msg = t('settings.mirror_pick_cancelled');
-                } else if (res.reason === 'unsupported') {
-                    this.err = t('settings.mirror_unsupported');
-                } else {
-                    this.err = t('settings.mirror_pick_failed');
-                }
-                return false;
-            }
-            this.mirrorFolderLabel = getMirrorFolderLabel();
-            this.msg = t('settings.mirror_pick_success');
-            return true;
-        } catch (e) {
-            this.err = t('settings.mirror_pick_error', {error: toUserErrorMessage(e)});
-            return false;
-        }
-    }
-
-    private setMirrorBackupMode(mode: 'manual' | 'after_export') {
-        this.mirrorBackupMode = mode;
-        settings.setMirrorBackupMode(mode);
     }
 
     private async toggleAuth() {
@@ -355,11 +235,7 @@ export class SettingsPage extends LitElement {
 
         this.requireAuth = nextState;
         await settings.setAuth(nextState);
-    }
-
-    private toggleDefaultVault() {
-        this.defaultVault = !this.defaultVault;
-        settings.setVault(this.defaultVault);
+        await syncPrivacyScreen(nextState);
     }
 
     private formatBytes(bytes: number): string {
@@ -488,15 +364,6 @@ export class SettingsPage extends LitElement {
                 type: 'application/octet-stream',
                 lastModified: Date.now()
             });
-
-            const mirror = await maybeMirrorBackupAfterExport(namedFile);
-            if (mirror.status === 'mirrored') {
-                this.msg = t('settings.mirror_auto_saved', {file: mirror.filename || finalName});
-                this.mirrorNeedsReselect = false;
-            } else if (mirror.status === 'needs_setup') {
-                this.err = t('settings.mirror_needs_setup_reselect');
-                this.mirrorNeedsReselect = true;
-            }
 
             AuthService.ignoreNextResumeForExternalAction('export-backup-share', AuthService.SHARE_BYPASS_TTL_MS);
             await shareFile(namedFile, finalName);
@@ -857,20 +724,10 @@ export class SettingsPage extends LitElement {
                         <div class="pointer-events-auto mt-2 p-4 rounded-lg bg-red-950/50 text-red-100 border border-red-900 flex items-start justify-between gap-3 shadow-lg">
                             <div class="flex-1">
                                 <div class="font-medium">${this.err}</div>
-                                ${this.mirrorNeedsReselect ? html`
-                                    <button class="mt-2 px-3 py-1.5 rounded-lg bg-red-900/60 hover:bg-red-800/60 text-xs text-red-100 border border-red-700/50"
-                                            @click=${async () => {
-                                                this.err = null;
-                                                this.mirrorNeedsReselect = false;
-                                                await this.pickMirrorBackupFolder();
-                                            }}>
-                                        ${t('settings.mirror_reselect')}
-                                    </button>
-                                ` : null}
                             </div>
                             <button class="text-red-300 hover:text-red-100 text-sm shrink-0"
                                     aria-label=${t('common.cancel')}
-                                    @click=${() => { this.err = null; this.mirrorNeedsReselect = false; }}>✕</button>
+                                    @click=${() => { this.err = null; }}>✕</button>
                         </div>
                     ` : null}
                 </div>
@@ -917,7 +774,7 @@ export class SettingsPage extends LitElement {
                 <div class="flex items-center justify-between">
                     <div>
                         <div class="text-sm text-slate-200">${t('settings.app_lock')}</div>
-                        <div class="text-[10px] text-slate-500">${t('settings.app_lock_desc')}</div>
+                        <div class="text-[10px] text-slate-400">${t('settings.app_lock_desc')}</div>
                     </div>
                     <button class="relative h-6 w-11 rounded-full transition-colors ${this.requireAuth ? 'bg-emerald-600' : 'bg-slate-700'}"
                             aria-label=${t('settings.app_lock')}
@@ -926,19 +783,6 @@ export class SettingsPage extends LitElement {
                     </button>
                 </div>
 
-                ${this.showAdvancedSecurity ? html`
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <div class="text-sm text-slate-200">${t('settings.vault_mode_label')}</div>
-                            <div class="text-[10px] text-slate-500">${t('settings.vault_mode_desc')}</div>
-                        </div>
-                        <button class="relative h-6 w-11 rounded-full transition-colors ${this.defaultVault ? 'bg-emerald-600' : 'bg-slate-700'}"
-                                aria-label=${t('settings.vault_mode')}
-                                @click=${this.toggleDefaultVault}>
-                            <span class="absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${this.defaultVault ? 'translate-x-5' : ''}"></span>
-                        </button>
-                    </div>
-                ` : null}
             </section>
         `;
     }
@@ -967,7 +811,7 @@ export class SettingsPage extends LitElement {
                     </div>
                 ` : null}
 
-                <div class="text-[10px] text-slate-500">${infoText}</div>
+                <div class="text-[10px] text-slate-400">${infoText}</div>
                 ${this.caps.isCapacitor ? null : html`
                     <div class="p-3 rounded-lg border border-slate-800 bg-slate-900/50 space-y-2">
                         <div class="text-xs text-slate-300">${t('settings.persistence_title')}</div>
@@ -1000,7 +844,6 @@ export class SettingsPage extends LitElement {
             <section class="space-y-3">
                 <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">${t('settings.data_management')}</h2>
                 ${this.renderBackupStatus()}
-                ${this.renderMirrorBackupSection()}
                 <div class="grid gap-3">
 
                     <button class="flex items-center justify-between p-4 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors"
@@ -1014,7 +857,7 @@ export class SettingsPage extends LitElement {
                             </div>
                             <div class="text-start">
                                 <div class="text-slate-200 font-medium">${t('settings.export_backup')}</div>
-                                <div class="text-xs text-slate-500">${t('settings.export_backup_desc')}</div>
+                                <div class="text-xs text-slate-400">${t('settings.export_backup_desc')}</div>
                             </div>
                         </div>
                     </button>
@@ -1031,7 +874,7 @@ export class SettingsPage extends LitElement {
                             </div>
                             <div class="text-start">
                                 <div class="text-slate-200 font-medium">${t('settings.restore_backup')}</div>
-                                <div class="text-xs text-slate-500">${t('settings.restore_backup_desc')}</div>
+                                <div class="text-xs text-slate-400">${t('settings.restore_backup_desc')}</div>
                             </div>
                         </div>
                         ${!this.caps.isCapacitor ? html`
@@ -1071,44 +914,6 @@ export class SettingsPage extends LitElement {
                         ${this.showAdvancedDataTools ? t('settings.hide_advanced_tools') : t('settings.show_advanced_tools')}
                     </button>
 
-                    ${this.showAdvancedDataTools && this.showRepairTool ? html`
-                        <button class="flex items-center justify-between p-4 rounded-xl bg-indigo-950/30 border border-indigo-500/30 hover:bg-indigo-900/40 transition-colors"
-                                ?disabled=${this.busy} @click=${() => this.runRepair()}>
-                            <div class="flex items-center gap-3">
-                                <div class="p-2 rounded-lg bg-indigo-900/50 text-indigo-400">
-                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                              d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path>
-                                    </svg>
-                                </div>
-                                <div class="text-start">
-                                    <div class="text-indigo-200 font-medium">${t('settings.repair_thumbnails')}</div>
-                                    <div class="text-xs text-indigo-400">${t('settings.repair_thumbnails_desc')}</div>
-                                </div>
-                            </div>
-                            ${this.repairProgress ? html`<span
-                                    class="text-xs font-mono text-indigo-300">${this.repairProgress}</span>` : null}
-                        </button>
-                    ` : null}
-
-                    ${this.showAdvancedDataTools && (this.hasIndexRisk || this.showRepairTool) ? html`
-                        <button class="flex items-center justify-between p-4 rounded-xl bg-red-950/20 border border-red-500/30 hover:bg-red-900/30 transition-colors"
-                                ?disabled=${this.busy} @click=${() => this.rebuildIndex()}>
-                            <div class="flex items-center gap-3">
-                                <div class="p-2 rounded-lg bg-red-900/40 text-red-300">
-                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                              d="M4 4v6h6M20 20v-6h-6M5.636 18.364A9 9 0 1020 12"></path>
-                                    </svg>
-                                </div>
-                                <div class="text-start">
-                                    <div class="text-red-100 font-medium">${t('settings.rebuild_index_cta')}</div>
-                                    <div class="text-xs text-red-300/80">${t('settings.rebuild_index_cta_desc')}</div>
-                                </div>
-                            </div>
-                        </button>
-                    ` : null}
-
                     ${this.showAdvancedDataTools ? html`
                     <button class="flex items-center justify-between p-4 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors"
                             data-testid="run-storage-audit-btn"
@@ -1123,7 +928,7 @@ export class SettingsPage extends LitElement {
                             </div>
                             <div class="text-start">
                                 <div class="text-slate-200 font-medium">${t('settings.storage_audit_title')}</div>
-                                <div class="text-xs text-slate-500">${t('settings.storage_audit_desc')}</div>
+                                <div class="text-xs text-slate-400">${t('settings.storage_audit_desc')}</div>
                             </div>
                         </div>
                         <div class="text-xs text-slate-400" data-testid="storage-audit-summary">
@@ -1143,65 +948,6 @@ export class SettingsPage extends LitElement {
         `;
     }
 
-    private renderMirrorBackupSection() {
-        const unsupported = !isMirrorBackupSupported();
-        return html`
-            <div class="p-3 rounded-xl border border-slate-800 bg-slate-900/60 space-y-2">
-                <div class="flex items-center justify-between gap-3">
-                    <div class="text-start flex-1 min-w-0">
-                        <div class="text-sm text-slate-200 font-medium">${t('settings.mirror_title')}</div>
-                        <div class="text-xs text-slate-500">${t('settings.mirror_desc')}</div>
-                        <div class="text-[11px] text-slate-500 mt-1">${t('settings.mirror_trigger_note')}</div>
-                    </div>
-                    <button class="relative h-6 w-11 rounded-full transition-colors shrink-0 ${this.mirrorBackupEnabled ? 'bg-emerald-600' : 'bg-slate-700'}"
-                            aria-label=${t('settings.mirror_title')}
-                            ?disabled=${this.busy}
-                            @click=${() => this.toggleMirrorBackupEnabled()}>
-                        <span class="absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${this.mirrorBackupEnabled ? 'translate-x-5' : ''}"></span>
-                    </button>
-                </div>
-
-                ${unsupported ? html`
-                    <div class="text-[11px] text-slate-500">${t('settings.mirror_unsupported')}</div>
-                ` : html`
-                    <div class="flex items-center justify-between gap-2">
-                        <div class="text-xs ${this.mirrorBackupReady ? 'text-emerald-300' : 'text-amber-300'}">
-                            ${this.mirrorBackupReady ? t('settings.mirror_folder_ready') : t('settings.mirror_folder_missing')}
-                            ${this.mirrorBackupReady && this.mirrorFolderLabel ? html`
-                                <div class="mt-1 text-[10px] text-slate-400 break-all">${this.mirrorFolderLabel}</div>
-                            ` : null}
-                        </div>
-                        <button class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 min-h-[44px]"
-                                ?disabled=${this.busy}
-                                @click=${() => this.pickMirrorBackupFolder()}>
-                            ${t('settings.mirror_choose_folder')}
-                        </button>
-                    </div>
-                    <div class="text-[11px] text-slate-500">${t('settings.mirror_picker_hint')}</div>
-
-                    <button class="text-xs text-slate-400 hover:text-slate-200"
-                            @click=${() => this.showMirrorAdvanced = !this.showMirrorAdvanced}>
-                        ${this.showMirrorAdvanced ? t('settings.mirror_hide_advanced') : t('settings.mirror_show_advanced')}
-                    </button>
-
-                    ${this.showMirrorAdvanced ? html`
-                        <div class="space-y-2 p-2 rounded-lg border border-slate-800 bg-black/30">
-                            <label class="text-[10px] text-slate-500 uppercase tracking-wider">${t('settings.mirror_when')}</label>
-                            <select
-                                    class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100"
-                                    .value=${this.mirrorBackupMode}
-                                    @change=${(e: Event) => this.setMirrorBackupMode((e.target as HTMLSelectElement).value as 'manual' | 'after_export')}>
-                                <option value="manual">${t('settings.mirror_mode_manual')}</option>
-                                <option value="after_export">${t('settings.mirror_mode_after_export')}</option>
-                            </select>
-                            <div class="text-[11px] text-amber-200/90">${t('settings.mirror_advanced_warning')}</div>
-                        </div>
-                    ` : null}
-                `}
-            </div>
-        `;
-    }
-
     private renderProcessingSection() {
         return html`
             <section class="p-4 rounded-xl border border-slate-700 bg-slate-800/50 space-y-4">
@@ -1216,7 +962,7 @@ export class SettingsPage extends LitElement {
                 <div class="flex items-center justify-between">
                     <div>
                         <div class="text-sm text-slate-200">${t('settings.ocr_label')}</div>
-                        <div class="text-[10px] text-slate-500">${t('settings.ocr_desc')}</div>
+                        <div class="text-[10px] text-slate-400">${t('settings.ocr_desc')}</div>
                     </div>
                     <button class="relative h-6 w-11 rounded-full transition-colors ${this.enableOcr ? 'bg-emerald-600' : 'bg-slate-700'}"
                             aria-label=${t('settings.ocr_toggle')}
@@ -1226,7 +972,7 @@ export class SettingsPage extends LitElement {
                 </div>
 
                 <div class="space-y-2">
-                    <label class="text-[10px] text-slate-500 uppercase tracking-wider">${t('settings.language')}</label>
+                    <label class="text-[10px] text-slate-400 uppercase tracking-wider">${t('settings.language')}</label>
                     <select
                             class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100"
                             @change=${(e: Event) => this.setLocale((e.target as HTMLSelectElement).value as LocaleCode)}>
@@ -1236,11 +982,11 @@ export class SettingsPage extends LitElement {
                             </option>
                         `)}
                     </select>
-                    <div class="text-[11px] text-slate-500">${t('settings.language_help')}</div>
+                    <div class="text-[11px] text-slate-400">${t('settings.language_help')}</div>
                 </div>
 
                 <div class="space-y-2">
-                    <label class="text-[10px] text-slate-500 uppercase tracking-wider">${t('settings.ocr_language')}</label>
+                    <label class="text-[10px] text-slate-400 uppercase tracking-wider">${t('settings.ocr_language')}</label>
                     <select
                             class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100"
                             .value=${this.ocrLang}
@@ -1251,24 +997,10 @@ export class SettingsPage extends LitElement {
                     </select>
                 </div>
 
-                ${this.caps.isCapacitor ? html`
-                    <div class="space-y-2">
-                        <label class="text-[10px] text-slate-500 uppercase tracking-wider">${t('settings.scan_mode')}</label>
-                        <select
-                                class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100"
-                                .value=${this.scanMode}
-                                @change=${(e: Event) => this.setScanMode((e.target as HTMLSelectElement).value as ScanMode)}>
-                            <option value="quick">${t('settings.scan_mode_quick')}</option>
-                            <option value="manual">${t('settings.scan_mode_manual')}</option>
-                        </select>
-                        <div class="text-[11px] text-slate-500">${t('settings.scan_mode_desc')}</div>
-                    </div>
-                ` : null}
-
                 <div class="flex items-center justify-between">
                     <div>
                         <div class="text-sm text-slate-200">${t('settings.clipboard_auto_clear')}</div>
-                        <div class="text-[10px] text-slate-500">${t('settings.clipboard_auto_clear_desc')}</div>
+                        <div class="text-[10px] text-slate-400">${t('settings.clipboard_auto_clear_desc')}</div>
                     </div>
                     <button class="relative h-6 w-11 rounded-full transition-colors ${this.clearClipboardAfter60s ? 'bg-emerald-600' : 'bg-slate-700'}"
                             aria-label=${t('settings.clipboard_auto_clear')}
@@ -1319,9 +1051,9 @@ export class SettingsPage extends LitElement {
         const daysSince = Math.floor((Date.now() - this.lastBackupDate) / (1000 * 60 * 60 * 24));
         const isOverdue = daysSince > 30;
         return html`
-            <div class="text-[10px] ${isOverdue ? 'text-amber-500 font-bold' : 'text-slate-500'}">
+            <div class="text-[10px] ${isOverdue ? 'text-amber-500 font-bold' : 'text-slate-400'}">
                 ${t('settings.last_backup_line', {
-                    date: new Date(this.lastBackupDate).toLocaleDateString(),
+                    date: new Date(this.lastBackupDate).toLocaleDateString(i18n.getLocale()),
                     days: daysSince
                 })}
                 ${isOverdue ? t('settings.backup_recommended_suffix') : ''}

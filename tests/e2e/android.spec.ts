@@ -125,4 +125,21 @@ test.describe('A. Android app (fake Android bridge) @phone', () => {
         await page.goto('/#/library');
         await expect.poll(() => nativeFiles(page)).toEqual(['DATA/docs/doc1/pages/p1.jpg']);
     });
+
+    test('A.11 Screenshots are blocked only while App Lock is on', async ({page}) => {
+        await fakeAndroid(page);
+        await page.goto('/#/settings');
+        await expect.poll(async () => (await nativeCalls(page, 'PrivacyScreen')).map((c) => c.options.enabled)).toEqual([false]);
+        await page.getByRole('button', {name: 'App Lock'}).click();
+        await expect.poll(async () => (await nativeCalls(page, 'PrivacyScreen')).map((c) => c.options.enabled)).toEqual([false, true]);
+        await page.getByRole('button', {name: 'App Lock'}).click();
+        await expect.poll(async () => (await nativeCalls(page, 'PrivacyScreen')).map((c) => c.options.enabled)).toEqual([false, true, false]);
+    });
+
+    test('A.12 With App Lock on, screenshots are blocked from the start', async ({page}) => {
+        await enableAppLock(page);
+        await fakeAndroid(page);
+        await page.goto('/#/library');
+        await expect.poll(async () => (await nativeCalls(page, 'PrivacyScreen')).map((c) => c.options.enabled)).toEqual([true]);
+    });
 });

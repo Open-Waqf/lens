@@ -77,15 +77,12 @@ vi.mock('../../src/services/db', () => {
 });
 
 import {ScanRepo} from '../../src/pages/scan/scan-repo';
-import {
-    clearStorageCleanupPending,
-    hasStorageCleanupPending
-} from '../../src/services/storage-cleanup-flag';
 
-describe('ScanRepo storage consistency signaling', () => {
+// When a file cannot be deleted, the document or page still leaves the library and nothing
+// throws. The file left behind is an orphan: the storage check at every start removes it.
+describe('ScanRepo: deleting when a file cannot be deleted', () => {
     beforeEach(() => {
         localStorage.clear();
-        clearStorageCleanupPending();
         state.docs.clear();
         state.pages.clear();
         state.deletedPaths = [];
@@ -101,21 +98,17 @@ describe('ScanRepo storage consistency signaling', () => {
         });
     });
 
-    it('marks cleanup pending when page file deletion fails', async () => {
+    it('still removes the page from the library', async () => {
         state.deleteShouldFail = true;
-        const repo = new ScanRepo();
-
-        await repo.deletePage('p1');
-
-        expect(hasStorageCleanupPending()).toBe(true);
+        await new ScanRepo().deletePage('p1');
+        expect(state.pages.has('p1')).toBe(false);
+        expect(state.docs.get('d1')?.pageIds).toEqual([]);
     });
 
-    it('marks cleanup pending when document file deletion fails', async () => {
+    it('still removes the document from the library', async () => {
         state.deleteShouldFail = true;
-        const repo = new ScanRepo();
-
-        await repo.deleteDocCompletely('d1');
-
-        expect(hasStorageCleanupPending()).toBe(true);
+        await new ScanRepo().deleteDocCompletely('d1');
+        expect(state.docs.has('d1')).toBe(false);
+        expect(state.pages.has('p1')).toBe(false);
     });
 });

@@ -44,6 +44,19 @@ export function tapScreenText(text: string) {
 
 export const pressPhoneBack = () => adb('shell', 'input', 'keyevent', 'KEYCODE_BACK');
 
+/**
+ * Close the Android share sheet and wait until Lens is in front again. A Back press while
+ * the sheet is still loading its targets is ignored by Android, so press until it closes.
+ */
+export async function closeShareSheet() {
+    for (let i = 0; i < 5; i++) {
+        if (topActivity().includes(APP_ID)) return;
+        pressPhoneBack();
+        await sleep(1000);
+    }
+    throw new Error(`The share sheet did not close (in front: ${topActivity()})`);
+}
+
 /** App memory (PSS) in MB, as Android reports it. */
 export function appMemoryMb(): number {
     const m = adb('shell', 'dumpsys', 'meminfo', APP_ID).match(/TOTAL PSS:\s+(\d+)/);

@@ -32,3 +32,29 @@ test('R.3 the bottom bar reads right to left: Library on the right, Settings on 
     const settings = await page.getByRole('navigation').getByRole('link', {name: 'الإعدادات'}).boundingBox();
     expect(library!.x).toBeGreaterThan(settings!.x);
 });
+
+test('R.4 the Arabic library shows Arabic counts, dates and prompts, no English left @rtl-only', async ({page}) => {
+    await page.goto('/#/library');
+    await page.evaluate(async () => {
+        const db = await new Promise<IDBDatabase>((resolve) => { const q = indexedDB.open('sahifah-lens'); q.onsuccess = () => resolve(q.result); });
+        await new Promise<void>((resolve) => {
+            const tx = db.transaction(['docs'], 'readwrite');
+            const when = new Date('2026-11-03T10:00:00').getTime();
+            // 6 documents and no backup yet: the "protect your data" prompt shows.
+            for (let i = 0; i < 6; i++) {
+                tx.objectStore('docs').put({id: `ar_${i}`, title: `وثيقة ${i}`, folder: null, tags: [],
+                    pageIds: i === 0 ? ['p'] : ['p1', 'p2', 'p3'], createdAt: when, updatedAt: when - i});
+            }
+            tx.oncomplete = () => resolve();
+        });
+        db.close();
+    });
+    await page.reload();
+    await expect(page.getByText('صفحة واحدة')).toBeVisible();
+    await expect(page.getByText('عدد الصفحات: 3').first()).toBeVisible();
+    await expect(page.getByText('احمِ بياناتك')).toBeVisible();
+    const visible = await page.locator('main').innerText();
+    // Only brand and format names may stay in Latin letters.
+    const latin = visible.replace(/\b(Lens|Sahifah|PDF|OCR|slbk)\b/g, '').match(/[A-Za-z]{2,}/g) || [];
+    expect(latin).toEqual([]);
+});

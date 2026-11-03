@@ -8,7 +8,6 @@ import {getFileStore} from '../../services/filestore';
 import {bytesToBlob} from "../../lib/bytes";
 import {ocrQueue} from '../../services/ocr-queue';
 import {settings} from '../../services/settings';
-import {markStorageCleanupPending} from '../../services/storage-cleanup-flag';
 import {detectImageMime} from '../../lib/image/mime';
 
 export type DocStripItem = { id: string; thumbBytes: Uint8Array };
@@ -158,12 +157,6 @@ export class ScanRepo {
         return Array.from(new Set(folders)).sort();
     }
 
-    async getAllTags(): Promise<string[]> {
-        const docs = await db.docs.toArray();
-        const tags = docs.flatMap(d => d.tags);
-        return Array.from(new Set(tags)).sort();
-    }
-
     async deleteFolder(folderName: string): Promise<void> {
         await db.transaction('rw', db.docs, async () => {
             await db.docs.where('folder').equals(folderName).modify({
@@ -231,12 +224,12 @@ export class ScanRepo {
             try {
                 await store.del(oldPage.imagePath);
             } catch {
-                markStorageCleanupPending();
+                // Left behind: the storage check at start removes orphan files.
             }
             try {
                 await store.del(oldPage.thumbPath);
             } catch {
-                markStorageCleanupPending();
+                // Left behind: the storage check at start removes orphan files.
             }
 
         } catch (e) {
@@ -283,12 +276,12 @@ export class ScanRepo {
         try {
             await store.del(page.imagePath);
         } catch {
-            markStorageCleanupPending();
+            // Left behind: the storage check at start removes orphan files.
         }
         try {
             await store.del(page.thumbPath);
         } catch {
-            markStorageCleanupPending();
+            // Left behind: the storage check at start removes orphan files.
         }
 
         // 3. Rebuild Index (Removes text of deleted page)
@@ -311,19 +304,19 @@ export class ScanRepo {
             try {
                 await store.del(p.imagePath);
             } catch {
-                markStorageCleanupPending();
+                // Left behind: the storage check at start removes orphan files.
             }
             try {
                 await store.del(p.thumbPath);
             } catch {
-                markStorageCleanupPending();
+                // Left behind: the storage check at start removes orphan files.
             }
         }
         if (doc?.pdfPath) {
             try {
                 await store.del(doc.pdfPath);
             } catch {
-                markStorageCleanupPending();
+                // Left behind: the storage check at start removes orphan files.
             }
         }
     }
@@ -343,111 +336,6 @@ export class ScanRepo {
             .trim();
 
         await db.docs.update(docId, {searchIndex: fullText});
-    }
-
-    async mergeDocuments(docIds: string[]): Promise<string> {
-        if (docIds.length < 2) return docIds[0];
-
-        const [targetId, ...others] = docIds;
-        const targetDoc = await db.docs.get(targetId);
-        if (!targetDoc) throw new Error("Target document not found");
-
-        const store = getFileStore();
-        type MovePlan = {
-            pageId: string;
-            oldImagePath: string;
-            oldThumbPath: string;
-            newImagePath: string;
-            newThumbPath: string;
-            imageBytes: Uint8Array;
-            thumbBytes: Uint8Array;
-            imageMime: string;
-            thumbMime: string;
-        };
-
-        const moves: MovePlan[] = [];
-        const otherDocs: DocRecord[] = [];
-        const combinedPageIds = [...targetDoc.pageIds];
-        for (const otherId of others) {
-            const otherDoc = await db.docs.get(otherId);
-            if (!otherDoc) continue;
-            otherDocs.push(otherDoc);
-            combinedPageIds.push(...otherDoc.pageIds);
-
-            const pages = await db.pages.where('docId').equals(otherId).toArray();
-            for (const page of pages) {
-                const imageBytes = await store.get(page.imagePath);
-                const thumbBytes = await store.get(page.thumbPath);
-                const imageExt = pathExt(page.imagePath, '.jpg');
-                const thumbExt = pathExt(page.thumbPath, '.jpg');
-                moves.push({
-                    pageId: page.id,
-                    oldImagePath: page.imagePath,
-                    oldThumbPath: page.thumbPath,
-                    newImagePath: `docs/${targetId}/pages/${page.id}${imageExt}`,
-                    newThumbPath: `docs/${targetId}/thumbs/${page.id}${thumbExt}`,
-                    imageBytes,
-                    thumbBytes,
-                    imageMime: detectImageMime(imageBytes),
-                    thumbMime: detectImageMime(thumbBytes),
-                });
-            }
-        }
-
-        const createdPaths: string[] = [];
-        try {
-            for (const move of moves) {
-                await store.put(move.newImagePath, move.imageBytes, move.imageMime);
-                createdPaths.push(move.newImagePath);
-                await store.put(move.newThumbPath, move.thumbBytes, move.thumbMime);
-                createdPaths.push(move.newThumbPath);
-            }
-
-            await db.transaction('rw', [db.docs, db.pages], async () => {
-                for (const move of moves) {
-                    await db.pages.update(move.pageId, {
-                        docId: targetId,
-                        imagePath: move.newImagePath,
-                        thumbPath: move.newThumbPath,
-                    });
-                }
-
-                for (const otherDoc of otherDocs) {
-                    await db.docs.delete(otherDoc.id);
-                }
-
-                await db.docs.update(targetId, {
-                    pageIds: combinedPageIds,
-                    updatedAt: Date.now()
-                });
-            });
-        } catch (e) {
-            for (const path of createdPaths) {
-                try {
-                    await store.del(path);
-                } catch {
-                    markStorageCleanupPending();
-                }
-            }
-            throw e;
-        }
-
-        for (const move of moves) {
-            try {
-                await store.del(move.oldImagePath);
-            } catch {
-                markStorageCleanupPending();
-            }
-            try {
-                await store.del(move.oldThumbPath);
-            } catch {
-                markStorageCleanupPending();
-            }
-        }
-
-        await this.rebuildDocIndex(targetId);
-
-        return targetId;
     }
 
     private async runBackgroundOcr(pageId: string, bytes: Uint8Array, w: number, h: number) {
@@ -494,10 +382,4 @@ export class ScanRepo {
             ocrQueue.completeJob(pageId, false);
         }
     }
-}
-
-function pathExt(path: string, fallback: string): string {
-    const dot = path.lastIndexOf('.');
-    if (dot <= -1 || dot < path.lastIndexOf('/')) return fallback;
-    return path.slice(dot);
 }

@@ -1,7 +1,7 @@
 // lens.spec.ts: the main flows on a real phone. Run with `npm run test:android`.
 // Only what a real phone can show: Playwright on the computer covers the rest (npm run check).
 import path from 'node:path';
-import {adb, APP_ID, appMemoryMb, expect, importPhoto, pressPhoneBack, screenTexts, sleep, test, topActivity, waitForOcr} from './phone';
+import {adb, APP_ID, appMemoryMb, closeShareSheet, expect, importPhoto, pressPhoneBack, screenTexts, test, topActivity, waitForOcr} from './phone';
 
 const PHOTOS = path.resolve('tests/fixtures/photos');
 
@@ -51,8 +51,7 @@ test('P.4 Export PDF opens the Android share sheet with the PDF', async ({app: {
     if (adb('shell', 'pm', 'list', 'packages', 'org.openwaqf.signer.dev').includes('signer.dev')) {
         expect(texts).toContain('Signer Dev');
     }
-    pressPhoneBack();
-    await expect.poll(topActivity).toContain(APP_ID);
+    await closeShareSheet();
 });
 
 test('P.5 A very large photo (48 MP) opens and saves without the app dying', async ({app: {page}}) => {
@@ -75,9 +74,9 @@ test('P.6 Backup made on the phone restores on the phone with the same password'
     const name = adb('shell', 'run-as', APP_ID, 'ls', 'files/exports').trim().split(/\s+/)[0];
     expect(name).toMatch(/\.slbk$/);
     const base64 = adb('shell', 'run-as', APP_ID, 'base64', '-w', '0', `files/exports/${name}`).trim();
-    pressPhoneBack();
-    await expect.poll(topActivity).toContain(APP_ID);
-    await sleep(500);
+    await closeShareSheet();
+    // Closing the share sheet deletes the temporary copies (checked on the phone, Nov 2026).
+    await expect.poll(() => adb('shell', 'run-as', APP_ID, 'ls', 'cache/share', 'files/exports').trim().split(/\s+/).filter((l) => /\.(pdf|slbk)$/.test(l))).toEqual([]);
 
     // Restore it (through the app's restore code; the system picker cannot be scripted).
     await page.evaluate(async (b64) => {

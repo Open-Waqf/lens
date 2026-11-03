@@ -122,7 +122,7 @@ export class ConfirmModal extends LitElement {
                     ${this.choices.length ? html`
                         <div class="grid gap-3 pt-2">
                             ${this.choices.map((c) => html`
-                                <button class="px-4 py-3 rounded-xl font-bold text-white transition-colors min-h-[44px] ${c.destructive ? 'bg-red-600 hover:bg-red-500' : 'bg-emerald-600 hover:bg-emerald-500'}"
+                                <button class="px-4 py-3 rounded-xl font-bold text-white transition-colors min-h-[44px] ${c.destructive ? 'bg-red-600 hover:bg-red-500' : 'bg-emerald-700 hover:bg-emerald-600'}"
                                         data-choice=${c.value}
                                         @click=${() => this.resolve?.(c.value)}>
                                     ${c.label}
@@ -139,7 +139,7 @@ export class ConfirmModal extends LitElement {
                                 @click=${() => this.onCancel()}>
                             ${this.cancelLabel}
                         </button>
-                        <button class="px-4 py-3 rounded-xl font-bold text-white transition-colors ${this.destructive ? 'bg-red-600 hover:bg-red-500' : 'bg-emerald-600 hover:bg-emerald-500'}"
+                        <button class="px-4 py-3 rounded-xl font-bold text-white transition-colors ${this.destructive ? 'bg-red-600 hover:bg-red-500' : 'bg-emerald-700 hover:bg-emerald-600'}"
                                 @click=${() => this.onConfirm()}>
                             ${this.confirmLabel}
                         </button>

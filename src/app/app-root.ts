@@ -17,14 +17,11 @@ import {getPersistenceStatus, type PersistenceStatus} from '../services/storage-
 import {garbageCollectOpfsDocs} from '../services/opfs-gc';
 import {AuthService} from '../services/auth-service';
 import {sweepTempFiles} from '../services/share';
+import {syncPrivacyScreen} from '../services/privacy-screen';
 import {resetAllStorage} from '../services/reset-storage';
 import {showToast} from "../components/toast-notification";
 import {hasIndexLossRiskFlag, runStorageHealthProbe} from '../services/storage-health';
 import {t} from '../lib/i18n';
-import {
-    clearStorageCleanupPending,
-    hasStorageCleanupPending
-} from '../services/storage-cleanup-flag';
 import type {ScanStage} from '../pages/scan/scan-session-state';
 
 type Route =
@@ -63,7 +60,6 @@ export class AppRoot extends LitElement {
     @state() private persist: PersistenceStatus | null = null;
     @state() private resetting = false;
     @state() private hasStorageRisk = false;
-    @state() private hasStorageCleanupPending = false;
     @state() private hidePersistBanner = false;
     @state() private scanStage: ScanStage = 'idle';
     @state() private hasPwaUpdate = false;
@@ -79,6 +75,8 @@ export class AppRoot extends LitElement {
         // Temporary share and backup copies left by an earlier run (the app closed while a
         // share sheet was open). Nothing is in progress yet, so this is safe now.
         void sweepTempFiles();
+        // Screenshots blocked only when App Lock is on (Android).
+        void settings.get().then((s) => syncPrivacyScreen(s.requireAuth));
 
         // 2. Listen for App Resume
         App.addListener('appStateChange', async (state) => {
@@ -108,7 +106,6 @@ export class AppRoot extends LitElement {
         if (!location.hash) location.hash = '#/library';
         this.updateSeoMeta();
         this.hasStorageRisk = hasIndexLossRiskFlag();
-        this.hasStorageCleanupPending = hasStorageCleanupPending();
         this.hidePersistBanner = localStorage.getItem(STORAGE_BANNER_DISMISS_KEY) === '1';
         this.hidePwaUpdateBanner = localStorage.getItem(PWA_UPDATE_BANNER_DISMISS_KEY) === '1';
         window.addEventListener('sahifah:pwa-update-available', this._onPwaUpdateAvailable as EventListener);
@@ -126,8 +123,6 @@ export class AppRoot extends LitElement {
             try {
                 const cleaned = await garbageCollectOpfsDocs();
                 if (cleaned > 0) {
-                    clearStorageCleanupPending();
-                    this.hasStorageCleanupPending = false;
                     showToast(t('storage.audit.auto_cleaned', {count: cleaned}), 'info');
                 }
             } catch {
@@ -357,7 +352,7 @@ export class AppRoot extends LitElement {
                         ${this.fatal.message} ${this.fatal.detail || ''}
                     </div>
                 </div>
-                <button class="w-full max-w-xs py-3 rounded-xl bg-emerald-600 text-white font-bold"
+                <button class="w-full max-w-xs py-3 rounded-xl bg-emerald-700 text-white font-bold"
                         @click=${() => location.reload()}>${t('app.reload')}
                 </button>
                 <button class="w-full max-w-xs py-3 rounded-xl bg-slate-900 text-red-400 text-sm"
@@ -405,20 +400,6 @@ export class AppRoot extends LitElement {
                 </div>
                 <a class="shrink-0 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
                    href="#/settings?repair=1">${t('storage.risk.recover')}</a>
-            </div>
-        `;
-    }
-
-    private renderStorageCleanupPendingBanner() {
-        if (!this.hasStorageCleanupPending) return null;
-        return html`
-            <div class="mb-4 p-3 rounded-xl border border-amber-900 bg-amber-950/40 text-amber-100 flex items-start justify-between gap-3">
-                <div class="min-w-0">
-                    <div class="text-sm font-medium">${t('storage.cleanup_pending.title')}</div>
-                    <div class="text-xs text-amber-200/80">${t('storage.cleanup_pending.body')}</div>
-                </div>
-                <a class="shrink-0 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
-                   href="#/settings">${t('storage.cleanup_pending.action')}</a>
             </div>
         `;
     }
@@ -490,7 +471,6 @@ export class AppRoot extends LitElement {
             <div class="min-h-dvh flex flex-col bg-slate-950">
                 <main class="flex-1 w-full max-w-7xl mx-auto px-4 pt-[env(safe-area-inset-top)] pb-28 relative">
                     ${this.renderStorageRiskBanner()}
-                    ${this.renderStorageCleanupPendingBanner()}
                     ${this.renderPersistenceBanner()}
                     ${this.renderPwaUpdateBanner()}
                     ${r.name === 'library' ? html`
@@ -506,7 +486,7 @@ export class AppRoot extends LitElement {
                     <nav class="fixed bottom-0 left-0 right-0 z-50 bg-slate-950/90 backdrop-blur-md border-t border-slate-800 pb-[env(safe-area-inset-bottom)]">
                         <div class="max-w-7xl mx-auto flex items-center justify-around h-16 px-2">
                             <a href="#/library"
-                               class="flex flex-col items-center gap-1 w-16 py-1 ${r.name === 'library' ? 'text-emerald-400' : 'text-slate-500 hover:text-slate-300'} transition-colors">
+                               class="flex flex-col items-center gap-1 w-16 py-1 ${r.name === 'library' ? 'text-emerald-400' : 'text-slate-400 hover:text-slate-300'} transition-colors">
                                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                           d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
@@ -524,7 +504,7 @@ export class AppRoot extends LitElement {
                                 </div>
                             </a>
                             <a href="#/settings"
-                               class="flex flex-col items-center gap-1 w-16 py-1 ${r.name === 'settings' ? 'text-emerald-400' : 'text-slate-500 hover:text-slate-300'} transition-colors">
+                               class="flex flex-col items-center gap-1 w-16 py-1 ${r.name === 'settings' ? 'text-emerald-400' : 'text-slate-400 hover:text-slate-300'} transition-colors">
                                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                           d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>

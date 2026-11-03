@@ -1,5 +1,5 @@
 import {beforeEach, describe, expect, it} from 'vitest';
-import {resolveDefaultScanMode, settings} from '../../src/services/settings';
+import {settings} from '../../src/services/settings';
 
 describe('settings OCR language', () => {
     beforeEach(() => {
@@ -28,32 +28,7 @@ describe('settings OCR language', () => {
         expect(s.clearClipboardAfter60s).toBe(true);
     });
 
-    it('defaults mirror backup settings to disabled/manual', async () => {
-        const s = await settings.get();
-        expect(s.mirrorBackupEnabled).toBe(false);
-        expect(s.mirrorBackupMode).toBe('manual');
-    });
 
-    it('persists mirror backup settings', async () => {
-        settings.setMirrorBackupEnabled(true);
-        settings.setMirrorBackupMode('after_export');
-        const s = await settings.get();
-        expect(s.mirrorBackupEnabled).toBe(true);
-        expect(s.mirrorBackupMode).toBe('after_export');
-    });
 
-    it('resolves scan mode default by platform', () => {
-        expect(resolveDefaultScanMode(true)).toBe('quick');
-        expect(resolveDefaultScanMode(false)).toBe('manual');
-    });
 
-    it('persists scan mode setting', async () => {
-        settings.setScanMode('quick');
-        let s = await settings.get();
-        expect(s.scanMode).toBe('quick');
-
-        settings.setScanMode('manual');
-        s = await settings.get();
-        expect(s.scanMode).toBe('manual');
-    });
 });

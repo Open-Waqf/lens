@@ -40,8 +40,7 @@ const METHODS: Record<string, string[]> = {
     DocumentScanner: ['scanDocument'],
     FilePicker: ['pickFiles', 'pickImages', 'pickMedia'],
     NativeBiometric: ['isAvailable', 'verifyIdentity'],
-    MirrorBackup: ['isSupported', 'hasDirectory', 'pickDirectory', 'writeBackup'],
-    NativeCameraControl: ['lockExposureAndFocus', 'unlockExposureAndFocus'],
+    PrivacyScreen: ['setLockEnabled'],
 };
 
 const FILE_ROUTE = '/__fake_android_file__/';
@@ -140,13 +139,6 @@ export async function fakeAndroid(page: Page, options: FakeAndroidOptions = {}) 
                 case 'NativeBiometric.verifyIdentity':
                     if (!bio.succeed) throw new Error('Authentication failed.');
                     return {};
-                case 'MirrorBackup.isSupported':
-                    return {supported: true};
-                case 'MirrorBackup.hasDirectory':
-                    return {hasDirectory: false};
-                case 'NativeCameraControl.lockExposureAndFocus':
-                case 'NativeCameraControl.unlockExposureAndFocus':
-                    throw new Error('"NativeCameraControl" plugin is not implemented on android');
                 default:
                     return {};
             }

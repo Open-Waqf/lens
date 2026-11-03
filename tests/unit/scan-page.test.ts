@@ -69,7 +69,6 @@ vi.mock('../../src/lib/camera/camera-manager', () => {
 
 const mockCreateDoc = vi.fn().mockResolvedValue({id: 'doc_123', title: 'Test Scan'});
 const mockAddNewPage = vi.fn().mockResolvedValue('page_123');
-const mockRecordSaveReminder = vi.fn().mockReturnValue(false);
 const mockShareFile = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('../../src/pages/scan/scan-repo', () => {
@@ -84,10 +83,6 @@ vi.mock('../../src/pages/scan/scan-repo', () => {
         }
     };
 });
-
-vi.mock('../../src/services/backup-reminder', () => ({
-    recordSuccessfulSaveAndShouldRemind: (...args: any[]) => mockRecordSaveReminder(...args)
-}));
 
 vi.mock('../../src/services/pending-import', () => ({
     takePendingImport: () => []
@@ -150,7 +145,6 @@ describe('ScanPage Component', () => {
         vi.clearAllMocks();
         localStorage.clear();
         document.body.innerHTML = ''; // Clean DOM
-        mockRecordSaveReminder.mockReturnValue(false);
         mockState.isNativePlatform = false;
         mockState.mockScanDocument.mockResolvedValue({scannedImages: []});
 
@@ -197,9 +191,8 @@ describe('ScanPage Component', () => {
         expect(element.querySelector('video')).toBeTruthy();
     });
 
-    it('uses native quick mode and invokes native scanner', async () => {
+    it('on Android, the scan button always opens the native document scanner', async () => {
         mockState.isNativePlatform = true;
-        localStorage.setItem('sahifah.scanMode', 'quick');
         element = await mountPage(true);
 
         const startBtn = await waitForButtonWithText(element, 'Start Scanner');
@@ -210,19 +203,20 @@ describe('ScanPage Component', () => {
         expect(mockState.mockScanDocument).toHaveBeenCalledTimes(1);
     });
 
-    it('uses manual camera flow on native when scan mode is manual', async () => {
+    it('on Android, an old "manual" scan mode setting no longer opens the in-app camera', async () => {
+        // The Android app has no camera permission: the in-app camera never worked there.
+        // A user who had picked "Manual" before Nov 2026 gets the native scanner.
         mockState.isNativePlatform = true;
         localStorage.setItem('sahifah.scanMode', 'manual');
         element = await mountPage(true);
 
-        const startBtn = await waitForButtonWithText(element, 'Open Camera');
+        const startBtn = await waitForButtonWithText(element, 'Start Scanner');
         startBtn.click();
+        await new Promise(r => setTimeout(r, 30));
 
-        await waitForElement(element, 'video');
-        await new Promise(r => setTimeout(r, 120));
-
-        expect(mockCameraStart).toHaveBeenCalledTimes(1);
-        expect(mockState.mockScanDocument).not.toHaveBeenCalled();
+        expect(mockState.mockScanDocument).toHaveBeenCalledTimes(1);
+        expect(mockCameraStart).not.toHaveBeenCalled();
+        expect(element.querySelector('video')).toBeNull();
     });
 
     it('enters Edit Mode after capturing a photo', async () => {
@@ -274,7 +268,6 @@ describe('ScanPage Component', () => {
         // Wait for mock call
         await new Promise(r => setTimeout(r, 50));
 
-        expect(mockRecordSaveReminder).toHaveBeenCalled();
         expect(mockCreateDoc).toHaveBeenCalled();
         expect(mockAddNewPage).toHaveBeenCalled();
     });

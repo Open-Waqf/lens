@@ -22,7 +22,13 @@ export type PageEditorShareDetail = {
     format: 'jpg' | 'pdf';
 };
 
-const FILTERS: FilterMode[] = ['original', 'magic', 'bw', 'grayscale', 'whiteboard'];
+// Three filters cover what people need (Nov 2026: Grayscale and Whiteboard removed).
+// "Clean" is the magic filter (white paper, sharper text); Black & white suits printing.
+const FILTERS: Array<{mode: FilterMode; labelKey: 'editor.filter_original' | 'editor.filter_clean' | 'editor.filter_bw'}> = [
+    {mode: 'original', labelKey: 'editor.filter_original'},
+    {mode: 'magic', labelKey: 'editor.filter_clean'},
+    {mode: 'bw', labelKey: 'editor.filter_bw'},
+];
 
 @customElement('page-editor')
 export class PageEditor extends LitElement {
@@ -772,7 +778,7 @@ export class PageEditor extends LitElement {
 
                 <div class="flex flex-col gap-3">
                     <div class="flex items-center justify-between px-1">
-                        <div class="text-xs font-bold text-slate-500 uppercase tracking-widest">${t('editor.crop_rotate')}</div>
+                        <div class="text-xs font-bold text-slate-400 uppercase tracking-widest">${t('editor.crop_rotate')}</div>
                         <div class="flex gap-2">
                             <button aria-label=${t('editor.auto_detect_edges')}
                                     class="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-400 active:scale-95 transition-transform border border-slate-700 hover:text-white"
@@ -828,9 +834,9 @@ export class PageEditor extends LitElement {
                 </div>
 
                 <div class="flex flex-col gap-3">
-                    <div class="text-xs font-bold text-slate-500 uppercase tracking-widest px-1">${t('editor.filter')}</div>
+                    <div class="text-xs font-bold text-slate-400 uppercase tracking-widest px-1">${t('editor.filter')}</div>
                     <div class="flex overflow-x-auto gap-3 pb-2 -mx-1 px-1 no-scrollbar snap-x">
-                        ${FILTERS.map(mode => html`
+                        ${FILTERS.map(({mode, labelKey}) => html`
                             <button @click=${() => {
                                 this.pushHistory();
                                 this.filter = mode;
@@ -860,8 +866,8 @@ export class PageEditor extends LitElement {
                                     ` : null}
                                 </div>
 
-                                <span class="text-[10px] font-bold tracking-wide uppercase transition-colors ${this.filter === mode ? 'text-emerald-400' : 'text-slate-500'}">
-                                    ${mode}
+                                <span class="text-[10px] font-bold tracking-wide uppercase transition-colors ${this.filter === mode ? 'text-emerald-400' : 'text-slate-400'}">
+                                    ${t(labelKey)}
                                 </span>
                             </button>
                         `)}
@@ -869,12 +875,12 @@ export class PageEditor extends LitElement {
                 </div>
 
                 <div class="flex flex-col gap-3">
-                    <div class="text-xs font-bold text-slate-500 uppercase tracking-widest px-1">${t('editor.final_result')}</div>
+                    <div class="text-xs font-bold text-slate-400 uppercase tracking-widest px-1">${t('editor.final_result')}</div>
                     <div class="relative w-full flex justify-center bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 group">
                         <canvas data-preview class="block max-w-full object-contain"
                                 style="image-rendering: high-quality; backface-visibility: hidden;"></canvas>
                         ${!this.sourceBitmap ? html`
-                            <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-500 min-h-[200px]">
+                            <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-400 min-h-[200px]">
                                 <div class="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
                                 <span class="text-xs font-bold uppercase tracking-wider">${t('common.loading')}</span>
                             </div>` : null}
@@ -889,7 +895,7 @@ export class PageEditor extends LitElement {
                                @change=${(e: Event) => this.extractText = (e.target as HTMLInputElement).checked}>
                         <div class="flex-1">
                             <div class="text-sm font-bold text-slate-200">${t('editor.extract_text')}</div>
-                            <div class="text-[10px] text-slate-500">${t('editor.extract_text_desc')}</div>
+                            <div class="text-[10px] text-slate-400">${t('editor.extract_text_desc')}</div>
                         </div>
                     </label>
 
@@ -912,7 +918,7 @@ export class PageEditor extends LitElement {
                             <span class="sr-only">${t('common.share_now')}</span>
                         </button>
                         <button aria-label=${t('scan.save_scan')}
-                                class="flex-[1.2] px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 active:scale-95 transition-all text-white font-bold tracking-wide shadow-lg shadow-emerald-900/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 min-h-[44px]"
+                                class="flex-[1.2] px-4 py-3 rounded-xl bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-700 active:scale-95 transition-all text-white font-bold tracking-wide shadow-lg shadow-emerald-900/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 min-h-[44px]"
                                 type="button"
                                 ?disabled=${this.busy || this.isQuadInvalid} @click=${() => void this.onSave()}>
                             ${this.busy

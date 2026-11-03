@@ -27,13 +27,12 @@ import {ScanRepo} from './scan/scan-repo';
 import {ocrQueue} from '../services/ocr-queue';
 import {AuthService} from "../services/auth-service";
 import {App} from "@capacitor/app";
-import {t} from '../lib/i18n';
-import {recordSuccessfulSaveAndShouldRemind} from '../services/backup-reminder';
+import {i18n, t} from '../lib/i18n';
 import {showToast} from '../components/toast-notification';
 import {toUserErrorMessage} from '../lib/user-error';
 import {shareFile} from '../services/share';
 import {PDFDocument} from 'pdf-lib';
-import {settings, type ScanMode} from '../services/settings';
+
 import {detectImageMime} from '../lib/image/mime';
 import {resolveScanQualityPlan} from '../lib/image/quality';
 import {pickedFileToBlob} from '../services/picked-file';
@@ -86,7 +85,6 @@ export class ScanPage extends LitElement {
     private importReviewQueue: string[] = [];
 
     @state() private autoCapture = readBool(AUTO_KEY, false);
-    @state() private scanMode: ScanMode = 'manual';
 
     @state() private videoW = 0;
     @state() private videoH = 0;
@@ -113,7 +111,6 @@ export class ScanPage extends LitElement {
     private lastAnnouncedStage: ScanStage | null = null;
     private autoCaptureSettleTimer: number | null = null;
     private appBackListener: PluginListenerHandle | null = null;
-    private appStateListener: PluginListenerHandle | null = null;
 
     async connectedCallback(): Promise<void> {
         super.connectedCallback();
@@ -148,17 +145,6 @@ export class ScanPage extends LitElement {
                     location.hash = '#/library';
                 }
             }).then(h => this.appBackListener = h);
-
-            // PAUSE CV ON BACKGROUND
-            void App.addListener('appStateChange', (state) => {
-                if (!state.isActive) {
-                    console.log('[ScanPage] App backgrounded, pausing detector');
-                    this.stopDetector();
-                } else if (this.session.stage === 'camera') {
-                    console.log('[ScanPage] App resumed, restarting detector');
-                    this.startDetector();
-                }
-            }).then(h => this.appStateListener = h);
         }
     }
 
@@ -220,9 +206,7 @@ export class ScanPage extends LitElement {
         this.clearImportReview();
         ocrQueue.removeEventListener('change', this.onOcrQueueChange);
         void this.appBackListener?.remove();
-        void this.appStateListener?.remove();
         this.appBackListener = null;
-        this.appStateListener = null;
         this.dispatchStageChange('idle');
         super.disconnectedCallback();
     }
@@ -271,12 +255,6 @@ export class ScanPage extends LitElement {
 
         this.lastDetect = null;
         this.smoothedQuad = null;
-        try {
-            const prefs = await settings.get();
-            this.scanMode = prefs.scanMode || (this.caps.isCapacitor ? 'quick' : 'manual');
-        } catch {
-            this.scanMode = this.caps.isCapacitor ? 'quick' : 'manual';
-        }
 
         const params = this.getHashParams();
         const forceNew = params.get('new') === '1';
@@ -483,9 +461,6 @@ export class ScanPage extends LitElement {
 
             this.session.markCommitted();
             await this.refreshDocInfo();
-            if (recordSuccessfulSaveAndShouldRemind()) {
-                showToast(t('storage.reminder.backup'), 'info');
-            }
 
             if (this.importReviewQueue.length > 0) {
                 // Remove whichever reviewed imported page was saved, even if user reviewed out of order.
@@ -552,8 +527,8 @@ export class ScanPage extends LitElement {
         if (this.session.docId) return this.session.docId;
 
         const now = new Date();
-        const dateStr = now.toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
-        const timeStr = now.toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'});
+        const dateStr = now.toLocaleDateString(i18n.getLocale(), {month: 'short', day: 'numeric'});
+        const timeStr = now.toLocaleTimeString(i18n.getLocale(), {hour: 'numeric', minute: '2-digit'});
         const title = `${t('scan.title')} ${dateStr} ${timeStr}`;
 
         const doc = await this.repo.createDoc(title);
@@ -579,16 +554,12 @@ export class ScanPage extends LitElement {
         this.strip = items;
     }
 
-    private setScanMode(mode: ScanMode): void {
-        if (mode !== 'quick' && mode !== 'manual') return;
-        this.scanMode = mode;
-        settings.setScanMode(mode);
-    }
-
-    // UPDATED: Added explicit flag to handle the regression
+    // On Android the scan always uses Google's document scanner (Quick Scan). The live
+    // camera below is for the web only: the Android app has no camera permission, and the
+    // in-app camera mode never worked there (removed Nov 2026).
     private beginCameraFromGesture(explicit: boolean = false): void {
         this.error = null;
-        if (this.caps.isCapacitor && this.scanMode === 'quick') {
+        if (this.caps.isCapacitor) {
             void this.invokeNativeScanner();
             return;
         }
@@ -610,14 +581,7 @@ export class ScanPage extends LitElement {
                 if (explicit) {
                     this.error = toUserErrorMessage(e);
                     this.showPermissionError = true;
-                    if (this.caps.isCapacitor && this.scanMode === 'manual') {
-                        this.error = t('scan.manual_camera_failed_fallback');
-                    }
                     this.session.setStage('idle');
-                    if (this.caps.isCapacitor && this.scanMode === 'manual') {
-                        this.setScanMode('quick');
-                        void this.invokeNativeScanner();
-                    }
                 } else {
                     console.warn("Camera auto-start failed (likely permission), fallback to idle.");
                     this.session.setStage('idle');
@@ -672,13 +636,8 @@ export class ScanPage extends LitElement {
         setTimeout(() => this.flashActive = false, 150);
 
         this.captureInFlight = true;
-        let aeAfLocked = false;
         try {
             const v = this.videoEl;
-            if (this.caps.isCapacitor) {
-                aeAfLocked = await this.camera.lockExposureAndFocus();
-                if (aeAfLocked) await new Promise(r => setTimeout(r, 80));
-            }
             const maxDim = 1800;
             const scale = Math.min(1, maxDim / Math.max(v.videoWidth, v.videoHeight));
             const w = Math.max(1, Math.round(v.videoWidth * scale));
@@ -724,7 +683,6 @@ export class ScanPage extends LitElement {
         } catch (e) {
             this.error = toUserErrorMessage(e);
         } finally {
-            if (aeAfLocked) await this.camera.unlockExposureAndFocus();
             this.captureInFlight = false;
         }
     }
@@ -1063,7 +1021,7 @@ export class ScanPage extends LitElement {
                     <div class="min-w-0">
                         <div class="text-xs text-slate-400">${t('scan.adding_to')}</div>
                         <div class="text-sm text-slate-100 truncate">${title}</div>
-                        <div class="text-xs text-slate-500">${t('scan.page_count', {count: this.session.pageCount})}</div>
+                        <div class="text-xs text-slate-400">${t('scan.page_count', {count: this.session.pageCount})}</div>
                     </div>
                     <div class="flex gap-2">
                         <button class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
@@ -1085,7 +1043,7 @@ export class ScanPage extends LitElement {
                 <div class="min-w-0">
                     <div class="text-xs text-slate-400">${t('scan.building_doc')}</div>
                     <div class="text-sm text-slate-100 truncate">${title}</div>
-                    <div class="text-xs text-slate-500">${t('scan.page_count', {count: this.session.pageCount})}</div>
+                    <div class="text-xs text-slate-400">${t('scan.page_count', {count: this.session.pageCount})}</div>
                 </div>
                 <div class="flex gap-2">
                     <button class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
@@ -1124,7 +1082,7 @@ export class ScanPage extends LitElement {
                             </div>
 
                             ${it.isNew ? html`
-                                <span class="absolute top-1 left-1 text-[8px] px-1.5 py-0.5 rounded bg-emerald-600 text-white font-bold shadow-sm">${t('common.new')}</span>
+                                <span class="absolute top-1 left-1 text-[8px] px-1.5 py-0.5 rounded bg-emerald-700 text-white font-bold shadow-sm">${t('common.new')}</span>
                             ` : null}
                         </button>
 
@@ -1170,7 +1128,7 @@ export class ScanPage extends LitElement {
                         <span .innerHTML=${t('scan.welcome_security')}></span>
                     </div>
 
-                    <button class="w-full py-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-lg shadow-lg shadow-emerald-900/20"
+                    <button class="w-full py-4 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-lg shadow-lg shadow-emerald-900/20"
                             @click=${() => this.finishWelcome()}>
                         ${t('scan.start_scanning')}
                     </button>
@@ -1198,7 +1156,7 @@ export class ScanPage extends LitElement {
                     </div>
                     ${!this.caps.isCapacitor ? html`
                         <div class="flex items-center gap-3 bg-slate-900/80 px-4 py-1.5 rounded-full border border-slate-800">
-                            <span class="text-[10px] font-bold uppercase tracking-widest text-slate-500">${t('scan.auto_capture')}</span>
+                            <span class="text-[10px] font-bold uppercase tracking-widest text-slate-400">${t('scan.auto_capture')}</span>
                             <button class="relative h-5 w-10 rounded-full transition-colors ${this.autoCapture ? 'bg-emerald-600' : 'bg-slate-700'}"
                                     @click=${() => {
                                         this.autoCapture = !this.autoCapture;
@@ -1234,22 +1192,6 @@ export class ScanPage extends LitElement {
                                     ${t('scan.importing_files')}
                                 </div>
                             ` : html`
-                            ${this.caps.isCapacitor ? html`
-                                <div class="grid grid-cols-2 gap-2 p-1 rounded-xl border border-slate-800 bg-slate-900/60">
-                                    <button
-                                            class="py-2.5 rounded-lg text-sm font-semibold transition-colors min-h-[44px] ${this.scanMode === 'quick' ? 'bg-emerald-600 text-slate-950' : 'text-slate-300 hover:bg-slate-800'}"
-                                            @click=${() => this.setScanMode('quick')}
-                                            aria-pressed=${this.scanMode === 'quick'}>
-                                        ${t('scan.mode_quick')}
-                                    </button>
-                                    <button
-                                            class="py-2.5 rounded-lg text-sm font-semibold transition-colors min-h-[44px] ${this.scanMode === 'manual' ? 'bg-emerald-600 text-slate-950' : 'text-slate-300 hover:bg-slate-800'}"
-                                            @click=${() => this.setScanMode('manual')}
-                                            aria-pressed=${this.scanMode === 'manual'}>
-                                        ${t('scan.mode_manual')}
-                                    </button>
-                                </div>
-                            ` : null}
                             ${this.showPermissionError ? html`
                                 <div class="p-3 rounded-xl border border-amber-900/40 bg-amber-950/20 text-amber-200 space-y-2">
                                     <div class="text-sm font-semibold">${t('scan.permission_title')}</div>
@@ -1272,13 +1214,11 @@ export class ScanPage extends LitElement {
                                 <button class="w-full py-5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 rounded-[1.5rem] font-bold text-xl shadow-lg shadow-emerald-900/20 transition-all active:scale-95"
                                         type="button"
                                         @click=${this.onTryCameraClick}>
-                                    ${this.caps.isCapacitor
-                                            ? (this.scanMode === 'quick' ? t('scan.start_scanner') : t('scan.open_camera'))
-                                            : t('scan.open_camera')}
+                                    ${this.caps.isCapacitor ? t('scan.start_scanner') : t('scan.open_camera')}
                                 </button>
                                 ${this.caps.isCapacitor ? html`
-                                    <div class="text-[11px] text-slate-500 text-center px-1">
-                                        ${this.scanMode === 'quick' ? t('scan.mode_quick_desc') : t('scan.mode_manual_desc')}
+                                    <div class="text-[11px] text-slate-400 text-center px-1">
+                                        ${t('scan.mode_quick_desc')}
                                     </div>
                                 ` : null}
                                 <button class="w-full py-4 text-slate-400 font-semibold hover:text-white transition-colors"

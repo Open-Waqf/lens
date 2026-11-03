@@ -14,11 +14,12 @@ import {ocrQueue} from '../services/ocr-queue';
 import {haptics} from "../services/haptics";
 import {ImpactStyle} from "@capacitor/haptics";
 import {showToast} from "../components/toast-notification";
-import {t} from '../lib/i18n';
+import {i18n, t} from '../lib/i18n';
 import {pruneSeenDocs} from '../services/seen-docs';
 
-type ViewMode = 'list' | 'gallery';
-
+// Trimmed in Nov 2026 to what most people use: one list view, folders, search. Tags, notes
+// and merging documents are no longer shown or edited. Their stored values stay in the
+// database and in backups, and search still finds them, so nothing a user saved is lost.
 @customElement('library-page')
 export class LibraryPage extends LitElement {
     createRenderRoot() {
@@ -36,13 +37,10 @@ export class LibraryPage extends LitElement {
     @state() private query = '';
     @state() private thumbnails = new Map<string, string>();
 
-    @state() private viewMode: ViewMode = 'list';
     @state() private selectionMode = false;
     @state() private selectedIds = new Set<string>();
 
-    @state() private selectedTag: string | null = null;
     @state() private groupByFolder = false;
-    @state() private allTags: string[] = [];
 
     @state() private loading = true;
 
@@ -63,9 +61,6 @@ export class LibraryPage extends LitElement {
         super.connectedCallback();
         ocrQueue.addEventListener('change', this._onOcrChange);
         this.ocrActiveCount = ocrQueue.activeCount;
-
-        const savedView = localStorage.getItem('sahifah.libraryView');
-        if (savedView === 'gallery') this.viewMode = 'gallery';
 
         // Check for new doc highlight
         const justSaved = sessionStorage.getItem('sahifah.justSavedDocId');
@@ -110,7 +105,6 @@ export class LibraryPage extends LitElement {
 
             this.allDocsSource = await db.docs.orderBy('updatedAt').reverse().toArray();
             pruneSeenDocs(this.allDocsSource.map(d => d.id));
-            this.allTags = await this.repo.getAllTags();
             this.applyFilters();
         } finally {
             this.loading = false; // Stop loading
@@ -119,11 +113,6 @@ export class LibraryPage extends LitElement {
 
     private applyFilters() {
         let list = this.allDocsSource;
-
-        // 1. Tag Filter
-        if (this.selectedTag) {
-            list = list.filter(d => d.tags.includes(this.selectedTag!));
-        }
 
         // 2. Search Query
         const q = this.query.trim().toLowerCase();
@@ -149,7 +138,6 @@ export class LibraryPage extends LitElement {
         const currentLen = this.visibleDocs.length;
         // Recompute filtered length for pagination; this O(n) pass is acceptable for <=1k docs.
         let filteredTotal = this.allDocsSource;
-        if (this.selectedTag) filteredTotal = filteredTotal.filter(d => d.tags.includes(this.selectedTag!));
         if (this.query.trim()) {
             const q = this.query.trim().toLowerCase();
             filteredTotal = filteredTotal.filter(d =>
@@ -189,11 +177,6 @@ export class LibraryPage extends LitElement {
         this.applyFilters();
     }
 
-    private toggleView() {
-        this.viewMode = this.viewMode === 'list' ? 'gallery' : 'list';
-        localStorage.setItem('sahifah.libraryView', this.viewMode);
-    }
-
     private toggleSelectionMode() {
         this.selectionMode = !this.selectionMode;
         this.selectedIds = new Set();
@@ -211,7 +194,7 @@ export class LibraryPage extends LitElement {
         if (count === 0) return;
 
         const ok = await ConfirmModal.ask({
-            title: t('library.delete_count_title', {count, suffix: count > 1 ? 's' : ''}),
+            title: count === 1 ? t('library.delete_count_one') : t('library.delete_count_other', {count}),
             description: t('library.delete_body'),
             confirm: t('common.delete'),
             destructive: true
@@ -284,30 +267,6 @@ export class LibraryPage extends LitElement {
         return snippet.replace(regex, '<b class="text-emerald-400 bg-emerald-950/50 px-0.5 rounded">$1</b>');
     }
 
-    private async mergeSelected() {
-        const ids = Array.from(this.selectedIds);
-        const ok = await ConfirmModal.ask({
-            title: t('library.merge_count_title', {count: ids.length}),
-            description: t('library.merge_body'),
-            confirm: t('library.merge_confirm')
-        });
-
-        if (!ok) return;
-
-        try {
-            const masterId = await this.repo.mergeDocuments(ids);
-            this.selectedIds = new Set();
-            this.selectionMode = false;
-            this.highlightDocId = masterId;
-            await this.loadDocs();
-            void haptics.impact(ImpactStyle.Medium);
-            showToast(t('library.merged_success', {count: ids.length}), 'success');
-        } catch (e) {
-            showToast(t('library.merge_failed', {error: String(e)}), 'error')
-        } finally {
-        }
-    }
-
     private async moveSelectedToFolder() {
         // FIX: Instead of 'suggestions', we list folders in the description
         const folders = Array.from(new Set(this.allDocsSource.map(d => d.folder).filter(Boolean))) as string[];
@@ -377,70 +336,6 @@ export class LibraryPage extends LitElement {
         `;
     }
 
-    private renderTagBar() {
-        return html`
-            <div class="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-                <button
-                        class="px-3 py-1 rounded-full text-xs font-medium transition-colors ${!this.selectedTag ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'}"
-                        @click=${() => {
-                            this.selectedTag = null;
-                            this.visibleLimit = 20;
-                            this.applyFilters();
-                        }}>
-                    ${t('library.all_tag')}
-                </button>
-                ${this.allTags.map(tag => html`
-                    <div class="flex items-center rounded-full bg-slate-900 border border-slate-800 overflow-hidden">
-                        <button
-                                class="px-3 py-1 text-xs font-medium transition-colors ${this.selectedTag === tag ? 'bg-emerald-600 text-white' : 'text-slate-300 hover:bg-slate-800'}"
-                                @click=${() => {
-                                    this.selectedTag = tag;
-                                    this.visibleLimit = 20;
-                                    this.applyFilters();
-                                }}>
-                            ${tag}
-                        </button>
-                        <button
-                                class="px-2 py-1 text-slate-500 hover:text-red-300 hover:bg-red-950/30 transition-colors"
-                                aria-label=${t('library.delete_tag_aria', {tag})}
-                                title=${t('library.delete_tag_aria', {tag})}
-                                @click=${(e: Event) => {
-                                    e.stopPropagation();
-                                    void this.onDeleteTag(tag);
-                                }}>
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                      d="M6 18L18 6M6 6l12 12"></path>
-                            </svg>
-                        </button>
-                    </div>
-                `)}
-            </div>
-        `;
-    }
-
-    private async onDeleteTag(tag: string) {
-        const ok = await ConfirmModal.ask({
-            title: t('library.delete_tag_title', {tag}),
-            description: t('library.delete_tag_body', {tag}),
-            confirm: t('library.delete_tag_confirm'),
-            destructive: true
-        });
-        if (!ok) return;
-
-        await db.transaction('rw', db.docs, async () => {
-            const docsWithTag = await db.docs.where('tags').equals(tag).toArray();
-            for (const doc of docsWithTag) {
-                const nextTags = doc.tags.filter(tg => tg !== tag);
-                await db.docs.update(doc.id, {tags: nextTags, updatedAt: Date.now()});
-            }
-            showToast(t('library.tag_removed', {tag, count: docsWithTag.length}), 'info');
-        });
-
-        if (this.selectedTag === tag) this.selectedTag = null;
-        await this.loadDocs();
-    }
-
     private renderSkeleton() {
         return html`
             <div class="flex flex-col gap-2 p-2 rounded-xl bg-slate-900/50 border border-slate-800/50">
@@ -456,14 +351,13 @@ export class LibraryPage extends LitElement {
 
     render() {
         const groups = this.groupedDocs;
-        const isGallery = this.viewMode === 'gallery';
         const hasDocs = this.visibleDocs.length > 0;
-        const isSearchEmpty = !hasDocs && (this.query || this.selectedTag);
-        const isLibraryEmpty = !hasDocs && !this.query && !this.selectedTag && this.allDocsSource.length === 0;
+        const isSearchEmpty = !hasDocs && this.query;
+        const isLibraryEmpty = !hasDocs && !this.query && this.allDocsSource.length === 0;
 
         return html`
             <div class="space-y-4 pb-4">
-                ${this.renderHeader(isGallery)}
+                ${this.renderHeader()}
                 ${this.renderSafetyPrompt()}
 
                 ${isLibraryEmpty && !this.loading
@@ -478,7 +372,7 @@ export class LibraryPage extends LitElement {
                                                         ${[...Array(10)].map(() => this.renderSkeleton())}
                                                     </div>`
                                                 : Object.entries(groups).map(([folderName, docs]) =>
-                                                        this.renderFolderGroup(folderName, docs, isGallery)
+                                                        this.renderFolderGroup(folderName, docs)
                                                 )
                                         }
                                         <div id="load-more-sentinel" class="h-10 w-full"></div>
@@ -492,7 +386,7 @@ export class LibraryPage extends LitElement {
     private renderNoSearchResults() {
         return html`
             <div class="flex flex-col items-center justify-center py-20 text-center space-y-4">
-                <div class="p-4 rounded-full bg-slate-900/50 text-slate-500">
+                <div class="p-4 rounded-full bg-slate-900/50 text-slate-400">
                     <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                               d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
@@ -502,7 +396,6 @@ export class LibraryPage extends LitElement {
                 <button class="text-emerald-400 text-sm font-bold hover:underline"
                         @click=${() => {
                             this.query = '';
-                            this.selectedTag = null;
                             this.applyFilters();
                         }}>
                     ${t('library.clear_filters')}
@@ -511,7 +404,7 @@ export class LibraryPage extends LitElement {
         `;
     }
 
-    private renderHeader(isGallery: boolean) {
+    private renderHeader() {
         const activeTitles = ocrQueue.activeTitles;
         const currentTask = activeTitles.length > 0 ? activeTitles[0] : null;
 
@@ -533,31 +426,30 @@ export class LibraryPage extends LitElement {
                         ` : null}
                     </div>
                     <div class="flex items-center gap-1">
-                        ${this.renderActionButtons(isGallery)}
+                        ${this.renderActionButtons()}
                     </div>
                 </div>
 
                 <div class="relative">
                     <input
                             type="text"
-                            class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-600 transition-colors"
+                            class="w-full bg-slate-900 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-slate-100 placeholder-slate-400 focus:outline-none focus:border-emerald-600 transition-colors"
                             placeholder="${t('library.search_placeholder')}"
                             .value=${live(this.query)}
                             @input=${this.onSearchInput}
                     >
-                    <svg class="w-5 h-5 text-slate-500 absolute left-3 top-3.5" fill="none" stroke="currentColor"
+                    <svg class="w-5 h-5 text-slate-400 absolute left-3 top-3.5" fill="none" stroke="currentColor"
                          viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                               d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
                     </svg>
                 </div>
 
-                ${this.allTags.length > 0 ? this.renderTagBar() : null}
             </div>
         `;
     }
 
-    private renderActionButtons(isGallery: boolean) {
+    private renderActionButtons() {
         return html`
             ${this.selectionMode ? html`
                 <button class="p-2 rounded-full hover:bg-slate-800 text-slate-400"
@@ -569,11 +461,6 @@ export class LibraryPage extends LitElement {
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                               d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
                     </svg>
-                </button>
-                <button class="px-3 py-1.5 text-xs font-bold text-emerald-400 bg-emerald-950/30 rounded-lg border border-emerald-900/50"
-                        @click=${this.mergeSelected}
-                        ?disabled=${this.selectedIds.size < 2}>
-                    ${t('library.merge_confirm')}
                 </button>
                 <button class="px-3 py-1.5 text-xs font-bold text-red-400 bg-red-950/30 rounded-lg border border-red-900/50"
                         @click=${this.deleteSelected}
@@ -606,35 +493,18 @@ export class LibraryPage extends LitElement {
                 </button>
             `}
 
-            <button class="p-2 rounded-full hover:bg-slate-800 text-slate-400" @click=${this.toggleView}
-                    aria-label=${isGallery ? t('library.list_view') : t('library.gallery_view')}
-                    title=${isGallery ? t('library.list_view') : t('library.gallery_view')}>
-                ${isGallery
-                        ? html`
-                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                      d="M4 6h16M4 12h16M4 18h16"></path>
-                            </svg>`
-                        : html`
-                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                      d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path>
-                            </svg>`}
-            </button>
         `;
     }
 
-    private renderFolderGroup(folderName: string, docs: DocRecord[], isGallery: boolean) {
+    private renderFolderGroup(folderName: string, docs: DocRecord[]) {
         if (docs.length === 0) return null;
 
-        const listGrid = "grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3";
-        const galleryGrid = "grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3";
-        const gridClass = isGallery ? galleryGrid : listGrid;
+        const gridClass = "grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3";
 
         return html`
             <div class="space-y-3">
                 ${this.groupByFolder ? html`
-                    <h2 class="text-xs font-bold text-slate-500 uppercase tracking-widest px-1 flex items-center justify-between gap-2">
+                    <h2 class="text-xs font-bold text-slate-400 uppercase tracking-widest px-1 flex items-center justify-between gap-2">
                         <div class="flex items-center gap-2">
                             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -645,7 +515,7 @@ export class LibraryPage extends LitElement {
                         
                         ${folderName !== t('library.unsorted') ? html`
                             <button @click=${() => this.onDeleteFolder(folderName)}
-                                    class="p-1 hover:bg-slate-800 rounded transition-colors text-slate-600 hover:text-red-400"
+                                    class="p-1 hover:bg-slate-800 rounded transition-colors text-slate-400 hover:text-red-400"
                                     aria-label=${t('library.unsort_folder_title')}
                                     title=${t('library.unsort_folder_title')}>
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -658,7 +528,7 @@ export class LibraryPage extends LitElement {
                 ` : null}
 
                 <div class="grid ${gridClass}">
-                    ${repeat(docs, (d) => d.id, (d) => this.renderDocItem(d, isGallery))}
+                    ${repeat(docs, (d) => d.id, (d) => this.renderDocItem(d))}
                 </div>
             </div>
         `;
@@ -669,7 +539,7 @@ export class LibraryPage extends LitElement {
             <div class="flex flex-col items-center justify-center min-h-[60vh] text-center p-6 space-y-6 relative">
 
                 <div class="w-32 h-32 bg-slate-900/50 rounded-full flex items-center justify-center border border-slate-800">
-                    <svg class="w-12 h-12 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg class="w-12 h-12 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
                               d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
@@ -679,7 +549,7 @@ export class LibraryPage extends LitElement {
 
                 <div>
                     <h2 class="text-xl font-bold text-slate-200">${t('library.no_scans')}</h2>
-                    <p class="text-sm text-slate-500 max-w-xs mx-auto mt-2">
+                    <p class="text-sm text-slate-400 max-w-xs mx-auto mt-2">
                         ${t('library.no_scans_body')}
                     </p>
                 </div>
@@ -694,9 +564,9 @@ export class LibraryPage extends LitElement {
         `;
     }
 
-    private renderDocItem(doc: DocRecord, isGallery: boolean) {
+    private renderDocItem(doc: DocRecord) {
         const thumb = this.thumbnails.get(doc.id);
-        const date = new Date(doc.updatedAt).toLocaleDateString();
+        const date = new Date(doc.updatedAt).toLocaleDateString(i18n.getLocale());
         const selected = this.selectedIds.has(doc.id);
 
         const isHighlight = this.highlightDocId === doc.id;
@@ -708,7 +578,7 @@ export class LibraryPage extends LitElement {
             ? "border-emerald-500 ring-1 ring-emerald-500/50 bg-emerald-900/10"
             : "border-slate-800 hover:border-slate-700 active:bg-slate-800";
 
-        const layoutClasses = isGallery ? "flex-col" : "flex";
+        const layoutClasses = "flex";
 
         const qTrim = this.query.trim();
         let snippet = this.getSearchSnippet(doc.searchIndex, qTrim);
@@ -745,7 +615,7 @@ export class LibraryPage extends LitElement {
                     </div>
                 ` : null}
 
-                <div class="${isGallery ? 'aspect-[3/4] w-full' : 'w-24 h-32 shrink-0'} bg-slate-950 relative border-r border-slate-800/50">
+                <div class="w-24 h-32 shrink-0 bg-slate-950 relative border-r border-slate-800/50">
                     ${thumb
                             ? html`<img src=${thumb}
                                         class="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity">`
@@ -758,25 +628,19 @@ export class LibraryPage extends LitElement {
                                     </svg>
                                 </div>`
                     }
-                    ${isGallery && snippet ? html`
-                        <div class="absolute bottom-2 right-2 bg-emerald-600 text-white text-[10px] px-1.5 py-0.5 rounded shadow">
-                            ${t('library.match')}
-                        </div>
-                    ` : null}
                 </div>
 
                 <div class="p-4 flex-1 min-w-0 flex flex-col justify-center gap-1">
                     <h3 class="text-slate-200 font-medium truncate leading-tight text-sm">${doc.title}</h3>
 
-                    <div class="flex items-center gap-2 text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
-                        <span>${t('library.page_suffix', {count: doc.pageIds.length, suffix: doc.pageIds.length === 1 ? '' : 's'})}</span>
-                        ${!isGallery ? html`<span>•</span><span>${date}</span>` : null}
+                    <div class="flex items-center gap-2 text-[10px] text-slate-400 uppercase tracking-wider font-semibold">
+                        <span>${doc.pageIds.length === 1 ? t('library.page_count_one') : t('library.page_count_other', {count: doc.pageIds.length})}</span>
+                        <span>•</span><span>${date}</span>
                     </div>
 
                     ${doc.folder ? html`
                         <button @click=${(e: Event) => {
                             e.stopPropagation();
-                            this.selectedTag = null;
                             this.query = doc.folder!;
                             this.applyFilters();
                         }}
@@ -785,18 +649,12 @@ export class LibraryPage extends LitElement {
                         </button>
                     ` : null}
 
-                    ${!isGallery && snippet ? html`
+                    ${snippet ? html`
                         <div class="mt-2 text-xs text-slate-400 bg-slate-950/50 p-2 rounded border border-slate-800/50 line-clamp-2 leading-relaxed">
                             ${unsafeHTML(snippet)}
                         </div>
                     ` : null}
 
-                    ${!isGallery && doc.tags.length > 0 && !snippet ? html`
-                        <div class="flex gap-1 mt-1 overflow-hidden">
-                            ${doc.tags.slice(0, 3).map(t => html`<span
-                                    class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 text-[10px]">${t}</span>`)}
-                        </div>
-                    ` : null}
                 </div>
             </div>
         `;

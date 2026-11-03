@@ -60,14 +60,15 @@ test('Search and Folder Cascade', async ({page}) => {
     await saveBtn.click();
     await expect(page.locator('page-editor')).not.toBeVisible({timeout: 10000});
 
-    // 2. Edit doc title, folder and notes in Library/DocPage
+    // 2. Edit doc title and folder in the document page
     await page.goto('#/library');
     await expect(page.locator('h3', {hasText: /Scan/i}).first()).toBeVisible({timeout: 10000});
     await page.locator('h3', {hasText: /Scan/i}).first().click();
     
     await page.waitForURL('**/#/doc/**');
     const docId = page.url().split('/doc/')[1];
-    const titleInput = page.locator('input').first();
+    // The document page's own title field (the library's search box can still be on screen).
+    const titleInput = page.locator('doc-page input').first();
     await titleInput.fill('Searchable Doc');
     await titleInput.dispatchEvent('change');
     
@@ -75,19 +76,13 @@ test('Search and Folder Cascade', async ({page}) => {
     await folderInput.fill('Taxes');
     await folderInput.dispatchEvent('change');
     
-    const notesArea = page.getByPlaceholder(/Add details/i);
-    await notesArea.fill('This contains the word Amanah for searching.');
-    await notesArea.dispatchEvent('change');
-
-    // 3. Test Search Snippet in Library
+    // 3. Search finds the document by its new title and by its folder
     await page.goto('#/library');
     const searchInput = page.getByPlaceholder(/Search docs/i);
-    await searchInput.fill('Amanah');
-    
-    // Snipet should be visible
-    const snippet = page.locator('library-page b', {hasText: 'Amanah'});
-    await expect(snippet).toBeVisible({timeout: 5000});
-    await expect(snippet).toHaveClass(/text-emerald-400/);
+    await searchInput.fill('Searchable');
+    await expect(page.locator('h3', {hasText: 'Searchable Doc'})).toBeVisible({timeout: 5000});
+    await searchInput.fill('Taxes');
+    await expect(page.locator('h3', {hasText: 'Searchable Doc'})).toBeVisible({timeout: 5000});
 
     // 4. Test Folder Cascade Deletion
     await searchInput.fill('');

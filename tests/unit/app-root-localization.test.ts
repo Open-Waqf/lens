@@ -3,7 +3,7 @@ import {t} from '../../src/lib/i18n';
 
 describe('app-root localization keys', () => {
     it('translates storage auto-clean toast with count', () => {
-        expect(t('storage.audit.auto_cleaned', {count: 3})).toBe('Storage Audit: cleaned 3 orphaned files.');
+        expect(t('storage.audit.auto_cleaned', {count: 3})).toBe('Cleaned up 3 leftover file(s).');
     });
 
     it('provides localized nav labels and fatal actions', () => {
