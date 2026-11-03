@@ -246,7 +246,6 @@ export class ScanPage extends LitElement {
         if (appendId) {
             const doc = await this.repo.getDoc(appendId);
             this.docTitle = doc?.title ?? t('common.document');
-            this.session.markCommitted();
             await this.refreshDocInfo();
         } else {
             this.session.setPageCount(0);
@@ -307,24 +306,6 @@ export class ScanPage extends LitElement {
             return;
         }
 
-        if (decision.kind === 'confirm-discard') {
-            const ok = await ConfirmModal.ask({
-                title: t('scan.discard_scan'),
-                description: decision.message,
-                confirm: t('common.discard'),
-                destructive: true
-            });
-            if (!ok) return;
-
-            await this.repo.deleteDocCompletely(decision.docId);
-            this.session.resetAll();
-            this.revokeStrip();
-            this.newPageIds.clear();
-            this.clearEditor();
-            location.hash = '#/library';
-            return;
-        }
-
         if (decision.kind === 'nav-library') {
             if (decision.markJustSavedDocId) {
                 try {
@@ -340,7 +321,6 @@ export class ScanPage extends LitElement {
         const id = this.session.docId;
         if (!id || this.session.pageCount === 0) return;
 
-        if (!this.session.isAppend) this.session.markCommitted();
         this.clearAppendKey();
         location.hash = `#/doc/${id}`;
     }
@@ -451,7 +431,6 @@ export class ScanPage extends LitElement {
                 this.selectedPageId = pageId;
             }
 
-            this.session.markCommitted();
             await this.refreshDocInfo();
 
             if (this.importReviewQueue.length > 0) {
@@ -848,7 +827,6 @@ export class ScanPage extends LitElement {
 
             await this.refreshDocInfo();
             if (source === 'scanner' && importedPageIds.length > 0) {
-                this.session.markCommitted();
                 this.selectedPageId = importedPageIds[importedPageIds.length - 1];
                 this.session.setStage('idle');
                 return;

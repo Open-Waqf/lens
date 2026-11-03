@@ -4,8 +4,7 @@ export type ScanStage = 'idle' | 'camera' | 'edit';
 
 export type ExitDecision =
     | { kind: 'nav-library'; markJustSavedDocId?: string }
-    | { kind: 'nav-doc'; docId: string }
-    | { kind: 'confirm-discard'; docId: string; message: string };
+    | { kind: 'nav-doc'; docId: string };
 
 export const MAX_PAGES_PER_BATCH = 50;
 
@@ -14,9 +13,6 @@ export class ScanSessionState {
     stage: ScanStage = 'idle';
     appendToDocId: string | null = null;
     currentDocId: string | null = null;
-
-    // “keep/discard” semantics
-    committed = false;
 
     // UI facts
     pageCount = 0;
@@ -48,9 +44,7 @@ export class ScanSessionState {
 
     get exitLabel(): string {
         if (this.isAppend) return t('scan.back_to_document');
-        if (!this.hasDoc && !this.hasPages) return t('common.cancel');
-        if (!this.committed && this.hasPages) return t('common.discard');
-        if (this.committed) return t('scan.back_to_library');
+        if (this.hasPages) return t('scan.back_to_library');
         return t('common.cancel');
     }
 
@@ -77,49 +71,23 @@ export class ScanSessionState {
         this.onChange?.();
     }
 
-    markCommitted() {
-        this.committed = true;
-        this.onChange?.();
-    }
-
     resetAll() {
         this.stage = 'idle';
         this.appendToDocId = null;
         this.currentDocId = null;
         this.pageCount = 0;
-        this.committed = false;
         this.onChange?.();
     }
 
     // ----- exit policy (TESTABLE) -----
 
+    // Leaving the scan screen never deletes anything: a saved page is saved (deleting is a
+    // separate act, with Undo). Before Nov 2026 the X button could discard a document whose
+    // pages were already saved, while the Android back button kept it.
     decideExit(): ExitDecision {
-        // append mode: always go back to the document
-        if (this.appendToDocId) {
-            return {kind: 'nav-doc', docId: this.appendToDocId};
-        }
-
+        if (this.appendToDocId) return {kind: 'nav-doc', docId: this.appendToDocId};
         const id = this.currentDocId;
-
-        // nothing created yet
-        if (!id || (!this.hasDoc && !this.hasPages)) {
-            return {kind: 'nav-library'};
-        }
-
-        // pages exist but user never committed => discard entire doc
-        if (this.hasPages && !this.committed) {
-            return {
-                kind: 'confirm-discard',
-                docId: id,
-                message: t('scan.discard_imported_body')
-            };
-        }
-
-        // committed => keep doc, go back library and highlight
-        if (this.committed && this.hasPages) {
-            return {kind: 'nav-library', markJustSavedDocId: id};
-        }
-
+        if (id && this.hasPages) return {kind: 'nav-library', markJustSavedDocId: id};
         return {kind: 'nav-library'};
     }
 }

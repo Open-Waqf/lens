@@ -24,13 +24,14 @@ import {deleteOrphanStorageFiles, findOrphanStorageFiles} from '../services/stor
 import {CapacitorFileStore} from "../services/filestore/capacitor-store";
 import {hasIndexLossRiskFlag, runStorageHealthProbe} from '../services/storage-health';
 import {rebuildLibraryIndexFromFiles} from '../services/rebuild-index';
-import {type BackupMetadata, restoreFromZipStream} from '../services/restore-stream';
+import {type BackupMetadata, IncompleteBackupError, restoreFromZipStream} from '../services/restore-stream';
 import {getPersistenceStatus, type PersistenceStatus} from '../services/storage-persistence';
 import {pickedFileToBlob} from '../services/picked-file';
 import {syncPrivacyScreen} from '../services/privacy-screen';
 import type {DocRecord, PageRecord} from '../domain/types';
 
 import type {RestoreMode} from '../services/restore-stream';
+import {ScanRepo} from './scan/scan-repo';
 
 const magicLength = 4;
 
@@ -107,6 +108,7 @@ export class SettingsPage extends LitElement {
             const result = await rebuildLibraryIndexFromFiles();
             await this.refreshStorageRisk();
             this.msg = t('settings.rebuild_index_done', {docs: result.docsRecovered, pages: result.pagesRecovered});
+            void new ScanRepo().resumePendingOcr(); // the rebuilt pages have no text yet
 
         } catch (e) {
             this.err = t('settings.rebuild_index_failed', {error: String(e)});
@@ -247,7 +249,16 @@ export class SettingsPage extends LitElement {
         // Items deleted with Undo still pending are already gone for the user: not backed up.
         const docs = (await db.docs.toArray()).filter(d => !d.deletedAt);
         const docIds = new Set(docs.map(d => d.id));
-        const pages = (await db.pages.toArray()).filter(p => !p.deletedAt && docIds.has(p.docId));
+        let pages = (await db.pages.toArray()).filter(p => !p.deletedAt && docIds.has(p.docId));
+        // A page whose image file is gone is not in the backup, and not in its document's
+        // list either: a backup always restores exactly what it lists (restore checks this).
+        const present: PageRecord[] = [];
+        for (const p of pages) if (await store.exists(p.imagePath)) present.push(p);
+        if (present.length !== pages.length) {
+            const keep = new Set(present.map(p => p.id));
+            for (const d of docs) d.pageIds = d.pageIds.filter(id => keep.has(id));
+            pages = present;
+        }
 
         // FIX 1: Math was wrong. docs.length must be part of the progress!
         this.backupTotal = docs.length + (pages.length * 2);
@@ -382,6 +393,7 @@ export class SettingsPage extends LitElement {
     private async restoreFromStream(chunks: AsyncIterable<Uint8Array> | ReadableStream<Uint8Array>): Promise<void> {
         const store = getFileStore();
         let meta: BackupMetadata | null = null;
+        const received = new Set<string>();
         this.backupTotal = 0;
         this.backupProgress = 0;
 
@@ -397,7 +409,9 @@ export class SettingsPage extends LitElement {
             },
             onFile: async (path, bytes) => {
                 try {
-                    await store.put(sanitizePath(path), bytes, 'image/jpeg');
+                    const safe = sanitizePath(path);
+                    await store.put(safe, bytes, 'image/jpeg');
+                    received.add(safe);
                     this.backupProgress++;
                     this.requestUpdate();
                 } catch (e) {
@@ -408,6 +422,21 @@ export class SettingsPage extends LitElement {
         if (!result.mode || !meta) return; // cancelled: nothing was changed
 
         const data = meta as BackupMetadata;
+        // The backup format has no end marker, and a zip is read entry by entry: a file cut
+        // off at a chunk boundary looks complete. So the backup is only as complete as its
+        // own list: every page listed must have arrived, or nothing is written to the
+        // library (the page files already written are orphans; the storage check removes
+        // them). Found in the Nov 2026 deep dive.
+        const listed = (data.pages as PageRecord[]).map(p => p.imagePath).filter(Boolean);
+        const missing = listed.filter(p => !received.has(p)).length;
+        if (missing > 0) {
+            try {
+                await deleteOrphanStorageFiles(await findOrphanStorageFiles());
+            } catch {
+                // The storage check at the next start will retry.
+            }
+            throw new IncompleteBackupError(missing, listed.length);
+        }
         await db.transaction('rw', db.docs, db.pages, async () => {
             if (result.mode === 'replace') {
                 await db.docs.clear();
@@ -426,6 +455,8 @@ export class SettingsPage extends LitElement {
         }
 
         this.msg = t('settings.restore_complete_processed', {count: result.files});
+        // Pages the backup lists without text (made before OCR, or mid-OCR) are read now.
+        void new ScanRepo().resumePendingOcr();
     }
 
     private async runStorageAudit() {

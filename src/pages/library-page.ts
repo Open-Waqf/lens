@@ -108,7 +108,9 @@ export class LibraryPage extends LitElement {
     }
 
     private async loadDocs() {
-        this.loading = true; // Start loading
+        // The skeleton only before the first list. Later loads (OCR done, a delete undone)
+        // change the list in place: a flash of placeholders made taps land on nothing (Nov 2026).
+        if (this.allDocsSource.length === 0) this.loading = true;
         try {
 
             this.allDocsSource = (await db.docs.orderBy('updatedAt').reverse().toArray()).filter(d => !d.deletedAt);

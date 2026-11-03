@@ -371,6 +371,41 @@ export class ScanRepo {
         return titleFromText(pageText(page.words));
     }
 
+    /**
+     * Read the pages still marked "pending" that no job is working on: left over when the
+     * app was closed during OCR, restored from a backup that had no text yet, or rebuilt
+     * from files. One at a time, in the background. Nov 2026 deep dive (C4).
+     */
+    async resumePendingOcr(): Promise<number> {
+        const pending = await db.pages.filter(p => p.ocrStatus === 'pending' && !p.deletedAt && !ocrQueue.isActive(p.id)).toArray();
+        let done = 0;
+        const store = getFileStore();
+        for (const p of pending) {
+            if (ocrQueue.isActive(p.id)) continue;
+            let bytes: Uint8Array;
+            try {
+                bytes = await store.get(p.imagePath);
+            } catch {
+                await db.pages.update(p.id, {ocrStatus: 'error'}); // the file is gone
+                continue;
+            }
+            let {width, height} = p;
+            if (!width || !height) {
+                // Rebuilt from files: the size is not known yet.
+                const bmp = await createImageBitmap(bytesToBlob(bytes, 'image/jpeg'));
+                width = bmp.width;
+                height = bmp.height;
+                bmp.close();
+                await db.pages.update(p.id, {width, height});
+            }
+            const doc = await db.docs.get(p.docId);
+            ocrQueue.addJob(p.id, doc?.title || 'Document');
+            await this.runBackgroundOcr(p.id, bytes, width, height);
+            done++;
+        }
+        return done;
+    }
+
     private async runBackgroundOcr(pageId: string, bytes: Uint8Array, w: number, h: number) {
         try {
             const blob = bytesToBlob(bytes, 'image/jpeg');

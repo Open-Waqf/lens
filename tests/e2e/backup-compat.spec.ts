@@ -23,7 +23,7 @@ for (const fx of FIXTURES) {
         await expect(page.getByText('Restore complete', {exact: false})).toBeVisible({timeout: 30_000});
 
         await page.goto('/#/library');
-        await page.getByText(fx.title).click();
+        await page.getByRole('heading', {name: fx.title}).click(); // not the "Analyzing" chip: the pages are read on restore
         // Every page image is really there and decodes (not just its database record).
         const thumbs = page.locator('[data-page-card-id] img');
         await expect(thumbs).toHaveCount(fx.pages);

@@ -149,3 +149,48 @@ for (const [label, metadata] of [['empty metadata', '{}'], ['metadata that is no
         await expect(page.getByRole('button', {name: 'Add to my library'})).toHaveCount(0);
     });
 }
+
+// Nov 2026 deep dive: the backup format has no end marker and the zip is read entry by
+// entry, so a backup cut off at a chunk boundary used to restore "cleanly" with pages
+// missing. In "Replace my library" the old library was already gone.
+test('SLBK restore refuses a backup cut off between two pages, and changes nothing', async ({page}) => {
+    const fs = await import('node:fs');
+    const whole = fs.readFileSync('tests/fixtures/backups/lens-0.5.0-2026-11.slbk');
+    // Byte 651762 is a chunk boundary: metadata.json and page 1 are before it, page 2 after.
+    const cut = whole.subarray(0, 651762);
+
+    const chooserPromise = page.waitForEvent('filechooser');
+    await page.locator('text=Restore Backup').click();
+    await (await chooserPromise).setFiles({name: 'cut.slbk', mimeType: 'application/octet-stream', buffer: Buffer.from(cut)});
+    await page.getByPlaceholder('Password').fill('fixture-2026-11');
+    await page.getByRole('button', {name: 'Restore', exact: true}).click();
+    await page.getByRole('button', {name: 'Replace my library'}).click({timeout: 30_000});
+
+    await expect(page.getByText(/incomplete: 1 of 2 pages/)).toBeVisible({timeout: 60_000});
+    await page.goto('/#/library');
+    await expect(page.getByText('No scans yet')).toBeVisible({timeout: 10_000});
+});
+
+test('A plain zip backup that lists a page it does not contain is refused', async ({page}) => {
+    const {zipSync, strToU8} = await import('fflate');
+    const meta = {
+        docs: [{id: 'd1', title: 'Half', folder: null, tags: [], createdAt: 1, updatedAt: 1, pageIds: ['p1', 'p2']}],
+        pages: [
+            {id: 'p1', docId: 'd1', imagePath: 'docs/d1/pages/p1.jpg', thumbPath: 'docs/d1/thumbs/p1.jpg', width: 1, height: 1, rotation: 0, createdAt: 1},
+            {id: 'p2', docId: 'd1', imagePath: 'docs/d1/pages/p2.jpg', thumbPath: 'docs/d1/thumbs/p2.jpg', width: 1, height: 1, rotation: 0, createdAt: 1},
+        ],
+    };
+    const buffer = Buffer.from(zipSync({
+        'metadata.json': strToU8(JSON.stringify(meta)),
+        'docs/d1/pages/p1.jpg': new Uint8Array([0xff, 0xd8, 0xff, 0xd9]),
+        'docs/d1/thumbs/p1.jpg': new Uint8Array([0xff, 0xd8, 0xff, 0xd9]),
+    }));
+    const chooserPromise = page.waitForEvent('filechooser');
+    await page.locator('text=Restore Backup').click();
+    await (await chooserPromise).setFiles({name: 'half.zip', mimeType: 'application/zip', buffer});
+    await page.getByRole('button', {name: 'Restore', exact: true}).click({timeout: 10_000});
+    await page.getByRole('button', {name: 'Add to my library'}).click({timeout: 10_000});
+    await expect(page.getByText(/incomplete: 1 of 2 pages/)).toBeVisible({timeout: 10_000});
+    await page.goto('/#/library');
+    await expect(page.getByText('No scans yet')).toBeVisible();
+});

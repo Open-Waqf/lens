@@ -18,6 +18,10 @@ class OcrQueueService extends EventTarget {
         return Array.from(new Set(titles));
     }
 
+    isActive(pageId: string): boolean {
+        return this.jobs.some(j => j.pageId === pageId && j.status === 'processing');
+    }
+
     addJob(pageId: string, docTitle: string) {
         this.jobs.push({pageId, docTitle, status: 'processing'});
         this.notify();

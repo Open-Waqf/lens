@@ -20,6 +20,14 @@ export class InvalidBackupError extends Error {
     }
 }
 
+/** The backup ended before every page it lists had arrived (cut off, or made from a broken library). */
+export class IncompleteBackupError extends Error {
+    constructor(public readonly missing: number, public readonly total: number) {
+        super(`incomplete_backup: ${missing} of ${total} page files missing`);
+        this.name = 'IncompleteBackupError';
+    }
+}
+
 export function isBackupMetadata(v: unknown): v is BackupMetadata {
     const m = v as {docs?: unknown; pages?: unknown} | null;
     if (!m || !Array.isArray(m.docs) || !Array.isArray(m.pages)) return false;

@@ -30,6 +30,8 @@ const FILTERS: Array<{mode: FilterMode; labelKey: 'editor.filter_original' | 'ed
     {mode: 'bw', labelKey: 'editor.filter_bw'},
 ];
 
+const PREVIEW_MAX = 2048;
+
 @customElement('page-editor')
 export class PageEditor extends LitElement {
     createRenderRoot() {
@@ -72,6 +74,10 @@ export class PageEditor extends LitElement {
     @state() private showShareSheet = false;
 
     private sourceBitmap: ImageBitmap | null = null;
+    // The preview is at most PREVIEW_MAX px wide, so it is warped from a copy that size,
+    // not from the full photo (a 48 MP photo warped on every corner move was slow). Nov 2026.
+    private previewBitmap: ImageBitmap | null = null;
+    private previewScale = 1;
     private baseCanvas: HTMLCanvasElement | null = null;
 
     private baseW = 0;
@@ -169,6 +175,8 @@ export class PageEditor extends LitElement {
             this.sourceBitmap.close();
             this.sourceBitmap = null;
         }
+        this.previewBitmap?.close();
+        this.previewBitmap = null;
         super.disconnectedCallback();
     }
 
@@ -225,6 +233,14 @@ export class PageEditor extends LitElement {
         try {
             if (this.sourceBitmap) this.sourceBitmap.close();
             this.sourceBitmap = await createImageBitmap(this.blob);
+            this.previewBitmap?.close();
+            const largest = Math.max(this.sourceBitmap.width, this.sourceBitmap.height);
+            this.previewScale = Math.min(1, PREVIEW_MAX / largest);
+            this.previewBitmap = await createImageBitmap(this.sourceBitmap, {
+                resizeWidth: Math.max(1, Math.round(this.sourceBitmap.width * this.previewScale)),
+                resizeHeight: Math.max(1, Math.round(this.sourceBitmap.height * this.previewScale)),
+                resizeQuality: 'high',
+            });
             this.updateBaseCanvasFromSource();
 
             this.quad = this.initialQuad ? [...this.initialQuad] as Quad : fullQuad(this.baseW, this.baseH);
@@ -535,10 +551,11 @@ export class PageEditor extends LitElement {
     }
 
     private async updatePreview(): Promise<void> {
-        if (!this.sourceBitmap || !this.quad) return;
+        if (!this.sourceBitmap || !this.previewBitmap || !this.quad) return;
         const token = ++this._previewToken;
         try {
-            const mappedQuad = this.mapQuadToSource(this.quad);
+            const k = this.previewScale;
+            const mappedQuad = this.mapQuadToSource(this.quad).map(p => ({x: p.x * k, y: p.y * k})) as Quad;
             const outSize = computeOutputSize(mappedQuad);
             const out = this.previewEl;
             if (!out) return;
@@ -583,7 +600,7 @@ export class PageEditor extends LitElement {
 
             const res = await this.runWorkerTask({
                 id: `prev-${token}`,
-                bitmap: await createImageBitmap(this.sourceBitmap),
+                bitmap: await createImageBitmap(this.previewBitmap),
                 quad: mappedQuad,
                 rotation: 0,
                 filter: this.filter,
@@ -631,42 +648,28 @@ export class PageEditor extends LitElement {
                 rawWidth: rawSize.w,
                 rawHeight: rawSize.h,
             });
-            const masterTask = this.runWorkerTask({
-                id: `save-m-${Date.now()}`,
+            // One pass: the photo is decoded and warped once, and the thumbnail is made from
+            // the finished page (before Nov 2026 both were warped from the photo separately,
+            // which doubled the save time of large photos).
+            const res = await this.runWorkerTask({
+                id: `save-${Date.now()}`,
                 blob: this.blob,
                 quad: mappedQuad,
                 rotation: 0,
                 filter: this.filter,
                 outW: qualityPlan.masterWidth,
                 outH: qualityPlan.masterHeight,
-                encode: true,
-                quality: qualityPlan.masterJpegQuality,
                 sharpenAmount: qualityPlan.sharpenAmount,
+                masterJpegQuality: qualityPlan.masterJpegQuality,
+                thumbMax: qualityPlan.thumbMax,
+                thumbJpegQuality: qualityPlan.thumbJpegQuality,
             });
-            const tScale = Math.min(1, qualityPlan.thumbMax / Math.max(rawSize.w, rawSize.h));
-            const tW = Math.round(rawSize.w * tScale);
-            const tH = Math.round(rawSize.h * tScale);
-            const thumbTask = this.runWorkerTask({
-                id: `save-t-${Date.now()}`,
-                blob: this.blob,
-                quad: mappedQuad,
-                rotation: 0,
-                filter: this.filter,
-                outW: tW,
-                outH: tH,
-                encode: true,
-                outputMime: 'image/webp',
-                quality: qualityPlan.thumbJpegQuality,
-                sharpenAmount: 0,
-            });
-            const [resM, resT] = await Promise.all([masterTask, thumbTask]);
-            if (!resM.ok) throw new Error(resM.error || t('errors.editor_encode_master_failed'));
-            if (!resT.ok) throw new Error(resT.error || t('errors.editor_encode_thumb_failed'));
-            if (!resM.bytes) throw new Error(t('errors.editor_master_missing'));
-            if (!resT.bytes) throw new Error(t('errors.editor_thumb_missing'));
+            if (!res.ok) throw new Error(res.error || t('errors.editor_encode_master_failed'));
+            if (!res.master) throw new Error(t('errors.editor_master_missing'));
+            if (!res.thumb) throw new Error(t('errors.editor_thumb_missing'));
             const detail: PageEditorSaveDetail = {
-                master: {bytes: resM.bytes, width: resM.width!, height: resM.height!},
-                thumb: {bytes: resT.bytes, width: resT.width!, height: resT.height!},
+                master: res.master,
+                thumb: res.thumb,
                 extractText: this.extractText,
             };
             this.dispatchEvent(

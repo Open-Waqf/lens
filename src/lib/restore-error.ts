@@ -1,7 +1,7 @@
 import {ERR_CORRUPTED_VAULT, ERR_INCORRECT_PASSWORD, ERR_UNSUPPORTED_VAULT_VERSION} from './crypto/pbe';
 import {t} from './i18n';
 import {toUserErrorMessage} from './user-error';
-import {InvalidBackupError} from '../services/restore-stream';
+import {IncompleteBackupError, InvalidBackupError} from '../services/restore-stream';
 
 const LEGACY_INCORRECT_PASSWORD = 'Incorrect password';
 const LEGACY_CORRUPTED_VAULT = 'Vault file is corrupted or incomplete';
@@ -24,6 +24,10 @@ export function mapRestoreError(error: unknown): { direct: boolean; message: str
 
     if (error instanceof InvalidBackupError) {
         return {direct: true, message: t('settings.restore_invalid_backup')};
+    }
+
+    if (error instanceof IncompleteBackupError) {
+        return {direct: true, message: t('settings.restore_incomplete', {missing: error.missing, total: error.total})};
     }
 
     if (raw === t('settings.restore_password_required')) {

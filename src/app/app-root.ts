@@ -18,6 +18,7 @@ import {garbageCollectOpfsDocs} from '../services/opfs-gc';
 import {AuthService} from '../services/auth-service';
 import {sweepTempFiles} from '../services/share';
 import {purgeDeleted} from '../services/pending-delete';
+import {ScanRepo} from '../pages/scan/scan-repo';
 import {syncPrivacyScreen} from '../services/privacy-screen';
 import {resetAllStorage} from '../services/reset-storage';
 import {showToast} from "../components/toast-notification";
@@ -142,6 +143,8 @@ export class AppRoot extends LitElement {
             try {
                 const {warmupOcr} = await import('../lib/ocr');
                 await warmupOcr(prefs.ocrLang || 'ara+eng');
+                // Pages whose text was never read (app closed mid-OCR, older backup, rebuilt index).
+                await new ScanRepo().resumePendingOcr();
             } catch (e) {
             }
         };
