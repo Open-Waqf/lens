@@ -1,8 +1,6 @@
 import {defineConfig} from 'vitest/config';
 import tailwindcss from '@tailwindcss/vite';
 import {VitePWA} from 'vite-plugin-pwa';
-import progress from 'vite-plugin-progress';
-import {visualizer} from 'rollup-plugin-visualizer';
 
 export default defineConfig({
     build: {
@@ -90,13 +88,6 @@ export default defineConfig({
                     }
                 }]
             }
-        }),
-        progress(),
-        visualizer({
-            open: false,
-            filename: 'dist/stats.html',
-            gzipSize: true,
-            brotliSize: true
         }),
     ],
     server: {

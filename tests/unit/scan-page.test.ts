@@ -89,6 +89,10 @@ vi.mock('../../src/services/backup-reminder', () => ({
     recordSuccessfulSaveAndShouldRemind: (...args: any[]) => mockRecordSaveReminder(...args)
 }));
 
+vi.mock('../../src/services/pending-import', () => ({
+    takePendingImport: () => []
+}));
+
 vi.mock('../../src/services/share', () => ({
     shareFile: (...args: any[]) => mockShareFile(...args)
 }));
@@ -150,9 +154,6 @@ describe('ScanPage Component', () => {
         mockState.isNativePlatform = false;
         mockState.mockScanDocument.mockResolvedValue({scannedImages: []});
 
-        vi.mock('../../src/services/pending-import', () => ({
-            takePendingImport: () => []
-        }));
     });
 
     async function mountPage(welcomeSeen = false) {
