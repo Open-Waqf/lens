@@ -28,6 +28,8 @@ test('quick share from scan editor does not create a saved document', async ({pa
 
     await expect(page.locator('page-editor')).toBeVisible({timeout: 15000});
     await expect(page.locator('nav')).toHaveCount(0);
+    // Set the crop once the editor has loaded and looked for edges, or it resets it.
+    await expect(page.getByTestId('editor-loading')).toBeHidden({timeout: 15000});
     await page.evaluate(() => {
         const el = document.querySelector('page-editor') as any;
         if (!el) return;

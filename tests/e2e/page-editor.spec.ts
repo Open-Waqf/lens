@@ -26,6 +26,8 @@ test('Page Editor: Invalid Selection (Crossed Handles) Warning', async ({page}) 
     await expect(editor).toBeVisible({timeout: 10000});
 
     // 2. Cross two handles (a bow-tie shape): the crop is invalid
+    // Set the crop once the editor has loaded and looked for edges, or it resets it.
+    await expect(page.getByTestId('editor-loading')).toBeHidden({timeout: 15000});
     await page.evaluate(() => {
         const el = document.querySelector('page-editor') as any;
         if (!el) return;
@@ -43,6 +45,8 @@ test('Page Editor: Invalid Selection (Crossed Handles) Warning', async ({page}) 
     await expect(saveBtn).toBeDisabled();
 
     // 5. Recover to valid shape
+    // Set the crop once the editor has loaded and looked for edges, or it resets it.
+    await expect(page.getByTestId('editor-loading')).toBeHidden({timeout: 15000});
     await page.evaluate(() => {
         const el = document.querySelector('page-editor') as any;
         el.quad = [
@@ -103,6 +107,8 @@ test('Page Editor: share button opens explicit format sheet', async ({page}) => 
     const editor = page.locator('page-editor');
     await expect(editor).toBeVisible({timeout: 10000});
     await page.waitForTimeout(600); // let the 1x1 test image finish loading before replacing its crop
+    // Set the crop once the editor has loaded and looked for edges, or it resets it.
+    await expect(page.getByTestId('editor-loading')).toBeHidden({timeout: 15000});
     await page.evaluate(() => {
         const el = document.querySelector('page-editor') as any;
         if (!el) return;
