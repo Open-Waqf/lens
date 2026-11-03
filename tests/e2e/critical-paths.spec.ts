@@ -1,4 +1,4 @@
-import {expect, test, type Download, type Page} from '@playwright/test';
+import {expect, test, type Download, type Page} from './support/test';
 import fs from 'fs';
 import path from 'path';
 
@@ -63,7 +63,7 @@ test.beforeEach(async ({page}) => {
     });
 
     // 2. Go to the app (it should now skip Welcome automatically)
-    await page.goto('http://localhost:4173');
+    await page.goto('/');
 });
 
 test('Disaster Recovery Flow: Import -> Encrypt -> Wipe -> Restore', async ({page}) => {
@@ -108,19 +108,19 @@ test('Disaster Recovery Flow: Import -> Encrypt -> Wipe -> Restore', async ({pag
     await expect(page.locator('page-editor')).not.toBeVisible({timeout: 15000});
 
     // CHECKPOINT: Go to Library and wait for the document to appear
-    await page.goto('http://localhost:4173/#/library');
+    await page.goto('/#/library');
 
     // Wait for the "No scans yet" message to disappear
     await expect(page.locator('text=No scans yet')).not.toBeVisible({timeout: 10000});
 
     // 4. BACKUP
-    await page.goto('http://localhost:4173/#/settings');
+    await page.goto('/#/settings');
 
     const backupBuffer = await exportBackupBuffer(page, 'secure123');
     console.log('Backup successfully captured');
 
     // 5. WIPE
-    await page.goto('http://localhost:4173/#/settings');
+    await page.goto('/#/settings');
     const dangerZone = page.locator('#DangerZone');
     const deleteInput = dangerZone.getByPlaceholder('DELETE');
     if (await deleteInput.count() === 0 || !(await deleteInput.isVisible().catch(() => false))) {

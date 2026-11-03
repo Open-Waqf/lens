@@ -24,6 +24,9 @@ export default defineConfig({
         },
     },
     base: './',
+    // Only scan index.html for dependencies. Without this, a cold Vite cache also scans the
+    // web copy that `cap sync` puts in android/app/src/main/assets/public (Signer lesson).
+    optimizeDeps: {entries: ['index.html']},
     plugins: [
         tailwindcss(),
         VitePWA({

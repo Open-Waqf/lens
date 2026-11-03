@@ -1,6 +1,6 @@
-import {expect, test} from '@playwright/test';
+import {expect, test} from './support/test';
 
-async function readDoc(page: import('@playwright/test').Page, docId: string): Promise<{ correctedOcrText?: string; searchIndex?: string }> {
+async function readDoc(page: import('./support/test').Page, docId: string): Promise<{ correctedOcrText?: string; searchIndex?: string }> {
     return await page.evaluate(async (id) => {
         const req = indexedDB.open('sahifah-lens');
         const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -23,7 +23,7 @@ test.beforeEach(async ({page}) => {
         window.localStorage.setItem('sahifah.welcomeSeen', '1');
         (window as any).Capacitor = {isNativePlatform: () => false, platform: 'web'};
     });
-    await page.goto('http://localhost:4173/#/library');
+    await page.goto('/#/library');
 });
 
 test('manual OCR correction saves corrected text and updates search index', async ({page}) => {
@@ -66,7 +66,7 @@ test('manual OCR correction saves corrected text and updates search index', asyn
         db.close();
     }, {now, docId});
 
-    await page.goto(`http://localhost:4173/#/doc/${docId}`);
+    await page.goto(`/#/doc/${docId}`);
     await page.getByRole('button', {name: 'Show Extracted Text'}).click();
     await page.getByRole('button', {name: 'Edit OCR Text'}).click();
     const editor = page.getByPlaceholder('Type corrected OCR text...');

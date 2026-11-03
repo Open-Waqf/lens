@@ -1,4 +1,4 @@
-import {expect, test} from '@playwright/test';
+import {expect, test} from './support/test';
 
 const MOCK_IMAGE_BASE64 =
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
@@ -14,7 +14,7 @@ test.beforeEach(async ({page}) => {
 });
 
 test('core flow scan -> OCR -> save -> search -> export does not require outbound network', async ({page}) => {
-    await page.goto('http://localhost:4173/#/scan');
+    await page.goto('/#/scan');
 
     const importBtn = page.locator('button').filter({hasText: /Import/i});
     await expect(importBtn).toBeVisible({timeout: 15000});
@@ -80,12 +80,12 @@ test('core flow scan -> OCR -> save -> search -> export does not require outboun
     });
     expect(ocrResolved).toBe(true);
 
-    await page.goto('http://localhost:4173/#/library');
+    await page.goto('/#/library');
     await expect(page.locator('text=No scans yet')).not.toBeVisible({timeout: 10000});
     await page.locator('input[placeholder*="Search"]').fill('scan');
     await expect(page.locator('h3', {hasText: /Scan/i}).first()).toBeVisible({timeout: 5000});
 
-    await page.goto('http://localhost:4173/#/settings');
+    await page.goto('/#/settings');
     const downloadPromise = page.waitForEvent('download');
     await page.locator('button:has-text("Export Backup")').click();
     await page.getByPlaceholder('Password123').fill('networkGate123');

@@ -1,4 +1,4 @@
-import {expect, test, type Page} from '@playwright/test';
+import {expect, test, type Page} from './support/test';
 
 test.beforeEach(async ({page}) => {
     await page.addInitScript(() => {
@@ -10,7 +10,7 @@ test.beforeEach(async ({page}) => {
         }
         (window as any).Capacitor = {isNativePlatform: () => false, platform: 'web'};
     });
-    await page.goto('http://localhost:4173/#/settings');
+    await page.goto('/#/settings');
 });
 
 function ocrLanguageSelect(page: Page) {

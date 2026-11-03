@@ -1,4 +1,4 @@
-import {expect, test} from '@playwright/test';
+import {expect, test} from './support/test';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -13,10 +13,10 @@ test.beforeEach(async ({page}) => {
         (window as any).navigator.mediaDevices.getUserMedia = async () => new MediaStream();
     });
     // Use a longer timeout for initial load
-    await page.goto('http://localhost:4173', { waitUntil: 'networkidle' });
+    await page.goto('/', { waitUntil: 'networkidle' });
 });
 
-async function readDocFolder(page: import('@playwright/test').Page, docId: string): Promise<string | null> {
+async function readDocFolder(page: import('./support/test').Page, docId: string): Promise<string | null> {
     return await page.evaluate(async (id) => {
         const req = indexedDB.open('sahifah-lens');
         const db = await new Promise<IDBDatabase>((resolve, reject) => {

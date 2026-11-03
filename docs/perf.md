@@ -1,51 +1,18 @@
-# Performance Gates (P0-1)
+# Performance gates
 
-This document defines the automated performance gates used for release checks.
+`npm run test:perf` runs `tests/e2e/perf-gates.spec.ts` on the desktop screen. The same
+tests run in `npm run check -- --desktop`, in the release, and on GitHub.
 
-## Command
+| Gate | Threshold |
+|---|---|
+| PERF-START-001 cold start to camera ready | 2.5 s |
+| PERF-OCR-001 OCR of a one-page document | 30 s |
+| PERF-SEARCH-001 search across 1,000 documents | 0.5 s |
+| PERF-EXPORT-001 backup export of 100 documents | 60 s |
+| PERF-RESET-001 erase a 500-document library | 3 s |
 
-```bash
-npm run test:perf
-```
+Data is seeded straight into IndexedDB and OPFS, and cleared between gates. The report
+(`perf-report.json`, `perf-summary.md`) is written to `test-results/perf/`, which git ignores.
 
-This runs `tests/e2e/perf-gates.spec.ts` (Desktop Chrome) and enforces thresholds in-test.
-
-## Measured Gates
-
-1. `PERF-START-001` cold start to camera-ready: `<= 2500ms`
-2. `PERF-OCR-001` OCR single page: `<= 30000ms`
-3. `PERF-SEARCH-001` search on 1,000 docs: `<= 500ms`
-4. `PERF-EXPORT-001` export on 100-doc vault: `<= 60000ms`
-5. `PERF-RESET-001` nuclear reset on 500-doc vault: `<= 3000ms`
-
-## Data Setup Strategy
-
-- Vault state is seeded directly into IndexedDB (`sahifah-lens`) for deterministic scale tests.
-- OPFS files are seeded for export/reset gates.
-- Tests run serially and clear DB + OPFS between gates.
-
-## Artifacts
-
-Generated under `artifacts/`:
-
-- `perf-report.json`: machine-readable metrics
-- `perf-summary.md`: markdown table summary
-
-`perf-report.json` includes:
-- metric name
-- samples
-- median measured time
-- p95 time
-- threshold
-- pass/fail
-
-## CI
-
-Workflow: `.github/workflows/perf.yml`
-
-CI job:
-1. installs dependencies
-2. builds app
-3. runs `npm run test:perf`
-4. uploads `artifacts/perf-report.json` and `artifacts/perf-summary.md`
-
+These are desktop numbers. Real phone numbers come from `npm run test:android` (OCR time and
+memory on the phone).

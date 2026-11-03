@@ -1,4 +1,4 @@
-import {expect, test} from '@playwright/test';
+import {expect, test} from './support/test';
 
 function findUnnamedVisibleButtons() {
     const buttons = Array.from(document.querySelectorAll('button')) as HTMLButtonElement[];
@@ -29,7 +29,7 @@ test.beforeEach(async ({page}) => {
 });
 
 test('primary flow controls are discoverable by role/name', async ({page}) => {
-    await page.goto('http://localhost:4173/#/library');
+    await page.goto('/#/library');
 
     await expect(page.getByRole('link', {name: 'Library'})).toBeVisible();
     await expect(page.getByRole('link', {name: 'New Scan'})).toBeVisible();
@@ -38,7 +38,7 @@ test('primary flow controls are discoverable by role/name', async ({page}) => {
     const libraryUnnamed = await page.evaluate(findUnnamedVisibleButtons);
     expect(libraryUnnamed).toEqual([]);
 
-    await page.goto('http://localhost:4173/#/scan?new=1');
+    await page.goto('/#/scan?new=1');
     await page.getByRole('button', {name: /Open Camera|Start Scanner/i}).click();
 
     await expect(page.getByRole('button', {name: 'Capture', exact: true})).toBeVisible({timeout: 10000});
@@ -48,7 +48,7 @@ test('primary flow controls are discoverable by role/name', async ({page}) => {
     const scanUnnamed = await page.evaluate(findUnnamedVisibleButtons);
     expect(scanUnnamed).toEqual([]);
 
-    await page.goto('http://localhost:4173/#/settings');
+    await page.goto('/#/settings');
     await expect(page.getByRole('heading', {name: 'Settings'})).toBeVisible();
     await expect(page.getByRole('button', {name: 'Show Destructive Options'})).toBeVisible();
 

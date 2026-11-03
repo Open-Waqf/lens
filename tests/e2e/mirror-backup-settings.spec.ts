@@ -1,11 +1,11 @@
-import {expect, test} from '@playwright/test';
+import {expect, test} from './support/test';
 
 test.beforeEach(async ({page}) => {
     await page.addInitScript(() => {
         window.localStorage.setItem('sahifah.welcomeSeen', '1');
         (window as any).Capacitor = {isNativePlatform: () => false, platform: 'web'};
     });
-    await page.goto('http://localhost:4173/#/settings');
+    await page.goto('/#/settings');
 });
 
 test('mirror backup section is visible with progressive disclosure UX', async ({page}) => {

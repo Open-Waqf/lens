@@ -1,4 +1,4 @@
-import {expect, test} from '@playwright/test';
+import {expect, test} from './support/test';
 
 const MOCK_IMAGE_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
@@ -7,7 +7,7 @@ test.beforeEach(async ({page}) => {
         window.localStorage.setItem('sahifah.welcomeSeen', '1');
         (window as any).Capacitor = {isNativePlatform: () => false, platform: 'web'};
     });
-    await page.goto('http://localhost:4173/#/scan?new=1');
+    await page.goto('/#/scan?new=1');
 });
 
 test('scan editor corner handles meet 44x44 touch target minimum', async ({page}) => {

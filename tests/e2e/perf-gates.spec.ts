@@ -1,4 +1,4 @@
-import {expect, test} from '@playwright/test';
+import {expect, test} from './support/test';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -26,9 +26,9 @@ function median(values: number[]): number {
     return percentile(values, 50);
 }
 
-async function clearVault(page: import('@playwright/test').Page): Promise<void> {
-    if (!page.url().startsWith('http://localhost:4173')) {
-        await page.goto('http://localhost:4173/#/library');
+async function clearVault(page: import('./support/test').Page): Promise<void> {
+    if (!page.url().startsWith('http')) {
+        await page.goto('/#/library');
     }
     await page.evaluate(async () => {
         async function clearDb(): Promise<void> {
@@ -84,7 +84,7 @@ async function clearVault(page: import('@playwright/test').Page): Promise<void> 
     });
 }
 
-async function seedVault(page: import('@playwright/test').Page, opts: {docCount: number; pagesPerDoc: number; includeFiles: boolean; searchOnly?: boolean}): Promise<void> {
+async function seedVault(page: import('./support/test').Page, opts: {docCount: number; pagesPerDoc: number; includeFiles: boolean; searchOnly?: boolean}): Promise<void> {
     await page.evaluate(async ({docCount, pagesPerDoc, includeFiles, searchOnly}) => {
         const now = Date.now();
 
@@ -219,7 +219,8 @@ test.beforeEach(async ({page}) => {
 });
 
 test.afterAll(async () => {
-    const outDir = path.resolve(process.cwd(), 'artifacts');
+    // Reports go to test-results/ (git-ignored), so a test run never changes tracked files.
+    const outDir = path.resolve(process.cwd(), 'test-results', 'perf');
     fs.mkdirSync(outDir, {recursive: true});
 
     const metrics = Object.entries(perfResults).map(([name, v]) => ({
@@ -235,7 +236,7 @@ test.afterAll(async () => {
         generatedAt: new Date().toISOString(),
         environment: {
             browser: 'Desktop Chrome (Playwright)',
-            routeBase: 'http://localhost:4173',
+            routeBase: 'vite (dev) or vite preview (TEST_BUILD)',
         },
         thresholdsMs: PERF_THRESHOLDS_MS,
         metrics,
@@ -256,13 +257,13 @@ test.afterAll(async () => {
     fs.writeFileSync(path.join(outDir, 'perf-summary.md'), lines.join('\n'), 'utf-8');
 });
 
-test('PERF-START-001 cold start to camera ready <= 2.5s', async ({page}) => {
+test('PERF-START-001 cold start to camera ready <= 2.5s @perf', async ({page}) => {
     test.setTimeout(120000);
     await clearVault(page);
     const samples: number[] = [];
     for (let i = 0; i < 3; i++) {
         const t0 = Date.now();
-        await page.goto('http://localhost:4173/#/scan');
+        await page.goto('/#/scan');
         const captureBtn = page.getByRole('button', {name: /Capture/i}).first();
         if (!(await captureBtn.isVisible().catch(() => false))) {
             const onboardingBtn = page.getByRole('button', {name: /Start Scanning/i});
@@ -280,9 +281,9 @@ test('PERF-START-001 cold start to camera ready <= 2.5s', async ({page}) => {
     expect(Math.round(median(samples))).toBeLessThanOrEqual(PERF_THRESHOLDS_MS.coldStartCameraReady);
 });
 
-test('PERF-OCR-001 OCR 1-page document <= 30s', async ({page}) => {
+test('PERF-OCR-001 OCR 1-page document <= 30s @perf', async ({page}) => {
     await clearVault(page);
-    await page.goto('http://localhost:4173/#/scan');
+    await page.goto('/#/scan');
 
     const importBtn = page.locator('button').filter({hasText: /Import/i});
     await expect(importBtn).toBeVisible({timeout: 15000});
@@ -352,9 +353,9 @@ test('PERF-OCR-001 OCR 1-page document <= 30s', async ({page}) => {
     expect(elapsed).toBeLessThanOrEqual(PERF_THRESHOLDS_MS.ocrSinglePage);
 });
 
-test('PERF-SEARCH-001 search <= 500ms at 1000 docs', async ({page}) => {
+test('PERF-SEARCH-001 search <= 500ms at 1000 docs @perf', async ({page}) => {
     await clearVault(page);
-    await page.goto('http://localhost:4173/#/library');
+    await page.goto('/#/library');
     await seedVault(page, {docCount: 1000, pagesPerDoc: 0, includeFiles: false, searchOnly: true});
     await page.reload();
 
@@ -375,9 +376,9 @@ test('PERF-SEARCH-001 search <= 500ms at 1000 docs', async ({page}) => {
     expect(Math.round(median(samples))).toBeLessThanOrEqual(PERF_THRESHOLDS_MS.search1000Docs);
 });
 
-test('PERF-EXPORT-001 export 100-doc vault <= 60s', async ({page}) => {
+test('PERF-EXPORT-001 export 100-doc vault <= 60s @perf', async ({page}) => {
     await clearVault(page);
-    await page.goto('http://localhost:4173/#/settings');
+    await page.goto('/#/settings');
     await seedVault(page, {docCount: 100, pagesPerDoc: 1, includeFiles: true});
     await page.reload();
 
@@ -395,9 +396,9 @@ test('PERF-EXPORT-001 export 100-doc vault <= 60s', async ({page}) => {
     expect(elapsed).toBeLessThanOrEqual(PERF_THRESHOLDS_MS.export100Docs);
 });
 
-test('PERF-RESET-001 nuclear reset 500-doc vault <= 3s', async ({page}) => {
+test('PERF-RESET-001 nuclear reset 500-doc vault <= 3s @perf', async ({page}) => {
     await clearVault(page);
-    await page.goto('http://localhost:4173/#/settings');
+    await page.goto('/#/settings');
     await seedVault(page, {docCount: 500, pagesPerDoc: 1, includeFiles: true});
     await page.reload();
 

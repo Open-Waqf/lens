@@ -1,4 +1,4 @@
-import {expect, test} from '@playwright/test';
+import {expect, test} from './support/test';
 
 test.beforeEach(async ({page}) => {
     await page.addInitScript(() => {
@@ -10,7 +10,7 @@ test.beforeEach(async ({page}) => {
         }
         (window as any).Capacitor = {isNativePlatform: () => false, platform: 'web'};
     });
-    await page.goto('http://localhost:4173/#/library');
+    await page.goto('/#/library');
 });
 
 test('storage banner can be dismissed and stays hidden after reload', async ({page}) => {

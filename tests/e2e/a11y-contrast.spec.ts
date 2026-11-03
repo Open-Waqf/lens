@@ -1,4 +1,4 @@
-import {expect, test} from '@playwright/test';
+import {expect, test} from './support/test';
 
 type ContrastProbe = {
     selector: string;
@@ -13,7 +13,7 @@ test.beforeEach(async ({page}) => {
     });
 });
 
-async function assertContrast(page: import('@playwright/test').Page, probes: ContrastProbe[]) {
+async function assertContrast(page: import('./support/test').Page, probes: ContrastProbe[]) {
     const failures = await page.evaluate((items) => {
         function parseRgbInPage(input: string): [number, number, number, number] | null {
             const canvas = document.createElement('canvas');
@@ -106,14 +106,14 @@ async function assertContrast(page: import('@playwright/test').Page, probes: Con
 }
 
 test('contrast baseline: library, scan, settings key text meets WCAG AA', async ({page}) => {
-    await page.goto('http://localhost:4173/#/library');
+    await page.goto('/#/library');
     await assertContrast(page, [
         {selector: 'h1', minRatio: 4.5},
         {selector: 'input[placeholder*="Search"]', minRatio: 4.5},
         {selector: 'nav span.text-\\[10px\\]', minRatio: 4.5},
     ]);
 
-    await page.goto('http://localhost:4173/#/scan?new=1');
+    await page.goto('/#/scan?new=1');
     await page.waitForSelector('.text-2xl.font-bold.tracking-tight');
     await assertContrast(page, [
         {selector: '.text-2xl.font-bold.tracking-tight', minRatio: 4.5},
@@ -121,7 +121,7 @@ test('contrast baseline: library, scan, settings key text meets WCAG AA', async 
         {selector: 'button.w-full.py-4.text-slate-400', minRatio: 4.5},
     ]);
 
-    await page.goto('http://localhost:4173/#/settings');
+    await page.goto('/#/settings');
     await assertContrast(page, [
         {selector: 'h1.text-2xl', minRatio: 4.5},
         {selector: '#DangerZone h2', minRatio: 4.5},

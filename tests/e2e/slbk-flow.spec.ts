@@ -1,4 +1,4 @@
-import {expect, test} from '@playwright/test';
+import {expect, test} from './support/test';
 import fs from 'fs';
 
 test.beforeEach(async ({page}) => {
@@ -6,7 +6,7 @@ test.beforeEach(async ({page}) => {
         window.localStorage.setItem('sahifah.welcomeSeen', '1');
         (window as any).Capacitor = {isNativePlatform: () => false, platform: 'web'};
     });
-    await page.goto('http://localhost:4173/#/settings');
+    await page.goto('/#/settings');
 });
 
 test('SLBK export downloads a .slbk file', async ({page}) => {
@@ -46,7 +46,7 @@ test('SLBK restore requires password', async ({page}) => {
 
     await expect(page.getByText('Incorrect password.')).toBeVisible({timeout: 20000});
 
-    await page.goto('http://localhost:4173/#/library');
+    await page.goto('/#/library');
     await expect(page.getByText('No scans yet')).toBeVisible({timeout: 10000});
 });
 
@@ -78,7 +78,7 @@ test('SLBK restore rejects corrupted backup with specific error and no partial w
 
     await expect(page.getByText('Vault file is corrupted or incomplete.')).toBeVisible({timeout: 10000});
 
-    await page.goto('http://localhost:4173/#/library');
+    await page.goto('/#/library');
     await expect(page.getByText('No scans yet')).toBeVisible({timeout: 10000});
 });
 
@@ -112,6 +112,6 @@ test('SLBK restore rejects unsupported future version backup', async ({page}) =>
 
     await expect(page.getByText('Vault file version is not supported.')).toBeVisible({timeout: 10000});
 
-    await page.goto('http://localhost:4173/#/library');
+    await page.goto('/#/library');
     await expect(page.getByText('No scans yet')).toBeVisible({timeout: 10000});
 });

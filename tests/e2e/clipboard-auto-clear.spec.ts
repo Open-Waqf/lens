@@ -1,6 +1,6 @@
-import {expect, test} from '@playwright/test';
+import {expect, test} from './support/test';
 
-async function seedDocWithOcr(page: import('@playwright/test').Page): Promise<void> {
+async function seedDocWithOcr(page: import('./support/test').Page): Promise<void> {
     await page.evaluate(async () => {
         async function openDb(version?: number): Promise<IDBDatabase> {
             const req = version ? indexedDB.open('sahifah-lens', version) : indexedDB.open('sahifah-lens');
@@ -72,11 +72,11 @@ test.beforeEach(async ({page}) => {
 });
 
 test('clipboard auto-clear removes copied OCR text when enabled', async ({page}) => {
-    await page.goto('http://localhost:4173/#/settings');
+    await page.goto('/#/settings');
     await page.getByRole('button', {name: 'Clipboard Auto-Clear'}).click();
 
     await seedDocWithOcr(page);
-    await page.goto('http://localhost:4173/#/doc/doc-clip-1');
+    await page.goto('/#/doc/doc-clip-1');
     await page.getByRole('button', {name: 'Show Extracted Text'}).click();
     await page.getByRole('button', {name: 'Copy OCR Text'}).click();
 
@@ -86,9 +86,9 @@ test('clipboard auto-clear removes copied OCR text when enabled', async ({page})
 });
 
 test('clipboard auto-clear keeps copied OCR text when disabled', async ({page}) => {
-    await page.goto('http://localhost:4173/#/settings');
+    await page.goto('/#/settings');
     await seedDocWithOcr(page);
-    await page.goto('http://localhost:4173/#/doc/doc-clip-1');
+    await page.goto('/#/doc/doc-clip-1');
     await page.getByRole('button', {name: 'Show Extracted Text'}).click();
     await page.getByRole('button', {name: 'Copy OCR Text'}).click();
 

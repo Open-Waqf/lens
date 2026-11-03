@@ -1,4 +1,4 @@
-import {expect, test} from '@playwright/test';
+import {expect, test} from './support/test';
 
 const MOCK_IMAGE_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
@@ -12,7 +12,7 @@ test.beforeEach(async ({page}) => {
         } catch {
         }
     });
-    await page.goto('http://localhost:4173/#/scan?new=1');
+    await page.goto('/#/scan?new=1');
 });
 
 test('quick share from scan editor does not create a saved document', async ({page}) => {
@@ -45,7 +45,7 @@ test('quick share from scan editor does not create a saved document', async ({pa
     await expect(page.locator('confirm-modal')).toHaveCount(0);
 
     await expect(page.locator('page-editor')).toBeVisible();
-    await page.goto('http://localhost:4173/#/library');
+    await page.goto('/#/library');
     await expect(page.getByText('No scans yet')).toBeVisible({timeout: 10000});
     await expect(page.locator('nav')).toHaveCount(1);
 });

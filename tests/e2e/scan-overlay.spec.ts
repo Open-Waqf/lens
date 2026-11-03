@@ -1,4 +1,4 @@
-import {expect, test} from '@playwright/test';
+import {expect, test} from './support/test';
 
 test.beforeEach(async ({page}) => {
     await page.addInitScript(() => {
@@ -12,7 +12,7 @@ test.beforeEach(async ({page}) => {
             return canvas.captureStream();
         };
     });
-    await page.goto('http://localhost:4173/#/scan?new=1');
+    await page.goto('/#/scan?new=1');
 });
 
 test('Scan Overlay: Displays alignment guide and handles detection states', async ({page}) => {

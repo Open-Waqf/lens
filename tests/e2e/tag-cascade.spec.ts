@@ -1,6 +1,6 @@
-import {expect, test} from '@playwright/test';
+import {expect, test} from './support/test';
 
-async function readDocTags(page: import('@playwright/test').Page, docId: string): Promise<string[]> {
+async function readDocTags(page: import('./support/test').Page, docId: string): Promise<string[]> {
     return await page.evaluate(async (id) => {
         const req = indexedDB.open('sahifah-lens');
         const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -24,7 +24,7 @@ test.beforeEach(async ({page}) => {
         (window as any).Capacitor = {isNativePlatform: () => false, platform: 'web'};
         (window as any).navigator.mediaDevices.getUserMedia = async () => new MediaStream();
     });
-    await page.goto('http://localhost:4173/#/library');
+    await page.goto('/#/library');
 });
 
 test('tag delete cascades across document metadata (AC-6.3)', async ({page}) => {
