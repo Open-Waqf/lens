@@ -74,7 +74,8 @@ test('D.5 Share as PDF right after removing a page leaves that page out, while i
         await page.getByRole('button', {name: 'Save Scan'}).click();
         if (i === 0) await expect(page.locator('page-editor')).toContainText(/2 of 2|2\s*\/\s*2/, {timeout: 30_000});
     }
-    await expect(page.getByTestId('scan-strip').getByRole('button', {name: 'Edit page'})).toHaveCount(2);
+    await expect(page.locator('page-editor')).toBeHidden({timeout: 30_000}); // the second save is done
+    await expect(page.getByTestId('scan-strip').getByRole('button', {name: 'Edit page'})).toHaveCount(2, {timeout: 15_000});
     await page.getByRole('button', {name: 'Remove page'}).first().click();
     await expect(page.getByTestId('scan-strip').getByRole('button', {name: 'Edit page'})).toHaveCount(1);
     const download = page.waitForEvent('download');
@@ -125,4 +126,37 @@ test('D.7 the document page lists folders without loading every document', async
     await expect(page.locator('doc-page input').first()).toHaveValue('In a folder');
     expect(await page.evaluate(() => (window as any).__docScans), 'full scans of the documents table').toBe(0);
     expect(await page.evaluate(() => (document.querySelector('doc-page') as any).folderSuggestions)).toEqual(['Taxes', 'Work']);
+});
+
+test('D.8 a name being typed is not reset when the page reloads (OCR finished meanwhile)', async ({page}) => {
+    await seed(page, [{id: 't1', title: 'Scan Nov 3', folder: null, tags: [], pageIds: [], createdAt: 1, updatedAt: 1, autoTitle: true}], []);
+    await page.goto('/#/doc/t1');
+    const title = page.locator('doc-page input').first();
+    await expect(title).toHaveValue('Scan Nov 3');
+    await title.fill('My lease');
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('sahifah-library-changed'))); // the reload OCR causes
+    await page.waitForTimeout(300);
+    await expect(title).toHaveValue('My lease');
+    await title.blur();
+    await expect.poll(() => page.evaluate(() => new Promise((resolve) => {
+        const q = indexedDB.open('sahifah-lens');
+        q.onsuccess = () => { const r = q.result.transaction(['docs']).objectStore('docs').get('t1'); r.onsuccess = () => { q.result.close(); resolve([r.result.title, r.result.autoTitle]); }; };
+    }))).toEqual(['My lease', false]);
+});
+
+test('D.9 renaming does not write back old search text that OCR replaced meanwhile', async ({page}) => {
+    await seed(page, [{id: 's1', title: 'Old', folder: null, tags: [], pageIds: [], createdAt: 1, updatedAt: 1, searchIndex: 'before ocr'}], []);
+    await page.goto('/#/doc/s1');
+    const title = page.locator('doc-page input').first();
+    await expect(title).toHaveValue('Old');
+    await page.evaluate(() => new Promise<void>((resolve) => { // OCR saves new text in the background
+        const q = indexedDB.open('sahifah-lens');
+        q.onsuccess = () => { const tx = q.result.transaction(['docs'], 'readwrite'); const s = tx.objectStore('docs'); const g = s.get('s1'); g.onsuccess = () => s.put({...g.result, searchIndex: 'after ocr'}); tx.oncomplete = () => { q.result.close(); resolve(); }; };
+    }));
+    await title.fill('New');
+    await title.blur();
+    await expect.poll(() => page.evaluate(() => new Promise((resolve) => {
+        const q = indexedDB.open('sahifah-lens');
+        q.onsuccess = () => { const r = q.result.transaction(['docs']).objectStore('docs').get('s1'); r.onsuccess = () => { q.result.close(); resolve([r.result.title, r.result.searchIndex]); }; };
+    }))).toEqual(['New', 'after ocr']);
 });

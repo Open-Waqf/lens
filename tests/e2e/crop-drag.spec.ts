@@ -19,7 +19,8 @@ async function importFiles(page: import('./support/test').Page, count: number) {
     const buffer = fs.readFileSync(PHOTO);
     await chooser.setFiles(Array.from({length: count}, (_, i) => ({name: `page-${i + 1}.jpg`, mimeType: 'image/jpeg', buffer})));
     await expect(page.locator('page-editor')).toBeVisible({timeout: 15_000});
-    await expect.poll(() => page.evaluate(() => (document.querySelector('canvas[data-preview]') as HTMLCanvasElement | null)?.width || 0), {timeout: 30_000}).toBeGreaterThan(0);
+    // The first preview is drawn after edge detection: the crop is final from here on.
+    await expect(page.getByTestId('editor-loading')).toBeHidden({timeout: 60_000});
 }
 
 /** Drags the top-left corner down and to the right; the corner must follow the finger. */

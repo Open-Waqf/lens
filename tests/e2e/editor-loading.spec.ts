@@ -38,3 +38,17 @@ test('E.1 the spinner stays until the first preview is drawn', async ({page}) =>
     }));
     expect(gap).toBeNull();
 });
+
+test('E.2 a photo with no page edges to find still gets its preview (no endless spinner)', async ({page}) => {
+    await page.addInitScript(() => {
+        window.localStorage.setItem('sahifah.welcomeSeen', '1');
+        (window as any).Capacitor = {isNativePlatform: () => false, platform: 'web'};
+    });
+    await page.goto('/#/scan?new=1');
+    const chooser = page.waitForEvent('filechooser');
+    await page.locator('button').filter({hasText: /Import/i}).click();
+    // A 1x1 photo: edge detection finds nothing.
+    await (await chooser).setFiles({name: 'blank.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')});
+    await expect(page.locator('page-editor')).toBeVisible();
+    await expect(page.getByTestId('editor-loading')).toBeHidden({timeout: 15_000});
+});

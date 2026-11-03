@@ -485,9 +485,11 @@ export class PageEditor extends LitElement {
             if (quadArea(mapped) / (this.baseW * this.baseH) < 0.08) return;
             this.quad = mapped;
             this.drawEdges();
-            this.queuePreview();
         } finally {
             this.detecting = false;
+            // Always draw the preview, also when no page edges were found (the whole photo
+            // stays). Before, that case never drew one and the spinner stayed (Nov 2026).
+            this.queuePreview();
         }
     }
 

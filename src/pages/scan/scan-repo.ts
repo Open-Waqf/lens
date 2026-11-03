@@ -343,16 +343,21 @@ export class ScanRepo {
      * scan's date and time stay in the name, so two shared files never look the same.
      */
     private async titleFromFirstPage(docId: string, pageId: string, words: OcrWord[]): Promise<void> {
-        const doc = await db.docs.get(docId);
-        if (!doc?.autoTitle || doc.pageIds[0] !== pageId) return;
-        let title = titleFromText(pageText(words));
-        if (!title) return;
-        const taken = await db.docs.where('title').startsWith(title).filter(d => d.id !== docId && !d.deletedAt).count();
-        if (taken > 0) {
-            const when = new Date(doc.createdAt).toLocaleString(i18n.getLocale(), {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'});
-            title = `${title} · ${when}`;
-        }
-        if (title !== doc.title) await db.docs.update(docId, {title});
+        const text = titleFromText(pageText(words));
+        if (!text) return;
+        // Check and write in one transaction: a name the user types meanwhile is either
+        // seen here (autoTitle false: nothing is written) or written after (and wins).
+        await db.transaction('rw', db.docs, async () => {
+            const doc = await db.docs.get(docId);
+            if (!doc?.autoTitle || doc.pageIds[0] !== pageId) return;
+            let title = text;
+            const taken = await db.docs.where('title').startsWith(title).filter(d => d.id !== docId && !d.deletedAt).count();
+            if (taken > 0) {
+                const when = new Date(doc.createdAt).toLocaleString(i18n.getLocale(), {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'});
+                title = `${title} · ${when}`;
+            }
+            if (title !== doc.title) await db.docs.update(docId, {title});
+        });
     }
 
     /** A name for one page from its own text, or null while OCR has not read it yet. */

@@ -140,7 +140,10 @@ test('core flow works offline and does not attempt external network', async ({pa
     const backupBuffer = await exportBackupBuffer(page, 'offline123');
 
     await page.getByRole('button', {name: 'Erase Everything'}).click();
+    // Erasing ends with a page reload: wait for it, or the next steps run on the old page.
+    const reloaded = page.waitForEvent('load', {timeout: 30000});
     await page.getByRole('button', {name: 'Wipe Everything', exact: true}).click();
+    await reloaded;
 
     await page.waitForURL(/#\/settings/, {timeout: 15000});
     await page.goto('/#/library');

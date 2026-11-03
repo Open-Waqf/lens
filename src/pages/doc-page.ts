@@ -80,6 +80,8 @@ export class DocPage extends LitElement {
     private pointerDragActive = false;
 
     @state() private folderSuggestions: string[] = [];
+    // The title as it is being typed: a reload meanwhile (OCR finished) must not reset it.
+    @state() private titleDraft: string | null = null;
 
     async connectedCallback(): Promise<void> {
         super.connectedCallback();
@@ -467,10 +469,13 @@ export class DocPage extends LitElement {
         this.zoomLevel = this.zoomLevel === 1 ? 2.5 : 1;
     }
 
+    // Only the changed fields are written. Writing back the whole document as loaded could
+    // undo what OCR saved meanwhile (its title, its search text). Nov 2026.
     private async saveMeta(patch: Partial<DocRecord>): Promise<void> {
         if (!this.doc) return;
-        this.doc = {...this.doc, ...patch, updatedAt: Date.now()};
-        await db.docs.put(this.doc);
+        const change = {...patch, updatedAt: Date.now()};
+        this.doc = {...this.doc, ...change};
+        await db.docs.update(this.doc.id, change);
     }
 
     /**
@@ -629,8 +634,11 @@ export class DocPage extends LitElement {
                     </a>
                     <input class="flex-1 min-w-0 bg-transparent border border-transparent focus:border-slate-700 focus:bg-slate-900 rounded-lg px-2 py-2 text-lg font-bold text-slate-100 min-h-[44px]"
                            aria-label=${t('doc.title_label')}
-                           .value=${live(this.doc.title)}
-                           @change=${(e: Event) => this.saveMeta({title: (e.target as HTMLInputElement).value, autoTitle: false})}/>
+                           .value=${live(this.titleDraft ?? this.doc.title)}
+                           @focus=${(e: Event) => this.titleDraft = (e.target as HTMLInputElement).value}
+                           @input=${(e: Event) => this.titleDraft = (e.target as HTMLInputElement).value}
+                           @change=${(e: Event) => this.saveMeta({title: (e.target as HTMLInputElement).value, autoTitle: false})}
+                           @blur=${() => this.titleDraft = null}/>
                 </div>
 
                 ${this.error ? html`
