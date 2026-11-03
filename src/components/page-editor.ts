@@ -104,6 +104,8 @@ export class PageEditor extends LitElement {
 
     private history: Array<{ quad: Quad; filter: FilterMode; rotation: 0 | 90 | 180 | 270 }> = [];
     @state() private showMagnify = false;
+    // The first preview is on the canvas. Until then the stage shows the spinner, not black.
+    @state() private previewReady = false;
     @state() private magnifyX = 0;
     @state() private magnifyY = 0;
 
@@ -217,6 +219,7 @@ export class PageEditor extends LitElement {
     private async loadBlob(): Promise<void> {
         this.err = null;
         this.quad = null;
+        this.previewReady = false;
         this.rotation = 0;
         this.history = [];
         try {
@@ -600,6 +603,7 @@ export class PageEditor extends LitElement {
             // Draw result to fill the calculated space
             ctx.drawImage(res.bitmap, 0, 0, out.width, out.height);
             res.bitmap.close();
+            this.previewReady = true;
         } catch (e) {
             // worker task failed — queue one retry in case it was transient
             window.setTimeout(() => this.queuePreview(), 160);
@@ -823,8 +827,8 @@ export class PageEditor extends LitElement {
                     ` : html`
                         <canvas data-preview class="block max-w-full max-h-full object-contain"
                                 style="image-rendering: high-quality; backface-visibility: hidden;"></canvas>
-                        ${!this.sourceBitmap ? html`
-                            <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-400">
+                        ${!this.sourceBitmap || !this.previewReady ? html`
+                            <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-400" data-testid="editor-loading">
                                 <div class="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
                                 <span class="text-xs font-bold uppercase tracking-wider">${t('common.loading')}</span>
                             </div>` : null}
