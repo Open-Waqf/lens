@@ -37,7 +37,13 @@ export class PageEditor extends LitElement {
     @property({attribute: false}) initialQuad: Quad | null = null;
 
     @state() private rotation: 0 | 90 | 180 | 270 = 0;
+    // `busy` = saving or sharing: the only time the action buttons are disabled.
+    // Edge detection and the preview do not block Save: a tap waits for them instead
+    // (Nov 2026: a tap during that work used to do nothing, with no feedback).
     @state() private busy = false;
+    @state() private detecting = false;
+    private loading: Promise<void> | null = null;
+    private detection: Promise<void> | null = null;
     @state() private err: string | null = null;
     @state() private shareFormat: 'jpg' | 'pdf' = 'jpg';
     @state() private showShareSheet = false;
@@ -69,9 +75,9 @@ export class PageEditor extends LitElement {
     @query('canvas[data-preview]') private previewEl!: HTMLCanvasElement;
     @query('canvas[data-magnify]') private magnifyEl!: HTMLCanvasElement;
 
-    private get isQuadValid(): boolean {
-        const valid = !!this.quad && isQuadConvex(this.quad);
-        return valid;
+    /** The crop is shown and crossed (not just "not loaded yet"). */
+    private get isQuadInvalid(): boolean {
+        return !!this.quad && !isQuadConvex(this.quad);
     }
 
     private history: Array<{ quad: Quad; filter: FilterMode; rotation: 0 | 90 | 180 | 270 }> = [];
@@ -164,14 +170,14 @@ export class PageEditor extends LitElement {
     }
 
     updated(ch: Map<string, unknown>) {
-        if (ch.has('blob')) void this.loadBlob();
+        if (ch.has('blob')) this.loading = this.loadBlob();
         if (ch.has('filter')) this.queuePreview();
     }
 
     reset() {
         this.err = null;
         this.history = [];
-        void this.loadBlob();
+        this.loading = this.loadBlob();
     }
 
     rotate90() {
@@ -208,7 +214,7 @@ export class PageEditor extends LitElement {
             this.drawEdges();
 
             if (!this.disableAutoDetect && !this.initialQuad) {
-                void this.autoDetectEdges();
+                this.detection = this.autoDetectEdges();
             } else {
                 this.queuePreview();
                 // Native scanner return can race layout; schedule bounded retries.
@@ -427,7 +433,7 @@ export class PageEditor extends LitElement {
 
     private async autoDetectEdges(): Promise<void> {
         if (!this.baseCanvas || !this.quad) return;
-        this.busy = true;
+        this.detecting = true;
         this.requestUpdate();
         await new Promise(r => setTimeout(r, 50));
         try {
@@ -458,8 +464,14 @@ export class PageEditor extends LitElement {
             this.drawEdges();
             this.queuePreview();
         } finally {
-            this.busy = false;
+            this.detecting = false;
         }
+    }
+
+    /** Wait until the image is loaded and edge detection is done, so Save uses the final crop. */
+    private async settle(): Promise<void> {
+        await this.loading;
+        await this.detection;
     }
 
     private detectQuad(rgba: Uint8ClampedArray, w: number, h: number): Promise<Quad | null> {
@@ -516,7 +528,6 @@ export class PageEditor extends LitElement {
     private async updatePreview(): Promise<void> {
         if (!this.sourceBitmap || !this.quad) return;
         const token = ++this._previewToken;
-        this.busy = true;
         try {
             const mappedQuad = this.mapQuadToSource(this.quad);
             const outSize = computeOutputSize(mappedQuad);
@@ -587,17 +598,20 @@ export class PageEditor extends LitElement {
             // worker task failed — queue one retry in case it was transient
             window.setTimeout(() => this.queuePreview(), 160);
         } finally {
-            if (token === this._previewToken) this.busy = false;
+            // The preview never blocks the buttons (see `busy`).
         }
     }
 
     private async onSave(): Promise<void> {
-        if (!this.sourceBitmap || !this.quad) return;
+        if (this.busy) return;
         this.err = null;
         this.busy = true;
         this.requestUpdate();
         await new Promise(r => setTimeout(r, 50));
         try {
+            await this.settle();
+            if (!this.sourceBitmap || !this.quad) throw new Error(t('editor.load_failed'));
+            if (!isQuadConvex(this.quad)) throw new Error(t('editor.invalid_selection'));
             const mappedQuad = this.mapQuadToSource(this.quad);
             const rawSize = computeOutputSize(mappedQuad);
             const qualityPlan = resolveScanQualityPlan({
@@ -656,12 +670,15 @@ export class PageEditor extends LitElement {
     }
 
     private async onShareNow(): Promise<void> {
-        if (!this.sourceBitmap || !this.quad) return;
+        if (this.busy) return;
         this.err = null;
         this.busy = true;
         this.requestUpdate();
         await new Promise(r => setTimeout(r, 50));
         try {
+            await this.settle();
+            if (!this.sourceBitmap || !this.quad) throw new Error(t('editor.load_failed'));
+            if (!isQuadConvex(this.quad)) throw new Error(t('editor.invalid_selection'));
             const mappedQuad = this.mapQuadToSource(this.quad);
             const rawSize = computeOutputSize(mappedQuad);
             const qualityPlan = resolveScanQualityPlan({
@@ -759,8 +776,8 @@ export class PageEditor extends LitElement {
                         <div class="flex gap-2">
                             <button aria-label=${t('editor.auto_detect_edges')}
                                     class="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-400 active:scale-95 transition-transform border border-slate-700 hover:text-white"
-                                    ?disabled=${this.busy}
-                                    @click=${() => void this.autoDetectEdges()}>
+                                    ?disabled=${this.busy || this.detecting}
+                                    @click=${() => { this.detection = this.autoDetectEdges(); }}>
                                 ${t('editor.auto_short')}
                             </button>
                             <button class="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-400 active:scale-95 transition-transform border border-slate-700 hover:text-white"
@@ -799,7 +816,7 @@ export class PageEditor extends LitElement {
                             <canvas data-magnify class="block w-full h-full bg-black"></canvas>
                         </div>
 
-                        ${!this.isQuadValid ? html`
+                        ${this.isQuadInvalid ? html`
                             <div data-testid="invalid-warning" class="absolute bottom-4 left-1/2 -translate-x-1/2 z-[45] px-4 py-2 bg-red-600/90 text-white text-xs font-bold rounded-full shadow-lg backdrop-blur-sm flex items-center gap-2">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
@@ -889,7 +906,7 @@ export class PageEditor extends LitElement {
                         <button aria-label=${t('common.share_now')}
                                 class="flex-1 px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-200 font-bold tracking-wide transition-colors min-h-[44px] flex items-center justify-center"
                                 type="button"
-                                ?disabled=${this.busy || !this.isQuadValid}
+                                ?disabled=${this.busy || this.isQuadInvalid}
                                 @click=${() => this.showShareSheet = true}>
                             <span class="inline-flex items-center justify-center shrink-0">${Icons.Share('w-5 h-5 block')}</span>
                             <span class="sr-only">${t('common.share_now')}</span>
@@ -897,7 +914,7 @@ export class PageEditor extends LitElement {
                         <button aria-label=${t('scan.save_scan')}
                                 class="flex-[1.2] px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 active:scale-95 transition-all text-white font-bold tracking-wide shadow-lg shadow-emerald-900/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 min-h-[44px]"
                                 type="button"
-                                ?disabled=${this.busy || !this.isQuadValid} @click=${() => void this.onSave()}>
+                                ?disabled=${this.busy || this.isQuadInvalid} @click=${() => void this.onSave()}>
                             ${this.busy
                                     ? html`
                                         <div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>

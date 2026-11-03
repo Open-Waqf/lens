@@ -25,11 +25,11 @@ test('Page Editor: Invalid Selection (Crossed Handles) Warning', async ({page}) 
     const editor = page.locator('page-editor');
     await expect(editor).toBeVisible({timeout: 10000});
 
-    // 2. Force invalid selection state
+    // 2. Cross two handles (a bow-tie shape): the crop is invalid
     await page.evaluate(() => {
         const el = document.querySelector('page-editor') as any;
         if (!el) return;
-        el.quad = null;
+        el.quad = [{x: 10, y: 10}, {x: 490, y: 490}, {x: 490, y: 10}, {x: 10, y: 490}];
         el.requestUpdate();
     });
 
