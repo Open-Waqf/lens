@@ -26,8 +26,14 @@ dist-ssr
 # Playwright
 /test-results/
 /playwright-report/
+/playwright-report-device/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
 AGENTS.md
 GEMINI.md
+
+# Android release signing (the key itself lives in the Cryptomator vault)
+*.jks
+*.keystore
+android/keystore.properties
