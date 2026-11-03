@@ -26,7 +26,7 @@ test.beforeEach(async ({page}) => {
 
 test('O.1 extracted text keeps one line per printed line', async ({page}) => {
     await page.goto('/#/doc/doc_lines');
-    await page.getByRole('button', {name: 'Show Extracted Text'}).click();
+    await page.getByTestId('btn-text').click();
     await expect(page.getByText('Facture 2026', {exact: false})).toBeVisible();
     const shown = await page.locator('.whitespace-pre-wrap').first().innerText();
     expect(shown.trim()).toBe('Facture 2026\n12 rue de la Paix');
@@ -34,6 +34,9 @@ test('O.1 extracted text keeps one line per printed line', async ({page}) => {
 
 test('O.2 find in document matches a phrase that spans several words', async ({page}) => {
     await page.goto('/#/doc/doc_lines');
+    await page.getByTestId('btn-text').click();
     await page.getByPlaceholder('Search text...').fill('rue de la');
-    await expect(page.getByText('Pages (1)', {exact: false})).toBeVisible();
+    await expect(page.locator('[data-page-card-id]')).toHaveCount(1);
+    await page.getByPlaceholder('Search text...').fill('nothing here');
+    await expect(page.locator('[data-page-card-id]')).toHaveCount(0);
 });

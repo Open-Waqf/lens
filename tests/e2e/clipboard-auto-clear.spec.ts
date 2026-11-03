@@ -73,11 +73,11 @@ test.beforeEach(async ({page}) => {
 
 test('clipboard auto-clear removes copied OCR text when enabled', async ({page}) => {
     await page.goto('/#/settings');
-    await page.getByRole('button', {name: 'Clipboard Auto-Clear'}).click();
+    await page.getByRole('switch', {name: 'Clipboard Auto-Clear'}).click();
 
     await seedDocWithOcr(page);
     await page.goto('/#/doc/doc-clip-1');
-    await page.getByRole('button', {name: 'Show Extracted Text'}).click();
+    await page.getByTestId('btn-text').click();
     await page.getByRole('button', {name: 'Copy OCR Text'}).click();
 
     await expect.poll(async () => page.evaluate(async () => navigator.clipboard.readText())).toContain('Sample OCR text');
@@ -89,7 +89,7 @@ test('clipboard auto-clear keeps copied OCR text when disabled', async ({page}) 
     await page.goto('/#/settings');
     await seedDocWithOcr(page);
     await page.goto('/#/doc/doc-clip-1');
-    await page.getByRole('button', {name: 'Show Extracted Text'}).click();
+    await page.getByTestId('btn-text').click();
     await page.getByRole('button', {name: 'Copy OCR Text'}).click();
 
     await expect.poll(async () => page.evaluate(async () => navigator.clipboard.readText())).toContain('Sample OCR text');

@@ -117,14 +117,14 @@ test('contrast baseline: library, scan, settings key text meets WCAG AA', async 
     await page.waitForSelector('.text-2xl.font-bold.tracking-tight');
     await assertContrast(page, [
         {selector: '.text-2xl.font-bold.tracking-tight', minRatio: 4.5},
-        {selector: 'button.w-full.py-5.bg-emerald-600', minRatio: 4.5},
-        {selector: 'button.w-full.py-4.text-slate-400', minRatio: 4.5},
+        {selector: 'button.w-full.py-4.bg-emerald-700', minRatio: 4.5},
+        {selector: 'button.w-full.py-3.text-slate-400', minRatio: 4.5},
     ]);
 
     await page.goto('/#/settings');
     await assertContrast(page, [
         {selector: 'h1.text-2xl', minRatio: 4.5},
-        {selector: '#DangerZone h2', minRatio: 4.5},
-        {selector: 'section .text-slate-200', minRatio: 4.5},
+        {selector: '#DangerZone button', minRatio: 4.5},
+        {selector: 'section .text-slate-100', minRatio: 4.5},
     ]);
 });

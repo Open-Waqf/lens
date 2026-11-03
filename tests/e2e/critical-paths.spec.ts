@@ -122,8 +122,7 @@ test('Disaster Recovery Flow: Import -> Encrypt -> Wipe -> Restore', async ({pag
     // 5. WIPE
     await page.goto('/#/settings');
     const dangerZone = page.locator('#DangerZone');
-    await dangerZone.getByRole('button', {name: 'Show Destructive Options'}).click();
-    const eraseBtn = dangerZone.locator('button.bg-red-600').first();
+    const eraseBtn = dangerZone.getByRole('button', {name: 'Erase Everything'});
     await expect(eraseBtn).toBeVisible({timeout: 10000});
     await expect(eraseBtn).toBeEnabled({timeout: 10000});
     await eraseBtn.click({force: true});

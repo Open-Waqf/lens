@@ -24,7 +24,6 @@ for (const fx of FIXTURES) {
 
         await page.goto('/#/library');
         await page.getByText(fx.title).click();
-        await expect(page.getByText(`Pages (${fx.pages})`)).toBeVisible();
         // Every page image is really there and decodes (not just its database record).
         const thumbs = page.locator('[data-page-card-id] img');
         await expect(thumbs).toHaveCount(fx.pages);

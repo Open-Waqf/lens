@@ -130,7 +130,7 @@ test('core flow works offline and does not attempt external network', async ({pa
     await expect(saveBtn).toBeEnabled({timeout: 10000});
     await saveBtn.click();
     await expect(page.locator('page-editor')).toBeHidden({timeout: 15000});
-    await expect(page.locator('button[aria-label="Edit page"]')).toHaveCount(1, {timeout: 10000});
+    await expect(page.locator('[data-testid=scan-strip] button[aria-label="Edit page"]')).toHaveCount(1, {timeout: 10000});
 
     await page.goto('/#/library');
     await expect(page.getByText('No scans yet')).not.toBeVisible({timeout: 10000});
@@ -139,7 +139,6 @@ test('core flow works offline and does not attempt external network', async ({pa
     await page.goto('/#/settings');
     const backupBuffer = await exportBackupBuffer(page, 'offline123');
 
-    await page.getByRole('button', {name: 'Show Destructive Options'}).click();
     await page.getByRole('button', {name: 'Erase Everything'}).click();
     await page.getByRole('button', {name: 'Wipe Everything', exact: true}).click();
 

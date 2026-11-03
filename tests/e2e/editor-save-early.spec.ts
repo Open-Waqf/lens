@@ -23,5 +23,5 @@ test('E.1 Save tapped at once, while the editor still loads and detects edges, s
         });
     });
     await expect(page.locator('page-editor')).toBeHidden({timeout: 15_000});
-    await expect(page.getByText('1 page(s)')).toBeVisible();
+    await expect(page.getByTestId('btn-share-pdf')).toBeVisible();
 });

@@ -42,8 +42,8 @@ test('P.3 An Arabic page: OCR reads Arabic on the phone', async ({app: {page}}) 
 test('P.4 Export PDF opens the Android share sheet with the PDF', async ({app: {page}}) => {
     await importPhoto(page, path.join(PHOTOS, 'french-invoice.jpg'));
     await page.getByRole('button', {name: 'Save Scan'}).click();
-    await page.getByRole('button', {name: 'Open'}).click();
-    await page.getByRole('button', {name: 'Export PDF'}).click();
+    await page.getByTestId('btn-done').click();
+    await page.getByTestId('btn-share-pdf').click();
     await expect.poll(topActivity, {timeout: 20_000}).toContain('intentresolver');
     const texts = screenTexts();
     expect(texts.some((t) => t.endsWith('.pdf'))).toBe(true);

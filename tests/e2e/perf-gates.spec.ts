@@ -402,7 +402,6 @@ test('PERF-RESET-001 nuclear reset 500-doc vault <= 3s @perf', async ({page}) =>
     await seedVault(page, {docCount: 500, pagesPerDoc: 1, includeFiles: true});
     await page.reload();
 
-    await page.getByRole('button', {name: 'Show Destructive Options'}).click();
 
     const t0 = Date.now();
     await page.getByRole('button', {name: 'Erase Everything'}).click();

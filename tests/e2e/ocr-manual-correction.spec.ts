@@ -67,7 +67,7 @@ test('manual OCR correction saves corrected text and updates search index', asyn
     }, {now, docId});
 
     await page.goto(`/#/doc/${docId}`);
-    await page.getByRole('button', {name: 'Show Extracted Text'}).click();
+    await page.getByTestId('btn-text').click();
     await page.getByRole('button', {name: 'Edit OCR Text'}).click();
     const editor = page.getByPlaceholder('Type corrected OCR text...');
     await editor.fill('verified arabic correction');

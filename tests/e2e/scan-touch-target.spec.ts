@@ -22,6 +22,7 @@ test('scan editor corner handles meet 44x44 touch target minimum', async ({page}
     });
 
     await expect(page.locator('page-editor')).toBeVisible({timeout: 10000});
+    await page.getByRole('button', {name: 'Crop'}).click(); // the handles live in crop mode
 
     for (const idx of [0, 1, 2, 3]) {
         const handle = page.getByTestId(`corner-handle-${idx}`);

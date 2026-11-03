@@ -9,11 +9,6 @@ test.beforeEach(async ({page}) => {
 });
 
 test('Vault Integrity: Danger Zone reveal works', async ({page}) => {
-    const revealButton = page.getByRole('button', {name: 'Show Destructive Options'});
-    await expect(revealButton).toBeVisible();
-    await revealButton.click();
-
-    // Verify Danger Zone reveals
     const dangerZone = page.locator('#DangerZone');
     await expect(dangerZone).toBeVisible();
 

@@ -14,10 +14,7 @@ test.beforeEach(async ({page}) => {
 });
 
 function ocrLanguageSelect(page: Page) {
-    return page.locator('div.space-y-2')
-        .filter({has: page.getByText('OCR Language')})
-        .locator('select')
-        .first();
+    return page.locator('label').filter({hasText: 'OCR Language'}).locator('select');
 }
 
 test('OCR language defaults to Arabic+English', async ({page}) => {

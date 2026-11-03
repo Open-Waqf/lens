@@ -72,9 +72,12 @@ test('Search and Folder Cascade', async ({page}) => {
     await titleInput.fill('Searchable Doc');
     await titleInput.dispatchEvent('change');
     
+    await page.getByTestId('btn-more').click();
     const folderInput = page.getByPlaceholder('e.g. Finance');
     await folderInput.fill('Taxes');
     await folderInput.dispatchEvent('change');
+    await page.keyboard.press('Escape');
+    await page.locator('[role=dialog]').locator('button', {hasText: 'Cancel'}).click();
     
     // 3. Search finds the document by its new title and by its folder
     await page.goto('#/library');
@@ -107,5 +110,6 @@ test('Search and Folder Cascade', async ({page}) => {
     await docInLibrary.click();
     
     await page.waitForURL('**/#/doc/**');
+    await page.getByTestId('btn-more').click();
     await expect(page.getByPlaceholder('e.g. Finance')).toHaveValue('');
 });

@@ -71,6 +71,7 @@ test('Page Editor: A11y Hitbox check', async ({page}) => {
 
     const editor = page.locator('page-editor');
     await expect(editor).toBeVisible();
+    await page.getByRole('button', {name: 'Crop'}).click(); // the handles live in crop mode
 
     const canvas = editor.locator('canvas[data-edges]');
     await canvas.waitFor({state: 'visible'});
@@ -101,6 +102,7 @@ test('Page Editor: share button opens explicit format sheet', async ({page}) => 
 
     const editor = page.locator('page-editor');
     await expect(editor).toBeVisible({timeout: 10000});
+    await page.waitForTimeout(600); // let the 1x1 test image finish loading before replacing its crop
     await page.evaluate(() => {
         const el = document.querySelector('page-editor') as any;
         if (!el) return;

@@ -93,11 +93,7 @@ test('C.2 all text on a document page meets WCAG AA contrast @rtl', async ({page
         db.close();
     });
     await page.goto('/#/doc/c_doc');
-    // A plain tap at the button's centre (Playwright's click safety check misreads this
-    // button when the storage banner is dismissed; a real tap works, checked Nov 2026).
-    const toggle = page.locator('doc-page button.text-emerald-400').first();
-    const box = (await toggle.boundingBox())!;
-    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await page.getByTestId('btn-text').click();
     await expect(page.locator('doc-page .whitespace-pre-wrap').first()).toBeVisible();
     await page.waitForTimeout(300);
     expect(await lowContrastTexts(page)).toEqual([]);
