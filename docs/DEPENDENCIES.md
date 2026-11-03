@@ -39,6 +39,7 @@ Do not upgrade these with a tool. Decline Dependabot pull requests for them.
 |---|---|---|---|---|
 | `typescript` | Tool | `6.0.x` | TypeScript 7 ships no `tsserver`, so IntelliJ loses type checking. | When IntelliJ supports TypeScript 7. |
 | `tesseract.js` | Shipped | `7.0.0` | `public/tesseract/worker.min.js` and `tesseract-core.wasm.js` are copies of the package files and must match its version. | Upgrade, then copy `node_modules/tesseract.js/dist/worker.min.js` and `node_modules/tesseract.js-core/tesseract-core.wasm.js` into `public/tesseract/`. If the `.traineddata` files change, update the SHA-256 hashes in `src/lib/ocr.ts`. Run an Arabic and an English OCR on the phone. |
+| `@types/node` | Tool | `25.x` | Types must match the Node we run (22 on GitHub, 24 here). Newer types let code use APIs that do not exist on that Node. | Together with a Node upgrade (`.nvmrc`). |
 | `@playwright/test` | Tool | exact version | Browser builds are tied to the version. | Bump, then `npx playwright install chromium`. |
 
 `pdf-lib` 1.17.1 and `@pdf-lib/fontkit` 1.1.1 have had no release since 2022. They are

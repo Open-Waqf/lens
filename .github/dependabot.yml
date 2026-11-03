@@ -20,6 +20,10 @@ updates:
       # TypeScript 7 ships no tsserver, so IntelliJ loses type checking.
       - dependency-name: typescript
         update-types: ["version-update:semver-major"]
+      # @types/node follows the Node version we run (22 on GitHub, 24 locally): types from a
+      # newer Node would let code use APIs that do not exist there. Move it with Node.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
       # The OCR worker and core are copied into public/tesseract and must match the
       # package version: upgrade by hand, following docs/DEPENDENCIES.md.
       - dependency-name: tesseract.js
