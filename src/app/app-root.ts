@@ -16,6 +16,7 @@ import {ConfirmModal} from '../components/confirm-modal';
 import {getPersistenceStatus, type PersistenceStatus} from '../services/storage-persistence';
 import {garbageCollectOpfsDocs} from '../services/opfs-gc';
 import {AuthService} from '../services/auth-service';
+import {sweepTempFiles} from '../services/share';
 import {resetAllStorage} from '../services/reset-storage';
 import {showToast} from "../components/toast-notification";
 import {hasIndexLossRiskFlag, runStorageHealthProbe} from '../services/storage-health';
@@ -74,6 +75,10 @@ export class AppRoot extends LitElement {
 
         // 1. Initial Check
         this._checkAuth();
+
+        // Temporary share and backup copies left by an earlier run (the app closed while a
+        // share sheet was open). Nothing is in progress yet, so this is safe now.
+        void sweepTempFiles();
 
         // 2. Listen for App Resume
         App.addListener('appStateChange', async (state) => {

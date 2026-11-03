@@ -37,6 +37,7 @@ import {settings, type ScanMode} from '../services/settings';
 import {detectImageMime} from '../lib/image/mime';
 import {resolveScanQualityPlan} from '../lib/image/quality';
 import {pickedFileToBlob} from '../services/picked-file';
+import {safeFileName} from '../lib/file-name';
 
 const APPEND_DOC_KEY = 'sahifah.appendToDocId';
 const AUTO_KEY = 'sahifah.autoCapture';
@@ -520,9 +521,8 @@ export class ScanPage extends LitElement {
 
         try {
             const {master, format} = ev.detail;
-            const safeTitle = (this.docTitle || t('scan.title')).replace(/[^a-zA-Z0-9._-]/g, '_');
-            const suffix = Date.now();
-            const filename = format === 'pdf' ? `${safeTitle}-${suffix}.pdf` : `${safeTitle}-${suffix}.jpg`;
+            const safeTitle = safeFileName(this.docTitle || t('scan.title'));
+            const filename = format === 'pdf' ? `${safeTitle}.pdf` : `${safeTitle}.jpg`;
             const file = format === 'pdf'
                 ? new File([bytesToBlob(await this.buildSinglePagePdf(master.bytes), 'application/pdf')], filename, {type: 'application/pdf'})
                 : new File([bytesToBlob(master.bytes, 'image/jpeg')], filename, {type: 'image/jpeg'});

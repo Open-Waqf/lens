@@ -55,8 +55,12 @@ test.describe('A. Android app (fake Android bridge) @phone', () => {
         await expect.poll(async () => (await nativeCalls(page, 'Share')).length).toBe(1);
         const share = (await nativeCalls(page, 'Share'))[0];
         expect(share.options.files).toHaveLength(1);
-        expect(share.options.files[0]).toMatch(/\.pdf$/);
+        // The file keeps the document's name: what the person receiving it sees.
+        const title = await page.getByRole('textbox').first().inputValue();
+        expect(decodeURIComponent(share.options.files[0].split('/').pop())).toBe(`${title.replace(/:/g, "-")}.pdf`); // ":" breaks Windows file names
         await expect.poll(async () => (await nativeFiles(page)).filter((f) => f.startsWith('CACHE/'))).toEqual([]);
+        // No hidden copy of every exported PDF stays inside the app (it was never used).
+        expect((await nativeFiles(page)).filter((f) => f.endsWith('.pdf'))).toEqual([]);
     });
 
     test('A.5 Back on the scan screen goes to the library', async ({page}) => {
@@ -94,5 +98,31 @@ test.describe('A. Android app (fake Android bridge) @phone', () => {
         const share = (await nativeCalls(page, 'Share'))[0];
         expect(share.options.files[0]).toMatch(/\.slbk$/);
         await expect.poll(async () => (await nativeFiles(page)).filter((f) => /^(CACHE\/|DATA\/exports\/)/.test(f))).toEqual([]);
+    });
+
+    test('A.9 An Arabic title stays Arabic in the shared file name', async ({page}) => {
+        await fakeAndroid(page, {scan: [PAGE1]});
+        await scanOnePage(page);
+        await page.getByRole('button', {name: 'Open'}).click();
+        const title = page.getByRole('textbox').first();
+        await title.fill('عقد الإيجار: نوفمبر');
+        await title.blur();
+        await page.getByRole('button', {name: 'Export PDF'}).click();
+        await expect.poll(async () => (await nativeCalls(page, 'Share')).length).toBe(1);
+        const file = decodeURIComponent((await nativeCalls(page, 'Share'))[0].options.files[0].split('/').pop());
+        expect(file).toBe('عقد الإيجار- نوفمبر.pdf');
+    });
+
+    test('A.10 Leftover temporary copies are deleted at start, documents are kept', async ({page}) => {
+        const bytes = Buffer.from('x').toString('base64');
+        await fakeAndroid(page, {existingFiles: {
+            'CACHE/share_1793703235098_Scan.pdf': bytes,             // old style
+            'CACHE/share/1793703384180/lens-backup.slbk': bytes,     // new style
+            'DATA/exports/backup_1793703378762.slbk': bytes,         // backup export work file
+            'DATA/imports/temp_restore_1793703378762.zip': bytes,    // restore work file
+            'DATA/docs/doc1/pages/p1.jpg': bytes,                    // a real document page
+        }});
+        await page.goto('/#/library');
+        await expect.poll(() => nativeFiles(page)).toEqual(['DATA/docs/doc1/pages/p1.jpg']);
     });
 });

@@ -27,6 +27,7 @@ import {PDFDocument} from 'pdf-lib';
 import {Icons} from '../components/icons';
 import {getTextDirection} from '../lib/text-direction';
 import {pageText} from '../lib/ocr-text';
+import {safeFileName as safeName} from '../lib/file-name';
 
 @customElement('doc-page')
 export class DocPage extends LitElement {
@@ -485,10 +486,9 @@ export class DocPage extends LitElement {
             const pdfFile = new File([blob], filename, {type: 'application/pdf'});
             AuthService.ignoreNextResumeForExternalAction('share-pdf', AuthService.SHARE_BYPASS_TTL_MS);
             await shareFile(pdfFile, filename);
-
-            const pdfPath = `docs/${this.doc.id}/exports/${Date.now()}.pdf`;
-            await store.put(pdfPath, pdfBytes, 'application/pdf');
-            await this.saveMeta({pdfPath});
+            // The PDF is not stored in the app: it is rebuilt from the pages on every export.
+            // (Older versions kept a copy per export in docs/<id>/exports/; deleting a document
+            // still removes it through doc.pdfPath.)
 
         } catch (e) {
             if ((e as Error).name !== 'AbortError') {
@@ -1051,8 +1051,4 @@ export class DocPage extends LitElement {
             </div>
         `;
     }
-}
-
-function safeName(s: string): string {
-    return s.replace(/[<>:"/\\|?*\u0000-\u001F]/g, '-').slice(0, 120).trim() || 'document';
 }

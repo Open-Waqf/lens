@@ -3,18 +3,23 @@ import {Directory, Filesystem} from '@capacitor/filesystem';
 import {Share} from "@capacitor/share";
 import {showToast} from "../components/toast-notification";
 import {t} from '../lib/i18n';
+import {safeFileName} from '../lib/file-name';
 
-// 1. Support function to write a file to temp storage (Native only)
-async function writeTempFile(file: File): Promise<{ uri: string, path: string }> {
-    const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const tempPath = `share_${Date.now()}_${cleanName}`;
+// Temporary copies for the share sheet live here, in the app's cache (never in shared
+// storage). Each share gets its own folder, so the file keeps its real name: the person
+// receiving it sees "Invoice.pdf", not "share_1793703235098_Invoice.pdf".
+const SHARE_DIR = 'share';
+
+// 1. Write a file to a temporary share folder (Native only)
+async function writeTempFile(file: File, folder: string): Promise<string> {
+    const tempPath = `${folder}/${safeFileName(file.name)}`;
 
     // Chunked Write to prevent Out-Of-Memory on large files
     const CHUNK_SIZE = 1024 * 512; // 512KB chunks
     let offset = 0;
     let firstChunk = true;
 
-    while (offset < file.size) {
+    while (offset < file.size || firstChunk) {
         const chunk = file.slice(offset, offset + CHUNK_SIZE);
         const base64Data = await blobToBase64(chunk);
 
@@ -40,21 +45,50 @@ async function writeTempFile(file: File): Promise<{ uri: string, path: string }>
         path: tempPath,
         directory: Directory.Cache
     });
+    return result.uri;
+}
 
-    return {uri: result.uri, path: tempPath};
+/**
+ * Delete temporary files left by earlier shares, backups and restores.
+ *
+ * Normally each one is deleted when it is done. But on Android the app can be closed while
+ * the share sheet is open, and then that cleanup never runs (seen on a phone, Nov 2026:
+ * a 5.6 MB backup copy stayed in the cache). Run at start, when nothing is in progress.
+ * Only these temporary places are touched, never documents (docs/).
+ */
+export async function sweepTempFiles(): Promise<void> {
+    if (!Capacitor.isNativePlatform()) return;
+    const quiet = async (fn: () => Promise<unknown>) => {
+        try {
+            await fn();
+        } catch {
+            // Missing folder: nothing to clean.
+        }
+    };
+    await quiet(() => Filesystem.rmdir({path: SHARE_DIR, directory: Directory.Cache, recursive: true}));
+    // Files from versions before Nov 2026 sat directly in the cache as share_<time>_<name>.
+    await quiet(async () => {
+        const {files} = await Filesystem.readdir({path: '', directory: Directory.Cache});
+        for (const f of files) {
+            if (f.type !== 'directory' && f.name.startsWith('share_')) {
+                await quiet(() => Filesystem.deleteFile({path: f.name, directory: Directory.Cache}));
+            }
+        }
+    });
+    // Backup export and restore work files (settings page): exports/ and imports/.
+    await quiet(() => Filesystem.rmdir({path: 'exports', directory: Directory.Data, recursive: true}));
+    await quiet(() => Filesystem.rmdir({path: 'imports', directory: Directory.Data, recursive: true}));
 }
 
 // 2. Main function for Batch Sharing (Multiple Files)
 export async function shareFiles(files: File[], title: string = t('common.share_now')): Promise<void> {
-    const tempPaths: string[] = [];
     if (Capacitor.isNativePlatform()) {
+        const folder = `${SHARE_DIR}/${Date.now()}`;
         try {
             const uris: string[] = [];
             // Write all files to temp storage first
             for (const f of files) {
-                const {uri, path} = await writeTempFile(f);
-                uris.push(uri);
-                tempPaths.push(path);
+                uris.push(await writeTempFile(f, folder));
             }
 
             // Share all URIs at once
@@ -69,16 +103,12 @@ export async function shareFiles(files: File[], title: string = t('common.share_
             if (files.length === 1) downloadFileFallback(files[0], files[0].name);
             else showToast(t('doc.share_failed_zip'), 'error');
         } finally {
-            // CRITICAL: Securely delete unencrypted temp files immediately
-            for (const path of tempPaths) {
-                try {
-                    await Filesystem.deleteFile({
-                        path,
-                        directory: Directory.Cache
-                    });
-                } catch (err) {
-                    console.warn('Failed to delete temp share file', path, err);
-                }
+            // Delete the unencrypted temporary copies at once. If the app is closed before
+            // this runs, sweepTempFiles() removes them at the next start.
+            try {
+                await Filesystem.rmdir({path: folder, directory: Directory.Cache, recursive: true});
+            } catch (err) {
+                console.warn('Failed to delete temp share folder', folder, err);
             }
         }
     } else {

@@ -25,6 +25,8 @@ export type FakeAndroidOptions = {
     biometric?: {available?: boolean; succeed?: boolean};
     /** Make Filesystem.writeFile fail (for example storage full). */
     failWrite?: boolean;
+    /** Files already on the phone at start: "DATA/docs/a/pages/p.jpg" or "CACHE/x.pdf" -> base64. */
+    existingFiles?: Record<string, string>;
 };
 
 // Every native method the app calls (src/), per plugin. A method missing here makes
@@ -70,6 +72,7 @@ export async function fakeAndroid(page: Page, options: FakeAndroidOptions = {}) 
         const listeners: Record<string, Array<(data: any) => void>> = {};
         // In-memory folders: "DATA/docs/x/pages/p.jpg" -> base64 chunks.
         const files: Record<string, string[]> = {};
+        for (const [p, data] of Object.entries(options.existingFiles || {})) files[p] = [data as string];
         let nextId = 1;
         const bio = {available: true, succeed: true, ...(options.biometric || {})};
         const key = (o: any) => `${o.directory || 'ABS'}/${String(o.path).replace(/^\/+/, '')}`;
