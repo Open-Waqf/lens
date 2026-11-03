@@ -90,82 +90,28 @@ identical performance on all hardware tiers.
 
 ## 🛠️ Developer Setup
 
-### 1. Prerequisites
-
-* **Node.js:** v18 or later.
-* **Package Manager:** `npm`.
-
-### 2. Installation
+Node 22 or newer (`.nvmrc`), JDK 21 and the Android SDK for the phone build.
 
 ```bash
-git clone [https://github.com/open-waqf/lens.git](https://github.com/open-waqf/lens.git)
-cd lens
-npm install
-
+npm ci
+npm run dev            # http://localhost:5173
+npm run check          # before every commit: typecheck, translations, unit and browser tests
 ```
 
-### 3. Development
+| Command | What it does |
+|---|---|
+| `npm run check -- --desktop --build` | the full check GitHub runs: all screens, against the production build |
+| `npm run android:run` | build and install the **Lens Dev** test app on your USB phone (own id, next to the Play Store app) |
+| `npm run android:live` | Lens Dev loads from this computer and reloads on every save |
+| `npm run test:android` | phone tests on the USB phone (see [docs/TESTING.md](docs/TESTING.md)) |
+| `npm run release -- --dry-run` | show what a release would do; without `--dry-run` it releases (website + Android bundle) |
+| `npm run android:release` | only the signed Android bundle for Play Console (unlock the key vault first) |
 
-```bash
-npm run dev
+How the tests work: [docs/TESTING.md](docs/TESTING.md). Upgrading packages:
+[docs/DEPENDENCIES.md](docs/DEPENDENCIES.md). Timing gates: [docs/perf.md](docs/perf.md).
 
-```
-
-### 4. Native Setup
-
-```bash
-# Android (Ready)
-npm run build
-npx cap sync
-npx cap open android
-
-# iOS (Requires setup)
-npm run build
-npx cap add ios
-npx cap open ios
-
-```
-
-### 5. Performance Gates (Release)
-
-```bash
-npm run test:perf
-```
-
-Performance gate details and PRD mapping are documented in [docs/perf.md](docs/perf.md).
-
-### 6. Security Network Gate
-
-```bash
-npm run test:security
-```
-
-Network gate policy, CI flow matrix, and allowlist rules are documented in [docs/security-network.md](docs/security-network.md).
-
-### 7. Android Privacy Smoke (FLAG_SECURE)
-
-CI workflow: `.github/workflows/android-privacy-smoke.yml`
-
-The workflow runs `scripts/android-smoke.ps1` on a self-hosted Windows Android runner and uploads runtime proof artifacts:
-- `window-flags.txt` (must contain `FLAG_SECURE check: PASS`)
-- `window-windows.txt`
-- `screenshot.png`
-- `logcat.txt`
-- `telemetry-report.txt`
-
-### 8. Android Release Build (APK/AAB)
-
-Workflow: `.github/workflows/android-release-build.yml` (manual dispatch)
-
-Optional signing/version env inputs:
-- `OWQ_ANDROID_VERSION_CODE`
-- `OWQ_ANDROID_VERSION_NAME`
-- `OWQ_ANDROID_STORE_FILE` (base64 keystore in GitHub Secret)
-- `OWQ_ANDROID_STORE_PASSWORD`
-- `OWQ_ANDROID_KEY_ALIAS`
-- `OWQ_ANDROID_KEY_PASSWORD`
-
-If signing secrets are not provided, release artifacts are still built (unsigned/default signing behavior).
+GitHub runs the checks on every push and pull request into `develop`, and deploys
+lens.open-waqf.org only from a version tag (made by `npm run release`).
 
 ---
 

@@ -55,7 +55,7 @@ Backups use a specific chunked-streaming protocol to allow multi-gigabyte export
 
 ### 4. Localization
 
-* **No hardcoded UI text:** User-facing strings must use translation keys from `src/lib/locales/en.ts` via `t(...)`.
+* **No hardcoded UI text:** User-facing strings must use translation keys from `src/lib/i18n.ts` via `t(...)`.
 * **App shell included:** Navigation labels, fatal/recovery prompts, and toast messages in `app-root` follow the same rule.
 * **Clipboard privacy:** Copy actions must route through `src/services/clipboard.ts` so opt-in auto-clear behavior remains consistent.
 
@@ -63,44 +63,18 @@ Backups use a specific chunked-streaming protocol to allow multi-gigabyte export
 
 ## 🚀 Development Workflow
 
-1. **Branching:** Create a feature branch (`feat/your-feature` or `fix/your-fix`).
-2. **Type Checking:** Run `npm run typecheck` before any PR. We do not accept PRs with `any` types in core logic.
-3. **Testing:**
+1. **Branching:** Create a feature branch (`feat/your-feature` or `fix/your-fix`) from `develop`.
+2. **Checks:** Run `npm run check` before every commit and pull request. GitHub runs the same
+   checks (on all screens, against the production build) on every pull request into `develop`.
+3. **Privacy:** Every browser test fails if the app tries to reach the network. Never add an
+   exception for analytics, fonts, CDNs or any remote service.
+4. **Phone:** Android-specific changes (sharing, files, scanner, app lock) are checked on a
+   real phone with `npm run test:android` before they are called done.
+5. **Translations:** Every text in `src/lib/i18n.ts` must exist in every language.
+   `npm run check-i18n` lists anything missing.
+6. **Dependencies:** Read [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) before upgrading anything.
 
-* Test image processing on both Desktop (high RAM) and Mobile (low RAM).
-* Verify that the "Offline" mode still works (DevTools -> Network -> Offline).
-* Run the privacy network gate for local-first verification:
-  ```bash
-  export MITM_CAPTURE_PATH=/tmp/mitm-requests.jsonl
-  export E2E_PROXY_SERVER=http://127.0.0.1:8080
-  nohup mitmdump --listen-host 127.0.0.1 --listen-port 8080 -q -s scripts/mitm_capture.py >/tmp/mitm.log 2>&1 &
-  MITM_PID=$!
-  npm run build
-  npm run test:security
-  node scripts/network-assert.mjs /tmp/mitm-requests.jsonl --allow-hosts=localhost,127.0.0.1
-  kill "$MITM_PID"
-  ```
-  Policy reference: `docs/security-network.md`.
-  Keep default allowlist strict (`localhost`, `127.0.0.1`). Add external hosts only for explicit language-pack networking tests.
-* Run APK telemetry guard (must be clean):
-  ```bash
-  npm run test:no-telemetry -- android/app/build/outputs/apk/debug/app-debug.apk
-  ```
-* Run performance gates before merging performance-sensitive changes:
-  ```bash
-  npm run test:perf
-  ```
-  Artifacts are written to `artifacts/perf-report.json` and `artifacts/perf-summary.md`.
-  Full gate definitions: `docs/perf.md`.
-* Android privacy runtime proof (FLAG_SECURE) is validated in CI via:
-  - `.github/workflows/android-privacy-smoke.yml`
-  - required artifact evidence in `test-results/android-smoke/`:
-    `window-flags.txt`, `window-windows.txt`, `screenshot.png`, `logcat.txt`
-  - workflow fails if `window-flags.txt` does not contain `FLAG_SECURE check: PASS`
-
-
-4. **Linting:** Follow the existing style. We prefer **Lit** for UI components and standard **TypeScript** classes for
-   services.
+Details: [docs/TESTING.md](docs/TESTING.md).
 
 ## 📦 Pull Request Process
 
