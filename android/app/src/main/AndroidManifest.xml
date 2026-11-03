@@ -36,6 +36,10 @@
     <queries>
         <package android:name="org.openwaqf.signer" />
         <package android:name="org.openwaqf.signer.dev" />
+        <!-- The phone's camera app: the scan fallback without Google Play services -->
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
     </queries>
 
     <!-- Permissions -->

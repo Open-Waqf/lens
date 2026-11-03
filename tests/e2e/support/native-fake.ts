@@ -25,6 +25,10 @@ export type FakeAndroidOptions = {
     biometric?: {available?: boolean; succeed?: boolean};
     /** Make Filesystem.writeFile fail (for example storage full). */
     failWrite?: boolean;
+    /** 'missing': Google's document scanner is not on the phone (no Google Play services). */
+    scanner?: 'missing';
+    /** Photos the phone's camera app "takes", one per call: local file paths. Empty = closed without a photo. */
+    camera?: string[];
     /** Open Waqf Signer installed (Sign with Signer). Default false. */
     signer?: boolean;
     /** Files already on the phone at start: "DATA/docs/a/pages/p.jpg" or "CACHE/x.pdf" -> base64. */
@@ -44,6 +48,7 @@ const METHODS: Record<string, string[]> = {
     NativeBiometric: ['isAvailable', 'verifyIdentity'],
     PrivacyScreen: ['setLockEnabled'],
     SignerHandoff: ['isAvailable', 'open'],
+    CameraCapture: ['takePhoto'],
 };
 
 const FILE_ROUTE = '/__fake_android_file__/';
@@ -55,6 +60,10 @@ export async function fakeAndroid(page: Page, options: FakeAndroidOptions = {}) 
     const scanUris = (options.scan || []).map((p, i) => {
         served[`scan-${i}.jpg`] = p;
         return `file:///data/user/0/org.openwaqf.lens/cache/mlkit_docscan/scan-${i}.jpg`;
+    });
+    const cameraPaths = (options.camera || []).map((p, i) => {
+        served[`camera-${i}.jpg`] = p;
+        return `/data/user/0/org.openwaqf.lens/cache/camera/camera-${i}.jpg`;
     });
     const picked = (options.pick || []).map((p) => ({
         name: p.split('/').pop(),
@@ -69,7 +78,7 @@ export async function fakeAndroid(page: Page, options: FakeAndroidOptions = {}) 
         return route.fulfill({status: 200, contentType: 'image/jpeg', body: fs.readFileSync(file)});
     });
 
-    await page.addInitScript(({methods, options, scanUris, picked, fileRoute}) => {
+    await page.addInitScript(({methods, options, scanUris, picked, cameraPaths, fileRoute}) => {
         const calls: any[] = [];
         const listeners: Record<string, Array<(data: any) => void>> = {};
         // In-memory folders: "DATA/docs/x/pages/p.jpg" -> base64 chunks.
@@ -132,8 +141,14 @@ export async function fakeAndroid(page: Page, options: FakeAndroidOptions = {}) 
                 case 'App.getLaunchUrl':
                     return {};
                 case 'DocumentScanner.scanDocument':
+                    if (options.scanner === 'missing') throw new Error('Google Play services are not available on this device.');
                     if (!scanUris.length) throw Object.assign(new Error('User canceled the scan.'), {code: 'USER_CANCELLED'});
                     return {scannedImages: scanUris};
+                case 'CameraCapture.takePhoto': {
+                    const next = cameraPaths.shift();
+                    if (!next) throw Object.assign(new Error('User cancelled the camera'), {code: 'USER_CANCELLED'});
+                    return {path: next};
+                }
                 case 'FilePicker.pickFiles':
                     if (!picked.length) throw Object.assign(new Error('pickFiles canceled.'), {code: 'USER_CANCELLED'});
                     return {files: picked.slice(0, o.limit || picked.length)};
@@ -181,7 +196,7 @@ export async function fakeAndroid(page: Page, options: FakeAndroidOptions = {}) 
                 return (listeners[`${plugin}:${eventName}`] || []).length;
             },
         };
-    }, {methods: METHODS, options, scanUris, picked, fileRoute: FILE_ROUTE});
+    }, {methods: METHODS, options, scanUris, picked, cameraPaths, fileRoute: FILE_ROUTE});
 }
 
 /** All native calls so far, optionally only one plugin's. */

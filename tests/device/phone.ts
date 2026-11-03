@@ -110,7 +110,10 @@ export const test = base.extend<{app: {page: Page; requests: string[]}}>({
         adb('shell', 'input', 'keyevent', 'KEYCODE_HOME');
         adb('shell', 'am', 'force-stop', APP_ID);
         adb('shell', 'pm', 'clear', APP_ID);
-        adb('shell', 'am', 'start', '-W', '-n', ACTIVITY);
+        // --activity-clear-task: a screen another app left on top of Lens (the share sheet,
+        // the camera app) is dropped with Lens's old task, instead of being shown over a dead
+        // Lens (the splash forever).
+        adb('shell', 'am', 'start', '-W', '--activity-clear-task', '-n', ACTIVITY);
         const {browser, page} = await attach();
         const requests: string[] = [];
         page.on('request', (r) => requests.push(r.url()));

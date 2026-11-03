@@ -236,4 +236,23 @@ test.describe('A. Android app (fake Android bridge) @phone', () => {
             r.onsuccess = () => { const c = r.result.transaction(['docs']).objectStore('docs').count(); c.onsuccess = () => resolve(c.result); };
         }))).toBe(0);
     });
+
+    test('A.20 No Google scanner: "+" opens the phone camera app, and the photo lands in the editor', async ({page}) => {
+        await fakeAndroid(page, {scanner: 'missing', camera: ['tests/fixtures/photos/french-invoice.jpg']});
+        await page.goto('/#/scan?new=1&scan=1');
+        await expect(page.locator('page-editor')).toBeVisible({timeout: 15000});
+        expect(await nativeCalls(page, 'CameraCapture')).toHaveLength(1);
+        await expect(page.getByText(/failed|Google Play/)).toHaveCount(0); // no error shown
+        await expect(page.getByTestId('editor-loading')).toBeHidden({timeout: 30000});
+        await page.getByRole('button', {name: 'Save Scan'}).click();
+        await expect(page.getByTestId('btn-share-pdf')).toBeVisible({timeout: 30000});
+    });
+
+    test('A.21 No Google scanner, camera app closed without a photo: back to the library, no error', async ({page}) => {
+        await fakeAndroid(page, {scanner: 'missing', camera: []});
+        await page.goto('/#/library');
+        await page.locator('#MainScanBtn').click();
+        await expect(page.locator('library-page')).toBeVisible({timeout: 15000});
+        await expect(page.getByText(/failed|Google Play/)).toHaveCount(0);
+    });
 });

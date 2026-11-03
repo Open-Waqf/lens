@@ -38,7 +38,8 @@ const mockState = vi.hoisted(() => ({
 }));
 
 vi.mock('@capacitor/core', () => ({
-    Capacitor: {isNativePlatform: () => mockState.isNativePlatform, convertFileSrc: (s: any) => s}
+    Capacitor: {isNativePlatform: () => mockState.isNativePlatform, convertFileSrc: (s: any) => s},
+    registerPlugin: () => ({takePhoto: vi.fn().mockRejectedValue(Object.assign(new Error('cancelled'), {code: 'USER_CANCELLED'}))})
 }));
 
 vi.mock('@capacitor/haptics', () => ({

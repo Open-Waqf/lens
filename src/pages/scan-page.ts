@@ -42,6 +42,7 @@ import {resolveScanQualityPlan} from '../lib/image/quality';
 import {pickedFileToBlob} from '../services/picked-file';
 import {safeFileName} from '../lib/file-name';
 import {deleteWithUndo, LIBRARY_CHANGED} from '../services/pending-delete';
+import {takePhotoWithCameraApp} from '../services/camera-capture';
 
 const APPEND_DOC_KEY = 'sahifah.appendToDocId';
 const AUTO_KEY = 'sahifah.autoCapture';
@@ -259,6 +260,22 @@ export class ScanPage extends LitElement {
             // Any other way onto this screen just shows it (Nov 2026).
             this.autoLaunched = true;
             setTimeout(() => void this.invokeNativeScanner(), 0);
+        }
+    }
+
+    /** The scan fallback: one photo from the phone's camera app, straight into the editor. */
+    private async captureWithCameraApp(scannerError: unknown): Promise<void> {
+        try {
+            const photo = await takePhotoWithCameraApp();
+            if (!photo) {
+                if (this.autoLaunched && !this.session.hasPages) void this.exitScan();
+                else this.session.setStage('idle');
+                return;
+            }
+            await this.openNewBlobInEditor(photo, null, 'camera');
+        } catch (e) {
+            this.error = t('scan.quick_scan_failed', {error: toUserErrorMessage(scannerError)}) + ' ' + toUserErrorMessage(e);
+            this.session.setStage('idle');
         }
     }
 
@@ -620,8 +637,9 @@ export class ScanPage extends LitElement {
                 if (this.autoLaunched && !this.session.hasPages) void this.exitScan();
                 return;
             }
-            this.error = t('scan.quick_scan_failed', {error: toUserErrorMessage(e)});
-            this.session.setStage('idle');
+            // Google's scanner is not on this phone (no Google Play services) or failed:
+            // the phone's own camera app takes the photo, and the editor finds the edges.
+            await this.captureWithCameraApp(e);
         } finally {
             this.busy = false;
             if (wasAuto) this.autoLaunched = false;
