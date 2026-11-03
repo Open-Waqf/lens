@@ -4,6 +4,7 @@ import {Share} from "@capacitor/share";
 import {showToast} from "../components/toast-notification";
 import {t} from '../lib/i18n';
 import {safeFileName} from '../lib/file-name';
+import {bytesToBase64} from '../lib/bytes';
 
 // Temporary copies for the share sheet live here, in the app's cache (never in shared
 // storage). Each share gets its own folder, so the file keeps its real name: the person
@@ -125,6 +126,43 @@ export async function shareFiles(files: File[], title: string = t('common.share_
         } else {
             if (files.length === 1) downloadFileFallback(files[0], files[0].name);
             else showToast(t('doc.browser_share_zip'), 'info');
+        }
+    }
+}
+
+/**
+ * Share a file that is produced as a stream (the encrypted backup). On Android the chunks
+ * go straight into the temporary share folder and the file is shared by its path, so the
+ * backup is never held in memory. On the web the chunks become a File for the browser.
+ */
+export async function shareStream(chunks: AsyncIterable<Uint8Array>, filename: string, mime = 'application/octet-stream'): Promise<void> {
+    if (!Capacitor.isNativePlatform()) {
+        const parts: Uint8Array[] = [];
+        for await (const c of chunks) parts.push(c);
+        await shareFiles([new File(parts as BlobPart[], filename, {type: mime})], filename);
+        return;
+    }
+    const folder = `${SHARE_DIR}/${Date.now()}`;
+    const path = `${folder}/${safeFileName(filename)}`;
+    try {
+        let first = true;
+        for await (const chunk of chunks) {
+            const data = await bytesToBase64(chunk);
+            if (first) {
+                await Filesystem.writeFile({path, data, directory: Directory.Cache, recursive: true});
+                first = false;
+            } else {
+                await Filesystem.appendFile({path, data, directory: Directory.Cache});
+            }
+        }
+        if (first) await Filesystem.writeFile({path, data: '', directory: Directory.Cache, recursive: true});
+        const {uri} = await Filesystem.getUri({path, directory: Directory.Cache});
+        await Share.share({title: filename, files: [uri], dialogTitle: filename});
+    } finally {
+        try {
+            await Filesystem.rmdir({path: folder, directory: Directory.Cache, recursive: true});
+        } catch (err) {
+            console.warn('Failed to delete temp share folder', folder, err);
         }
     }
 }

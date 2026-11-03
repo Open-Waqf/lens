@@ -63,6 +63,19 @@ test('SLBK restore rejects corrupted backup with specific error and no partial w
     const cutoff = Math.max(16, backupBuffer.length - 64);
     const corrupted = backupBuffer.subarray(0, cutoff);
 
+    // A document already in the library: "Replace" with a corrupt backup must not lose it.
+    await page.goto('/#/library');
+    await page.evaluate(async () => {
+        const db = await new Promise<IDBDatabase>((resolve) => { const q = indexedDB.open('sahifah-lens'); q.onsuccess = () => resolve(q.result); });
+        await new Promise<void>((resolve) => {
+            const tx = db.transaction(['docs'], 'readwrite');
+            tx.objectStore('docs').put({id: 'keep_me', title: 'Keep me', folder: null, tags: [], pageIds: [], createdAt: 1, updatedAt: 1});
+            tx.oncomplete = () => resolve();
+        });
+        db.close();
+    });
+    await page.goto('/#/settings');
+
     const chooserPromise = page.waitForEvent('filechooser');
     await page.locator('text=Restore Backup').click();
     const chooser = await chooserPromise;
@@ -75,11 +88,13 @@ test('SLBK restore rejects corrupted backup with specific error and no partial w
     await expect(page.getByPlaceholder('Password')).toBeVisible({timeout: 10000});
     await page.getByPlaceholder('Password').fill('correct123');
     await page.getByRole('button', {name: 'Restore', exact: true}).click();
+    // The damage is at the end of the file, so it is found only after the mode question.
+    await page.getByRole('button', {name: 'Replace my library'}).click({timeout: 15000});
 
     await expect(page.getByText('Vault file is corrupted or incomplete.')).toBeVisible({timeout: 10000});
 
     await page.goto('/#/library');
-    await expect(page.getByText('No scans yet')).toBeVisible({timeout: 10000});
+    await expect(page.getByText('Keep me')).toBeVisible({timeout: 10000});
 });
 
 test('SLBK restore rejects unsupported future version backup', async ({page}) => {
@@ -120,10 +135,8 @@ for (const [label, metadata] of [['empty metadata', '{}'], ['metadata that is no
     test(`SLBK restore of a damaged backup (${label}) says so clearly and changes nothing`, async ({page}) => {
         // Regression (Nov 2026): a backup without docs/pages lists failed with a raw
         // "Cannot read properties of undefined (reading 'length')".
-        const JSZip = (await import('jszip')).default;
-        const zip = new JSZip();
-        zip.file('metadata.json', metadata);
-        const buffer = await zip.generateAsync({type: 'nodebuffer'});
+        const {zipSync, strToU8} = await import('fflate');
+        const buffer = Buffer.from(zipSync({'metadata.json': strToU8(metadata)}));
 
         const chooserPromise = page.waitForEvent('filechooser');
         await page.locator('text=Restore Backup').click();

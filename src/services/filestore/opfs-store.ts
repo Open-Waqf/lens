@@ -109,42 +109,6 @@ export class OPFSFileStore implements FileStore {
     }
 }
 
-// ---- Stream Writer (New) ----
-
-export class OPFSStreamWriter {
-    private fileHandle: FileSystemFileHandle | null = null;
-    private writable: FileSystemWritableFileStream | null = null;
-
-    constructor(private path: string) {
-    }
-
-    async open(): Promise<void> {
-        const root = await getRootDir();
-        const parts = splitPath(this.path);
-        const fileName = parts.pop();
-        if (!fileName) throw new Error('Invalid path');
-
-        const dir = await ensureDir(root, parts, true);
-        this.fileHandle = await dir.getFileHandle(fileName, {create: true});
-        this.writable = await this.fileHandle.createWritable();
-    }
-
-    async write(chunk: Uint8Array): Promise<void> {
-        if (!this.writable) throw new Error('Stream not open');
-        // FIX: Use toArrayBuffer to satisfy TypeScript strict types
-        await this.writable.write({type: 'write', data: toArrayBuffer(chunk)});
-    }
-
-    async close(): Promise<File> {
-        if (this.writable) {
-            await this.writable.close();
-            this.writable = null;
-        }
-        if (!this.fileHandle) throw new Error('No file handle');
-        return await this.fileHandle.getFile();
-    }
-}
-
 // ---- Helpers ----
 
 export async function opfsRemoveEntry(path: string, opts?: { recursive?: boolean }): Promise<void> {
