@@ -43,6 +43,12 @@ android {
         }
     }
     buildTypes {
+        // Test builds install next to the Play Store app: own id and name ("Lens Dev",
+        // see src/debug/res), own data. Release builds are unchanged.
+        debug {
+            applicationIdSuffix ".dev"
+            versionNameSuffix "-dev"
+        }
         release {
             minifyEnabled false
             if (releaseSigningReady) {

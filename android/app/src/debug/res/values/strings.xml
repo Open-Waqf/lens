@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!-- Test builds only: a different name so they are easy to tell apart from the Play Store app. -->
+<resources>
+    <string name="app_name">Lens Dev</string>
+    <string name="title_activity_main">Lens Dev</string>
+    <string name="package_name">org.openwaqf.lens.dev</string>
+    <string name="custom_url_scheme">org.openwaqf.lens.dev</string>
+</resources>
