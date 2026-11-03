@@ -1,7 +1,6 @@
-# ✒️ Sahifah Lens (العدسة)
+# Sahifah Lens (العدسة)
 
-> **Private. Local. Sovereign.**
-> A high-performance, local-first document scanner and vault. No accounts, no ads, no cloud.
+> Scan a paper, read its text, keep it on your phone, share it. Nothing is uploaded.
 
 <div align="center">
 <a href="https://lens.open-waqf.org">
@@ -9,90 +8,89 @@
 </a>
 </div>
 
-Sahifah Lens allows users to digitize documents, perform OCR, and organize their personal library directly on their
-device. Built on the principle of **Amanah** (Trust), it ensures that your sensitive documents never leave your physical
-control. Read our [Local Privacy Policy](PRIVACY_POLICY.md).
+Sahifah Lens is a document scanner for Android and the web. It scans paper with the phone's
+scanner, reads the text on the device (OCR), keeps the pages in the app's private storage,
+and shares them as a PDF or as images. No account, no ads, no cloud. It is built on the
+principle of **Amanah** (trust): your documents never leave your hands. Read the
+[privacy policy](PRIVACY_POLICY.md).
 
 ---
 
-## 🌟 Key Features
+## What it does
 
-### 🛡️ Privacy & Sovereignty
+### Scan
 
-* **Zero-Cloud Architecture:** Documents stay in the app's private storage on the phone (Android app), or in the
-  browser's private storage (OPFS and IndexedDB) on the web. Nothing is uploaded; every test fails if the app tries to
-  reach the network.
-* **App Lock (Android):** Optional fingerprint or face unlock (Android's own biometric prompt) when the app opens and
-  when it comes back from the background.
-* **Clipboard Auto-Clear (Opt-in):** Clears app-copied text from clipboard after 60 seconds.
-* **Stream-Encrypted Backups:** Export your library as a `.slbk` vault using AES-256-GCM with a chunked streaming
-  protocol (Magic: `SLBK`).
-* **Advanced Mirror Folder (Optional):** Save an extra encrypted `.slbk` copy to a user-chosen local folder after export.
-* **Nuclear Reset:** A "Reset Storage" kill-switch erases all local documents and database entries instantly.
-* **Inclusive Design:** Optimized for screen readers with semantic labels and high-contrast controls.
-* **Offline First:** Fully functional in airplane mode; OCR and image processing are 100% local.
+* **Quick Scan (Android):** "+" opens Google's document scanner (ML Kit, part of Google Play
+  services). It finds the page edges and straightens the page. Lens saves the pages exactly as
+  the scanner made them, with no extra processing, and shows them with one button: Share as
+  PDF. Scan another page, or Done. On a phone without Google Play services, "+" opens the
+  phone's camera app instead and the photo goes to the editor.
+* **Import:** photos and PDFs from the phone or the computer. The editor finds the page edges;
+  you can move the corners with a finger, rotate, and choose Original, Clean or Black & white.
+* **Camera (web):** in the browser, a live camera view with edge detection.
 
-### 📸 Intelligent Scanning & Editing
+### Read
 
-* **Quick Scan (Android):** Google's document scanner (ML Kit, part of Google Play services) finds the page edges and
-  straightens the page. It runs on the phone; it needs Google Play services on the phone.
-* **Camera Scan (web):** In the browser, a live camera view with edge detection in a Web Worker.
-* **Import:** Photos, images and PDFs from the phone or computer.
-* **Visual Filter Picker:** Real-time thumbnail previews for Magic Color, B&W, and Whiteboard filters.
-* **Quality Presets:** `Archive`, `Share`, and `Original` output policies balance readability, file size, and processing cost. `Original` disables auto-sharpening.
-* **Thumb Encoding Policy:** Library/editor thumbnails are encoded as WebP for smaller storage while master pages remain JPEG for compatibility.
-* **The "Stitcher":** Merge multiple separate scans into a single organized document.
-* **Perspective Correction:** Automatically warps and crops images to fix camera angles.
+* **OCR on the device:** Tesseract reads English and Arabic (both packs ship with the app).
+  The text keeps its lines, and Arabic lines with numbers stay right to left.
+* **Names from the text:** a new document is named after the first words on its first page.
+  Rename it any time; a name you typed is never replaced.
+* **Search** finds words inside the pages. **Copy text** with one tap.
 
-### 🔍 Deep Search & OCR
+### Keep
 
-* **On-Device OCR:** Uses **Tesseract.js** in WebWorkers to extract text without internet.
-* **Arabic PDF Robustness:** Arabic OCR text layers require the bundled `public/fonts/noto-arabic.ttf` font; export fails fast if that asset is missing.
-* **Contextual Snippets:** Search results highlight the exact sentence found in OCR text or user notes.
-* **Rich Metadata:** Organize with Folders, Tags, and private searchable Notes.
-* **PDF Generation:** Compile professional, searchable PDFs with invisible text layers locally.
+* **Folders**, and delete with **Undo** (five seconds).
+* **Encrypted backup (`.slbk`):** one file, encrypted with your password (PBKDF2-SHA-256,
+  600,000 rounds, then AES-256-GCM). It is written and restored as a stream, so a large
+  library restores on an old phone. Restore can merge into or replace the library.
+* **App Lock (Android):** fingerprint or face through Android's own prompt. With App Lock on,
+  the app is hidden in Recents and screenshots are blocked.
+* **No copies you did not make:** Android cloud backup and phone-to-phone transfer are off.
+* **Erase everything** from Settings, in two taps.
 
----
+### Share
 
-## 🏗️ Technical Architecture
+* **Share as PDF** (normal or a smaller file), **share images**, and on Android **Sign with
+  Signer** when Open Waqf Signer is installed.
 
-* **UI:** TypeScript + Lit (Web Components) + Tailwind CSS.
-* **Persistence:** Dexie.js (IndexedDB) for metadata; page images in the app's private files on Android, OPFS on the web.
-* **Crypto:** Web Crypto API using PBKDF2-SHA-256 (`600,000` iterations, `16-byte` random salt) and AES-256-GCM
-  (`12-byte` random IV per encrypted chunk).
-* **Native:** Capacitor 8 (Android): document scanner, biometric lock, files and the system share sheet.
-* **Sensory:** Hybrid Haptic engine for tactile feedback on both Web and Native.
-* **Localization:** Single-file registry in `src/lib/i18n.ts` (locale config + all messages + text direction).
+### Private by design
 
-### 🌍 Localization Workflow
-
-To add or update a language, edit only `src/lib/i18n.ts`:
-- add messages in the locale registry
-- set locale metadata (`label`, `dir`)
-- `dir` supports both `ltr` and `rtl`; app root direction is applied automatically via `document.documentElement.dir`
-- current shipped locales: `en` and `ar` (Arabic RTL)
-- all user-visible labels, placeholders, hints, and ARIA text must use translation keys (no hardcoded UI strings)
-
-### ♿ Accessibility i18n Rule
-
-- Every interactive control must have an accessible name (`aria-label` or visible label) sourced from i18n keys.
-- New UI controls should be tested in both `en` and `ar` to verify label readability and direction-aware alignment.
+* Documents stay in the app's private storage on Android, or in the browser's private
+  storage (OPFS and IndexedDB) on the web.
+* Nothing is uploaded. Every browser test and every phone test fails if the app reaches the
+  network. No analytics, no crash reporting, no accounts.
 
 ---
 
-## 📱 Minimum Platform Targets
+## How it is built
 
-* **Android:** Android 11 (API 30) or newer. Tested on a moto g75 5G (Android 16). Quick Scan needs Google Play
-  services.
+* **UI:** TypeScript, Lit (Web Components), Tailwind CSS.
+* **Storage:** Dexie.js (IndexedDB) for the list of documents; page images in the app's
+  private files on Android, OPFS on the web.
+* **OCR:** tesseract.js in a worker, language packs bundled (`public/tesseract/`).
+* **PDF:** pdf-lib with an invisible text layer; the bundled Arabic font makes Arabic text
+  searchable.
+* **Backup:** Web Crypto, streamed with fflate. Format: [VAULT_SPEC.md](VAULT_SPEC.md).
+  `node scripts/slbk-verify.mjs <file.slbk>` inspects a backup without decrypting it.
+* **Native (Capacitor 8, Android):** ML Kit document scanner, biometric prompt, files, the
+  system share sheet, a privacy-screen plugin and a Signer handoff plugin.
+* **Languages:** English and Arabic (right to left), all in `src/lib/i18n.ts`. The check
+  fails on a missing translation: [docs/TRANSLATIONS.md](docs/TRANSLATIONS.md).
+
+---
+
+## Platforms
+
+* **Android:** Android 11 (API 30) or newer. Tested on a moto g75 5G (Android 16). Quick Scan
+  needs Google Play services. Without it, "+" opens the phone's own camera app instead, one
+  photo at a time, and the editor finds the edges. The Android app has no camera of its own
+  and needs no camera permission.
 * **Web/PWA:** current Chrome, Firefox and Safari (OPFS required).
-* **iOS:** not built yet.
-
-These are product support targets for release validation (performance and compatibility gates), not a guarantee of
-identical performance on all hardware tiers.
+* **iOS:** not built.
 
 ---
 
-## 🛠️ Developer Setup
+## Developer setup
 
 Node 22 or newer (`.nvmrc`), JDK 21 and the Android SDK for the phone build.
 
@@ -119,29 +117,15 @@ lens.open-waqf.org only from a version tag (made by `npm run release`).
 
 ---
 
-## ⚠️ Disclaimers
+## Good to know
 
-* **Storage Persistence:**
-* **Native App (APK):** Binary files are stored in persistent app-internal storage. Metadata still depends on WebView IndexedDB.
-* **Web/PWA:** Managed by the browser. The OS may clear this if storage is low.
-* **Recommendation:** Always export an **Encrypted Backup** to secure your data permanently.
-* **Storage Cleanup Signal:** If file cleanup partially fails (for example due filesystem/browser restrictions), the app
-  surfaces a Storage Cleanup banner that directs you to run **Settings -> Storage Audit**.
-
-* **Vault Format:** `.slbk` header spec is documented in [VAULT_SPEC.md](VAULT_SPEC.md). You can inspect an exported
-  backup without decrypting via:
-
-```bash
-node scripts/slbk-verify.mjs ./lens-backup-YYYY-MM-DD.slbk
-```
-
-
-* **Sovereignty:** You are responsible for your own keys/passwords. There is no "Forgot Password" link because there is
-  no server.
-* **App Lock Scope:** Biometric/app lock is a local UX gate for shoulder-surfing/device access friction. It is not the
-  cryptographic security boundary; vault backup encryption (`.slbk`) is enforced separately via PBKDF2 + AES-GCM.
+* **Web storage is the browser's.** It can clear the site's storage when space is low. Export
+  a backup. The Android app keeps its files in private app storage.
+* **Your password is yours.** There is no "forgot password": there is no server.
+* **App Lock is a gate, not encryption.** Pages are stored unencrypted in the app's private
+  storage, which other apps cannot read. The backup file is the encrypted form.
 
 <div align="center">
 <p><em>Built with ❤️ for the Ummah and Humanity.</em></p>
-<p><small>Released under <a href="https://www.elastic.co/licensing/elastic-license">Elastic License 2.0 (ELv2)</a> — free for personal, professional, and institutional use. Hosting as a competing managed service is not permitted.</small></p>
+<p><small>Released under <a href="https://www.elastic.co/licensing/elastic-license">Elastic License 2.0 (ELv2)</a>: free for personal, professional, and institutional use. Hosting as a competing managed service is not permitted.</small></p>
 </div>
