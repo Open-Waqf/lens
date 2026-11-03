@@ -64,28 +64,7 @@
 		const f = e(a, n, o, -r.angleDeg), l = t(f, n, o);
 		return Math.abs(l.angleDeg) + .15 < Math.abs(r.angleDeg) ? f : a;
 	}
-	function n(t, e, a, n = 20) {
-		const o = new Uint8ClampedArray(e * a * 4), r = e + 1, s = new Int32Array(r * (a + 1));
-		let i = 0;
-		for (let h = 1; h <= a; h++) {
-			let a = 0;
-			const n = h * r, o = (h - 1) * r;
-			for (let r = 1; r <= e; r++) a += .299 * t[i] + .587 * t[i + 1] + .114 * t[i + 2] | 0, s[n + r] = s[o + r] + a, i += 4;
-		}
-		for (let h = 0; h < a; h++) {
-			const i = Math.max(0, h - n), f = Math.min(a - 1, h + n), l = f - i + 1, c = (f + 1) * r, g = i * r, m = h * e * 4;
-			for (let a = 0; a < e; a++) {
-				const r = Math.max(0, a - n), i = Math.min(e - 1, a + n), h = g + (i + 1), f = c + r, u = g + r, M = (i - r + 1) * l;
-				let d = 240 / ((s[c + (i + 1)] - s[h] - s[f] + s[u]) / M + 10);
-				d > 2.5 && (d = 2.5), d < 1 && (d = 1);
-				const w = m + 4 * a;
-				let x = t[w] * d, y = t[w + 1] * d, p = t[w + 2] * d;
-				x = x > 255 ? 255 : x, y = y > 255 ? 255 : y, p = p > 255 ? 255 : p, o[w] = x, o[w + 1] = y, o[w + 2] = p, o[w + 3] = 255;
-			}
-		}
-		return o;
-	}
-	function o(t, e, a, n, o, i) {
+	function n(t, e, a, n, s, i) {
 		const h = function(t, e, a) {
 			return function(t, e) {
 				const a = [], n = [];
@@ -156,21 +135,21 @@
 					y: e - 1
 				}
 			], a);
-		}(o, i, n), f = new Uint8ClampedArray(o * i * 4);
-		for (let l = 0; l < i; l++) for (let n = 0; n < o; n++) {
-			const i = r(h, n, l), c = s(t, e, a, i.x, i.y), g = 4 * (l * o + n);
+		}(s, i, n), f = new Uint8ClampedArray(s * i * 4);
+		for (let l = 0; l < i; l++) for (let n = 0; n < s; n++) {
+			const i = o(h, n, l), c = r(t, e, a, i.x, i.y), g = 4 * (l * s + n);
 			f[g] = c[0], f[g + 1] = c[1], f[g + 2] = c[2], f[g + 3] = c[3];
 		}
 		return f;
 	}
-	function r(t, e, a) {
+	function o(t, e, a) {
 		const [n, o, r, s, i, h, f, l, c] = t, g = f * e + l * a + c;
 		return {
 			x: (n * e + o * a + r) / g,
 			y: (s * e + i * a + h) / g
 		};
 	}
-	function s(t, e, a, n, o) {
+	function r(t, e, a, n, o) {
 		const r = Math.max(0, Math.min(e - 1, n)), s = Math.max(0, Math.min(a - 1, o)), i = Math.floor(r), h = Math.floor(s), f = r - i, l = s - h, c = (t, a) => 4 * (t * e + a), g = c(h, i), m = c(h, Math.min(i + 1, e - 1)), u = c(Math.min(h + 1, a - 1), i), M = c(Math.min(h + 1, a - 1), Math.min(i + 1, e - 1)), d = (t, e, a) => t + (e - t) * a;
 		return [
 			0 | d(d(t[g], t[m], f), d(t[u], t[M], f), l),
@@ -179,7 +158,7 @@
 			255
 		];
 	}
-	async function i(t, e, a, n, o) {
+	async function s(t, e, a, n, o) {
 		const r = new OffscreenCanvas(e, a);
 		r.getContext("2d").putImageData(new ImageData(t, e, a), 0, 0);
 		const s = await r.convertToBlob({
@@ -190,43 +169,39 @@
 	}
 	self.onmessage = async (t) => {
 		const e = t.data;
-		let r = null;
+		let o = null;
 		try {
-			if (e.bitmap) r = e.bitmap;
+			if (e.bitmap) o = e.bitmap;
 			else {
 				if (!e.blob) throw new Error("No source image");
-				r = await createImageBitmap(e.blob);
+				o = await createImageBitmap(e.blob);
 			}
-			let t, s = e.outW ?? r.width, h = e.outH ?? r.height;
+			let t, r = e.outW ?? o.width, i = e.outH ?? o.height;
 			if (!e.outW && !e.outH) {
-				const t = 2500, e = Math.max(s, h);
+				const t = 2500, e = Math.max(r, i);
 				if (e > t) {
 					const a = t / e;
-					s = Math.round(s * a), h = Math.round(h * a);
+					r = Math.round(r * a), i = Math.round(i * a);
 				}
 			}
 			if (e.quad) {
-				const n = new OffscreenCanvas(r.width, r.height).getContext("2d", { willReadFrequently: !0 });
-				n.drawImage(r, 0, 0);
-				t = o(n.getImageData(0, 0, r.width, r.height).data, r.width, r.height, e.quad, s, h), t = a(t, s, h);
+				const s = new OffscreenCanvas(o.width, o.height).getContext("2d", { willReadFrequently: !0 });
+				s.drawImage(o, 0, 0);
+				t = n(s.getImageData(0, 0, o.width, o.height).data, o.width, o.height, e.quad, r, i), t = a(t, r, i);
 			} else {
 				const a = e.crop ?? {
 					x: 0,
 					y: 0,
-					w: r.width,
-					h: r.height
-				}, n = new OffscreenCanvas(a.w, a.h), o = n.getContext("2d", { willReadFrequently: !0 });
-				if (o.save(), o.drawImage(r, a.x, a.y, a.w, a.h, 0, 0, a.w, a.h), o.restore(), a.w !== s || a.h !== h) {
-					const e = new OffscreenCanvas(s, h).getContext("2d");
-					e.drawImage(n, 0, 0, s, h), t = e.getImageData(0, 0, s, h).data;
-				} else t = o.getImageData(0, 0, a.w, a.h).data;
+					w: o.width,
+					h: o.height
+				}, n = new OffscreenCanvas(a.w, a.h), s = n.getContext("2d", { willReadFrequently: !0 });
+				if (s.save(), s.drawImage(o, a.x, a.y, a.w, a.h, 0, 0, a.w, a.h), s.restore(), a.w !== r || a.h !== i) {
+					const e = new OffscreenCanvas(r, i).getContext("2d");
+					e.drawImage(n, 0, 0, r, i), t = e.getImageData(0, 0, r, i).data;
+				} else t = s.getImageData(0, 0, a.w, a.h).data;
 			}
 			if ("original" !== e.filter) {
-				if ("grayscale" === e.filter) for (let e = 0; e < t.length; e += 4) {
-					const a = .299 * t[e] + .587 * t[e + 1] + .114 * t[e + 2] | 0;
-					t[e] = t[e + 1] = t[e + 2] = a;
-				}
-				else if ("bw" === e.filter) {
+				if ("bw" === e.filter) {
 					const e = function(t, e, a) {
 						const n = e * a, o = e + 1, r = a + 1, s = new Float64Array(o * r), i = new Float64Array(o * r), h = new Uint8Array(n);
 						let f = 0;
@@ -247,30 +222,35 @@
 							}
 						}
 						return l;
-					}(t, s, h);
+					}(t, r, i);
 					t.set(e);
 				} else if ("magic" === e.filter) {
-					const e = n(t, s, h);
-					t.set(e);
-				} else if ("whiteboard" === e.filter) {
-					const e = function(t, e, a) {
-						const o = n(t, e, a), r = o.length;
-						for (let n = 0; n < r; n += 4) {
-							let t = o[n], e = o[n + 1], a = o[n + 2];
-							if (t > 210 && e > 210 && a > 210) {
-								o[n] = 255, o[n + 1] = 255, o[n + 2] = 255;
-								continue;
+					const e = function(t, e, a, n = 20) {
+						const o = new Uint8ClampedArray(e * a * 4), r = e + 1, s = new Int32Array(r * (a + 1));
+						let i = 0;
+						for (let h = 1; h <= a; h++) {
+							let a = 0;
+							const n = h * r, o = (h - 1) * r;
+							for (let r = 1; r <= e; r++) a += .299 * t[i] + .587 * t[i + 1] + .114 * t[i + 2] | 0, s[n + r] = s[o + r] + a, i += 4;
+						}
+						for (let h = 0; h < a; h++) {
+							const i = Math.max(0, h - n), f = Math.min(a - 1, h + n), l = f - i + 1, c = (f + 1) * r, g = i * r, m = h * e * 4;
+							for (let a = 0; a < e; a++) {
+								const r = Math.max(0, a - n), i = Math.min(e - 1, a + n), h = g + (i + 1), f = c + r, u = g + r, M = (i - r + 1) * l;
+								let d = 240 / ((s[c + (i + 1)] - s[h] - s[f] + s[u]) / M + 10);
+								d > 2.5 && (d = 2.5), d < 1 && (d = 1);
+								const w = m + 4 * a;
+								let x = t[w] * d, y = t[w + 1] * d, p = t[w + 2] * d;
+								x = x > 255 ? 255 : x, y = y > 255 ? 255 : y, p = p > 255 ? 255 : p, o[w] = x, o[w + 1] = y, o[w + 2] = p, o[w + 3] = 255;
 							}
-							const r = 77 * t + 150 * e + 29 * a >> 8, s = 1.8;
-							t = r + (t - r) * s, e = r + (e - r) * s, a = r + (a - r) * s, t < 60 && (t *= .8), e < 60 && (e *= .8), a < 60 && (a *= .8), o[n] = t < 0 ? 0 : t > 255 ? 255 : t, o[n + 1] = e < 0 ? 0 : e > 255 ? 255 : e, o[n + 2] = a < 0 ? 0 : a > 255 ? 255 : a;
 						}
 						return o;
-					}(t, s, h);
+					}(t, r, i);
 					t.set(e);
 				}
 			}
-			const f = e.sharpenAmount ?? ("original" === e.filter ? 0 : .5);
-			if (f > 0 && function(t, e, a, n) {
+			const h = e.sharpenAmount ?? ("original" === e.filter ? 0 : .5);
+			if (h > 0 && function(t, e, a, n) {
 				if (n <= 0) return;
 				const o = new Uint8ClampedArray(t);
 				for (let r = 1; r < a - 1; r++) for (let a = 1; a < e - 1; a++) {
@@ -280,11 +260,11 @@
 						t[s + e] = r < 0 ? 0 : r > 255 ? 255 : r;
 					}
 				}
-			}(t, s, h, f), void 0 !== e.masterJpegQuality && void 0 !== e.thumbMax) {
+			}(t, r, i, h), void 0 !== e.masterJpegQuality && void 0 !== e.thumbMax) {
 				const a = await async function(t, e, a, n) {
-					return i(t, e, a, "image/jpeg", n);
-				}(t, s, h, e.masterJpegQuality), n = Math.min(1, e.thumbMax / Math.max(s, h)), o = Math.max(1, Math.round(s * n)), r = Math.max(1, Math.round(h * n)), f = new OffscreenCanvas(s, h);
-				f.getContext("2d").putImageData(new ImageData(t, s, h), 0, 0);
+					return s(t, e, a, "image/jpeg", n);
+				}(t, r, i, e.masterJpegQuality), n = Math.min(1, e.thumbMax / Math.max(r, i)), o = Math.max(1, Math.round(r * n)), h = Math.max(1, Math.round(i * n)), f = new OffscreenCanvas(r, i);
+				f.getContext("2d").putImageData(new ImageData(t, r, i), 0, 0);
 				const l = await function(t, e, a) {
 					let n = t, o = t.width, r = t.height;
 					for (; o / 2 >= e && r / 2 >= a;) {
@@ -296,7 +276,7 @@
 						return s.imageSmoothingEnabled = !0, s.imageSmoothingQuality = "high", s.drawImage(n, 0, 0, o, r, 0, 0, e, a), t;
 					}
 					return n;
-				}(f, o, r).convertToBlob({
+				}(f, o, h).convertToBlob({
 					type: "image/webp",
 					quality: e.thumbJpegQuality ?? .82
 				}), c = new Uint8Array(await l.arrayBuffer()), g = {
@@ -304,46 +284,46 @@
 					ok: !0,
 					master: {
 						bytes: a,
-						width: s,
-						height: h
+						width: r,
+						height: i
 					},
 					thumb: {
 						bytes: c,
 						width: o,
-						height: r
+						height: h
 					}
 				};
 				self.postMessage(g, [a.buffer, c.buffer]);
 			} else if (e.encode) {
-				const a = await i(t, s, h, e.outputMime ?? "image/jpeg", e.quality ?? .85), n = {
+				const a = await s(t, r, i, e.outputMime ?? "image/jpeg", e.quality ?? .85), n = {
 					id: e.id,
 					ok: !0,
 					bytes: a,
-					width: s,
-					height: h
+					width: r,
+					height: i
 				};
 				self.postMessage(n, [a.buffer]);
 			} else {
-				const a = new OffscreenCanvas(s, h);
-				a.getContext("2d").putImageData(new ImageData(t, s, h), 0, 0);
+				const a = new OffscreenCanvas(r, i);
+				a.getContext("2d").putImageData(new ImageData(t, r, i), 0, 0);
 				const n = a.transferToImageBitmap(), o = {
 					id: e.id,
 					ok: !0,
 					bitmap: n,
-					width: s,
-					height: h
+					width: r,
+					height: i
 				};
 				self.postMessage(o, [n]);
 			}
-		} catch (s) {
+		} catch (r) {
 			const t = {
 				id: e.id,
 				ok: !1,
-				error: String(s)
+				error: String(r)
 			};
 			self.postMessage(t);
 		} finally {
-			r?.close();
+			o?.close();
 		}
 	};
 })();
