@@ -2,7 +2,7 @@ import type {FilterMode} from '../../domain/types';
 import type {Quad} from '../scan/quad';
 import {adaptiveBwFromRgba} from './adaptive-bw';
 import {applyConservativeDeskew} from './deskew';
-import {magicColorFromRgba, whiteboardFromRgba} from './magic-filter';
+import {magicColorFromRgba} from './magic-filter';
 import {warpRgba} from './warp';
 
 export type Rotation = 0 | 90 | 180 | 270;
@@ -104,20 +104,12 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
 
         // 3. Apply Filters
         if (req.filter !== 'original') {
-            if (req.filter === 'grayscale') {
-                for (let i = 0; i < finalRgba.length; i += 4) {
-                    const y = (0.299 * finalRgba[i] + 0.587 * finalRgba[i + 1] + 0.114 * finalRgba[i + 2]) | 0;
-                    finalRgba[i] = finalRgba[i + 1] = finalRgba[i + 2] = y;
-                }
-            } else if (req.filter === 'bw') {
+            if (req.filter === 'bw') {
                 const bw = adaptiveBwFromRgba(finalRgba, finalW, finalH);
                 finalRgba.set(bw);
             } else if (req.filter === 'magic') {
                 const magic = magicColorFromRgba(finalRgba, finalW, finalH);
                 finalRgba.set(magic);
-            } else if (req.filter === 'whiteboard') {
-                const wb = whiteboardFromRgba(finalRgba, finalW, finalH);
-                finalRgba.set(wb);
             }
         }
 

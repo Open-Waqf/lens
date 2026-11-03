@@ -61,7 +61,6 @@ export class SettingsPage extends LitElement {
     @state() private backupPhase: 'collecting' | 'encrypting' = 'collecting';
 
 
-    @state() private enableOcr = true;
     @state() private ocrLang = 'ara+eng';
     @state() private clearClipboardAfter60s = false;
     @state() private hasIndexRisk = false;
@@ -120,7 +119,6 @@ export class SettingsPage extends LitElement {
     private async _refreshSettings() {
         const s = await settings.get();
         this.requireAuth = s.requireAuth;
-        this.enableOcr = s.enableOcr;
         this.ocrLang = s.ocrLang || 'ara+eng';
         this.clearClipboardAfter60s = s.clearClipboardAfter60s;
     }
@@ -162,12 +160,6 @@ export class SettingsPage extends LitElement {
                 console.warn('Storage estimate failed', e);
             }
         }
-    }
-
-    private toggleOcr() {
-        void haptics.selection();
-        this.enableOcr = !this.enableOcr;
-        settings.setOcr(this.enableOcr);
     }
 
     private async refreshPersistence(requestIfNeeded: boolean) {
@@ -364,7 +356,8 @@ export class SettingsPage extends LitElement {
             }.call(this);
 
             AuthService.ignoreNextResumeForExternalAction('export-backup-share', AuthService.SHARE_BYPASS_TTL_MS);
-            await shareStream(progress, finalName);
+            const shared = await shareStream(progress, finalName);
+            if (!shared) return; // share sheet closed: no backup was made, nothing to report
 
             const now = Date.now();
             localStorage.setItem('sahifah.lastBackup', String(now));
@@ -698,15 +691,12 @@ export class SettingsPage extends LitElement {
         return html`
             <section class="rounded-2xl border border-slate-800 bg-slate-900/40 px-4">
                 ${this.renderToggle(t('settings.app_lock'), t('settings.app_lock_desc'), this.requireAuth, () => this.toggleAuth())}
-                ${this.renderToggle(t('settings.ocr_label'), t('settings.ocr_desc'), this.enableOcr, () => this.toggleOcr())}
-                ${this.enableOcr ? html`
-                    <label class="block py-3 border-b border-slate-800 space-y-1">
-                        <span class="text-xs text-slate-400 uppercase tracking-wider">${t('settings.ocr_language')}</span>
-                        <select class=${select} .value=${this.ocrLang} @change=${(e: Event) => this.setOcrLang((e.target as HTMLSelectElement).value)}>
-                            ${OCR_LANG_OPTIONS.map(opt => html`<option value=${opt.code}>${t(opt.labelKey)}</option>`)}
-                        </select>
-                    </label>
-                ` : null}
+                <label class="block py-3 border-b border-slate-800 space-y-1">
+                    <span class="text-xs text-slate-400 uppercase tracking-wider">${t('settings.ocr_language')}</span>
+                    <select class=${select} .value=${this.ocrLang} @change=${(e: Event) => this.setOcrLang((e.target as HTMLSelectElement).value)}>
+                        ${OCR_LANG_OPTIONS.map(opt => html`<option value=${opt.code}>${t(opt.labelKey)}</option>`)}
+                    </select>
+                </label>
                 <label class="block py-3 border-b border-slate-800 space-y-1">
                     <span class="text-xs text-slate-400 uppercase tracking-wider">${t('settings.language')}</span>
                     <select class=${select} @change=${(e: Event) => this.setLocale((e.target as HTMLSelectElement).value as LocaleCode)}>

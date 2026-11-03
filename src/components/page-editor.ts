@@ -14,7 +14,6 @@ import {Icons} from './icons';
 export type PageEditorSaveDetail = {
     master: { bytes: Uint8Array; width: number; height: number };
     thumb: { bytes: Uint8Array; width: number; height: number };
-    extractText: boolean;
 };
 
 export type PageEditorShareDetail = {
@@ -47,7 +46,6 @@ export class PageEditor extends LitElement {
         this.style.paddingBottom = 'env(safe-area-inset-bottom)';
     }
 
-    @property({type: Boolean}) extractText = true;
     // Shown above the image while several imported pages are reviewed one by one ("2/5").
     @property({type: String}) reviewLabel = '';
     @property({attribute: false}) blob!: Blob;
@@ -670,7 +668,6 @@ export class PageEditor extends LitElement {
             const detail: PageEditorSaveDetail = {
                 master: res.master,
                 thumb: res.thumb,
-                extractText: this.extractText,
             };
             this.dispatchEvent(
                 new CustomEvent<PageEditorSaveDetail>('page-editor-save', {detail, bubbles: true, composed: true}),
@@ -760,13 +757,25 @@ export class PageEditor extends LitElement {
         if (!this.worker) this.startWorker();
         return new Promise(resolve => {
             const w = this.worker!;
+            const done = () => {
+                w.removeEventListener('message', onMsg);
+                w.removeEventListener('error', onCrash);
+            };
             const onMsg = (ev: MessageEvent) => {
                 if (ev.data.id === req.id) {
-                    w.removeEventListener('message', onMsg);
+                    done();
                     resolve(ev.data);
                 }
             };
+            // The worker died (out of memory on a huge photo): answer instead of waiting
+            // forever, and start a fresh worker next time. Nov 2026 deep dive (C10).
+            const onCrash = () => {
+                done();
+                if (this.worker === w) this.stopWorker();
+                resolve({id: req.id, ok: false, error: t('errors.editor_worker_crashed')});
+            };
             w.addEventListener('message', onMsg);
+            w.addEventListener('error', onCrash);
             const transfer: Transferable[] = [];
             if (req.bitmap) transfer.push(req.bitmap);
             w.postMessage(req, transfer);

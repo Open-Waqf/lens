@@ -23,9 +23,9 @@ describe('OCR Integrity & Dynamic Language', () => {
         
         // This should fail because the hash of [1,2,3,4,5] 
         // does not match the hardcoded manifest hash for 'eng'
-        const words = await recognizeText(dummyBlob, 100, 100, 'eng');
-        
-        expect(words).toEqual([]); // Should return empty array on failure
+        // A failure is reported, not turned into "no text" (Nov 2026: the page is then
+        // marked as failed and can be read again, instead of looking empty forever).
+        await expect(recognizeText(dummyBlob, 100, 100, 'eng')).rejects.toThrow(/corrupted or modified/);
     });
 
     it('proceeds with a warning if no hash is defined for a language', async () => {

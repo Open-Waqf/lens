@@ -255,4 +255,38 @@ test.describe('A. Android app (fake Android bridge) @phone', () => {
         await expect(page.locator('library-page')).toBeVisible({timeout: 15000});
         await expect(page.getByText(/failed|Google Play/)).toHaveCount(0);
     });
+
+    test('A.22 Closing the share sheet without sharing is not an error, and nothing is downloaded', async ({page}) => {
+        await fakeAndroid(page, {scan: [PAGE1], shareCancel: true});
+        let downloads = 0;
+        page.on('download', () => downloads++);
+        await scanOnePage(page);
+        await page.getByTestId('btn-share-pdf').click();
+        await expect.poll(async () => (await nativeCalls(page, 'Share')).length).toBe(1);
+        await page.waitForTimeout(500);
+        await expect(page.locator('.bg-red-950\\/40, .bg-red-950\\/50')).toHaveCount(0); // no error box
+        expect(downloads, 'no browser download inside the app').toBe(0);
+    });
+
+    test('A.23 A backup whose share sheet was closed is not counted as made', async ({page}) => {
+        await fakeAndroid(page, {scan: [PAGE1], shareCancel: true});
+        await scanOnePage(page);
+        await page.goto('/#/settings');
+        await page.getByRole('button', {name: /Export Backup/}).click();
+        await page.getByPlaceholder('Password123').fill('test-1234');
+        await page.getByRole('button', {name: 'Export', exact: true}).click();
+        await expect.poll(async () => (await nativeCalls(page, 'Share')).length, {timeout: 20000}).toBe(1);
+        await page.waitForTimeout(500);
+        await expect(page.getByText(/canceled|exported successfully/i)).toHaveCount(0);
+        expect(await page.evaluate(() => localStorage.getItem('sahifah.lastBackup'))).toBeNull();
+    });
+
+    test('A.24 Import offers photos only (nothing here can open a PDF)', async ({page}) => {
+        await fakeAndroid(page, {pick: []});
+        await page.goto('/#/scan?new=1');
+        await page.getByRole('button', {name: 'Import a photo'}).click();
+        await expect.poll(async () => (await nativeCalls(page, 'FilePicker')).length).toBe(1);
+        const types = (await nativeCalls(page, 'FilePicker'))[0].options.types as string[];
+        expect(types.some((t) => t.includes('pdf'))).toBe(false);
+    });
 });

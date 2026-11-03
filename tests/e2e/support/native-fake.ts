@@ -29,6 +29,8 @@ export type FakeAndroidOptions = {
     scanner?: 'missing';
     /** Photos the phone's camera app "takes", one per call: local file paths. Empty = closed without a photo. */
     camera?: string[];
+    /** The user closes the Android share sheet without picking an app. */
+    shareCancel?: boolean;
     /** Open Waqf Signer installed (Sign with Signer). Default false. */
     signer?: boolean;
     /** Files already on the phone at start: "DATA/docs/a/pages/p.jpg" or "CACHE/x.pdf" -> base64. */
@@ -152,6 +154,9 @@ export async function fakeAndroid(page: Page, options: FakeAndroidOptions = {}) 
                 case 'FilePicker.pickFiles':
                     if (!picked.length) throw Object.assign(new Error('pickFiles canceled.'), {code: 'USER_CANCELLED'});
                     return {files: picked.slice(0, o.limit || picked.length)};
+                case 'Share.share':
+                    if (options.shareCancel) throw new Error('Share canceled');
+                    return {};
                 case 'SignerHandoff.isAvailable':
                     return {available: !!options.signer};
                 case 'SignerHandoff.open':

@@ -72,7 +72,7 @@ function computeAdaptiveSharpen(base: number, filter: FilterMode, largestDim: nu
     if (base <= 0) return 0;
     let amount = base;
     if (filter === 'magic') amount -= 0.12;
-    if (filter === 'bw' || filter === 'whiteboard') amount += 0.05;
+    if (filter === 'bw') amount += 0.05;
     if (largestDim > 2200) amount -= 0.07;
     return clamp(amount, 0, 0.6);
 }

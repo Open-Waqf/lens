@@ -89,7 +89,6 @@ export class ScanRepo {
         docId: string,
         master: PageEditorSaveDetail['master'],
         thumb: PageEditorSaveDetail['thumb'],
-        doOcr: boolean = true
     ): Promise<string> {
         const store = getFileStore();
         const pageId = nanoid();
@@ -150,11 +149,9 @@ export class ScanRepo {
             throw e;
         }
 
-        if (doOcr) {
-            const doc = await db.docs.get(docId);
-            ocrQueue.addJob(pageId, doc?.title || 'Document');
-            this.runBackgroundOcr(pageId, master.bytes, master.width, master.height);
-        }
+        const doc = await db.docs.get(docId);
+        ocrQueue.addJob(pageId, doc?.title || 'Document');
+        this.runBackgroundOcr(pageId, master.bytes, master.width, master.height);
 
         return pageId;
     }
@@ -178,7 +175,6 @@ export class ScanRepo {
         pageId: string,
         master: PageEditorSaveDetail['master'],
         thumb: PageEditorSaveDetail['thumb'],
-        doOcr: boolean = true
     ): Promise<void> {
         const store = getFileStore();
 
@@ -252,14 +248,9 @@ export class ScanRepo {
             throw e;
         }
 
-        if (doOcr) {
-            const doc = await db.docs.get(docId);
-            ocrQueue.addJob(pageId, doc?.title || 'Document');
-            this.runBackgroundOcr(pageId, master.bytes, master.width, master.height);
-        } else {
-            // OCR disabled: clear old indexed text immediately and rebuild from current persisted words.
-            await this.rebuildDocIndex(docId);
-        }
+        const doc = await db.docs.get(docId);
+        ocrQueue.addJob(pageId, doc?.title || 'Document');
+        this.runBackgroundOcr(pageId, master.bytes, master.width, master.height);
     }
 
     async deletePage(pageId: string): Promise<void> {
@@ -377,7 +368,7 @@ export class ScanRepo {
      * from files. One at a time, in the background. Nov 2026 deep dive (C4).
      */
     async resumePendingOcr(): Promise<number> {
-        const pending = await db.pages.filter(p => p.ocrStatus === 'pending' && !p.deletedAt && !ocrQueue.isActive(p.id)).toArray();
+        const pending = await db.pages.where('ocrStatus').equals('pending').filter(p => !p.deletedAt && !ocrQueue.isActive(p.id)).toArray();
         let done = 0;
         const store = getFileStore();
         for (const p of pending) {

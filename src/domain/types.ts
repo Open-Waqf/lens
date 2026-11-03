@@ -1,5 +1,5 @@
 export type DocId = string;
-export type FilterMode = 'original' | 'grayscale' | 'bw' | 'magic' | 'whiteboard';
+export type FilterMode = 'original' | 'bw' | 'magic';
 
 export type OcrWord = {
     text: string;

@@ -92,6 +92,12 @@ export async function sweepTempFiles(): Promise<void> {
     await quiet(() => Filesystem.rmdir({path: 'imports', directory: Directory.Data, recursive: true}));
 }
 
+/** The user closed the share sheet without picking an app: not an error (Nov 2026). */
+export function isShareCancel(e: unknown): boolean {
+    const err = e as {message?: string; name?: string; code?: string} | null;
+    return err?.name === 'AbortError' || /cancel/i.test(err?.message || '') || err?.code === 'USER_CANCELLED';
+}
+
 // 2. Main function for Batch Sharing (Multiple Files)
 export async function shareFiles(files: File[], title: string = t('common.share_now')): Promise<void> {
     if (Capacitor.isNativePlatform()) {
@@ -111,6 +117,7 @@ export async function shareFiles(files: File[], title: string = t('common.share_
             });
 
         } catch (e) {
+            if (isShareCancel(e)) return; // closed without sharing (finally still cleans up)
             console.error('Native sharing failed', e);
             if (files.length === 1) downloadFileFallback(files[0], files[0].name);
             else showToast(t('doc.share_failed_zip'), 'error');
@@ -146,12 +153,13 @@ export async function shareFiles(files: File[], title: string = t('common.share_
  * go straight into the temporary share folder and the file is shared by its path, so the
  * backup is never held in memory. On the web the chunks become a File for the browser.
  */
-export async function shareStream(chunks: AsyncIterable<Uint8Array>, filename: string, mime = 'application/octet-stream'): Promise<void> {
+/** Returns false when the user closed the share sheet without sharing. */
+export async function shareStream(chunks: AsyncIterable<Uint8Array>, filename: string, mime = 'application/octet-stream'): Promise<boolean> {
     if (!Capacitor.isNativePlatform()) {
         const parts: Uint8Array[] = [];
         for await (const c of chunks) parts.push(c);
         await shareFiles([new File(parts as BlobPart[], filename, {type: mime})], filename);
-        return;
+        return true;
     }
     const folder = `${SHARE_DIR}/${Date.now()}`;
     const path = `${folder}/${safeFileName(filename)}`;
@@ -168,7 +176,13 @@ export async function shareStream(chunks: AsyncIterable<Uint8Array>, filename: s
         }
         if (first) await Filesystem.writeFile({path, data: '', directory: Directory.Cache, recursive: true});
         const {uri} = await Filesystem.getUri({path, directory: Directory.Cache});
-        await Share.share({title: filename, files: [uri], dialogTitle: filename});
+        try {
+            await Share.share({title: filename, files: [uri], dialogTitle: filename});
+        } catch (e) {
+            if (isShareCancel(e)) return false;
+            throw e;
+        }
+        return true;
     } finally {
         try {
             await Filesystem.rmdir({path: folder, directory: Directory.Cache, recursive: true});

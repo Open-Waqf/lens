@@ -139,7 +139,6 @@ export class AppRoot extends LitElement {
         const runWarmup = async () => {
             if (location.hash.includes('scan')) return;
             const prefs = await settings.get();
-            if (!prefs.enableOcr) return;
             try {
                 const {warmupOcr} = await import('../lib/ocr');
                 await warmupOcr(prefs.ocrLang || 'ara+eng');
@@ -302,12 +301,13 @@ export class AppRoot extends LitElement {
         this.fatal = {message: e.message || t('errors.generic'), detail: e.error?.stack};
     };
 
+    // A promise that failed in the background (a plugin call, a cancelled share) is not a
+    // crash: the screen keeps working. Before Nov 2026 it opened the full-screen error page,
+    // which offers to erase everything. Render errors and script errors still do.
     private _onUnhandled = (ev: PromiseRejectionEvent) => {
-        const reason = ev.reason;
-        this.fatal = {
-            message: (reason as Error)?.message ?? String(reason),
-            detail: (reason as Error)?.stack
-        };
+        console.error('Unhandled rejection', ev.reason);
+        ev.preventDefault();
+        showToast(t('errors.background'), 'error');
     };
 
     private _onVisibilityChange = () => {

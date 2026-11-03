@@ -25,7 +25,7 @@ principle of **Amanah** (trust): your documents never leave your hands. Read the
   the scanner made them, with no extra processing, and shows them with one button: Share as
   PDF. Scan another page, or Done. On a phone without Google Play services, "+" opens the
   phone's camera app instead and the photo goes to the editor.
-* **Import:** photos and PDFs from the phone or the computer. The editor finds the page edges;
+* **Import:** photos from the phone or the computer (PDF files cannot be imported yet). The editor finds the page edges;
   you can move the corners with a finger, rotate, and choose Original, Clean or Black & white.
 * **Camera (web):** in the browser, a live camera view with edge detection.
 

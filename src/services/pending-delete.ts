@@ -77,8 +77,8 @@ async function removePage(pageId: string) {
 
 /** At start: finish deletes whose Undo time ended while the app was closed. */
 export async function purgeDeleted(): Promise<void> {
-    const docs = (await db.docs.toArray()).filter(d => d.deletedAt);
-    const pages = (await db.pages.toArray()).filter(p => p.deletedAt);
+    const docs = await db.docs.where('deletedAt').above(0).toArray();
+    const pages = await db.pages.where('deletedAt').above(0).toArray();
     for (const d of docs) await repo().deleteDocCompletely(d.id);
     for (const p of pages) if (await db.pages.get(p.id)) await removePage(p.id);
     if (docs.length || pages.length) changed();

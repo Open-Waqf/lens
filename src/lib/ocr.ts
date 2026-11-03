@@ -169,9 +169,10 @@ export async function recognizeText(
 
         return words;
     } catch (e) {
+        // Not "no text": the page is marked as failed, so it can say so and be read again.
         console.error('OCR Failed', e);
         terminateOcr();
-        return [];
+        throw e;
     } finally {
         if (url) URL.revokeObjectURL(url);
     }

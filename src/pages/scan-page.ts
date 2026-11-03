@@ -40,7 +40,7 @@ import {bytesToBlob as toBlob} from '../lib/bytes';
 import {detectImageMime} from '../lib/image/mime';
 import {resolveScanQualityPlan} from '../lib/image/quality';
 import {pickedFileToBlob} from '../services/picked-file';
-import {safeFileName} from '../lib/file-name';
+import {pageFileBase, safeFileName} from '../lib/file-name';
 import {deleteWithUndo, LIBRARY_CHANGED} from '../services/pending-delete';
 import {takePhotoWithCameraApp} from '../services/camera-capture';
 
@@ -409,13 +409,13 @@ export class ScanPage extends LitElement {
         const reviewedPageId = this.editingPageId;
 
         try {
-            const {master, thumb, extractText} = ev.detail;
+            const {master, thumb} = ev.detail;
             const docId = await this.ensureDocId();
 
             const targetId = this.editingPageId || this.replacePageId;
 
             if (targetId) {
-                await this.repo.updateExistingPage(targetId, master, thumb, extractText);
+                await this.repo.updateExistingPage(targetId, master, thumb);
                 if (this.editingPageId) this.newPageIds.delete(this.editingPageId);
                 this.selectedPageId = targetId;
 
@@ -426,7 +426,7 @@ export class ScanPage extends LitElement {
                     return;
                 }
             } else {
-                const pageId = await this.repo.addNewPage(docId, master, thumb, extractText);
+                const pageId = await this.repo.addNewPage(docId, master, thumb);
                 this.newPageIds.add(pageId);
                 this.selectedPageId = pageId;
             }
@@ -472,7 +472,9 @@ export class ScanPage extends LitElement {
             const own = this.editingPageId ? await this.repo.pageTitle(this.editingPageId) : null;
             const pageNo = this.editingPageId && this.session.pageCount > 1
                     ? this.strip.findIndex(it => it.id === this.editingPageId) + 1 : 0;
-            const safeTitle = safeFileName(own || `${this.docTitle || t('scan.title')}${pageNo > 0 ? ` p${pageNo}` : ''}`);
+            const safeTitle = pageNo > 0 || own
+                    ? pageFileBase(this.docTitle || t('scan.title'), pageNo, own)
+                    : safeFileName(this.docTitle || t('scan.title')); // the only page: the document's name
             const filename = format === 'pdf' ? `${safeTitle}.pdf` : `${safeTitle}.jpg`;
             const file = format === 'pdf'
                 ? new File([bytesToBlob(await this.buildSinglePagePdf(master.bytes), 'application/pdf')], filename, {type: 'application/pdf'})
@@ -497,7 +499,8 @@ export class ScanPage extends LitElement {
             if (!doc) return;
             const pages = await db.pages.where('docId').equals(docId).toArray();
             const byId = new Map(pages.map(p => [p.id, p]));
-            const ordered = doc.pageIds.map(id => byId.get(id)).filter((p): p is NonNullable<typeof p> => !!p);
+            // A page deleted a moment ago (its Undo still open) is not in the PDF.
+            const ordered = doc.pageIds.map(id => byId.get(id)).filter((p): p is NonNullable<typeof p> => !!p && !p.deletedAt);
             const bytes = await buildPdfForDoc(getFileStore(), ordered, {quality: 'original'});
             const name = `${safeFileName(doc.title)}.pdf`;
             AuthService.ignoreNextResumeForExternalAction('share-scan-pdf', AuthService.SHARE_BYPASS_TTL_MS);
@@ -704,7 +707,7 @@ export class ScanPage extends LitElement {
                 AuthService.ignoreNextResumeForExternalAction('scan-file-picker-native', 120_000);
                 const result = await FilePicker.pickFiles({
                     limit: opts.multiple ? 0 : 1,
-                    types: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
+                    types: ['image/jpeg', 'image/png', 'image/webp'], // no PDF: nothing here can open one (Nov 2026)
                     readData: true
                 });
 
@@ -1003,7 +1006,7 @@ export class ScanPage extends LitElement {
         return html`
             <input type="file"
                    id="import-input"
-                   accept="image/jpeg,image/png,image/webp,application/pdf"
+                   accept="image/jpeg,image/png,image/webp"
                    multiple
                    style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;">
         `;

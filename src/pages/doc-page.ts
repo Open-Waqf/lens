@@ -25,7 +25,7 @@ import {PDFDocument} from 'pdf-lib';
 import {Icons} from '../components/icons';
 import {getTextDirection} from '../lib/text-direction';
 import {pageText} from '../lib/ocr-text';
-import {safeFileName as safeName} from '../lib/file-name';
+import {pageFileBase, safeFileName as safeName} from '../lib/file-name';
 import {deleteWithUndo, LIBRARY_CHANGED} from '../services/pending-delete';
 import {ConfirmModal} from '../components/confirm-modal';
 import {ocrQueue} from '../services/ocr-queue';
@@ -111,7 +111,7 @@ export class DocPage extends LitElement {
             const bytes = await store.get(page.imagePath);
             const blob = bytesToBlob(bytes, 'image/jpeg');
             const pageNum = this.pages.indexOf(page) + 1;
-            const name = `${safeName(this.doc.title)} - Page ${pageNum}.jpg`;
+            const name = `${pageFileBase(this.doc.title, pageNum, await this.repo.pageTitle(page.id))}.jpg`;
             const file = new File([blob], name, {type: 'image/jpeg'});
             AuthService.ignoreNextResumeForExternalAction('share-single', AuthService.SHARE_BYPASS_TTL_MS);
             await shareFile(file, name); // Uses the native-safe service
@@ -135,7 +135,7 @@ export class DocPage extends LitElement {
                 const p = this.pages[i];
                 const bytes = await store.get(p.imagePath);
                 const blob = bytesToBlob(bytes, 'image/jpeg');
-                const name = `${safeName(this.doc.title)} - Page ${i + 1}.jpg`;
+                const name = `${pageFileBase(this.doc.title, i + 1, null)}.jpg`; // a set: name and number
                 files.push(new File([blob], name, {type: 'image/jpeg'}));
             }
 
@@ -272,14 +272,9 @@ export class DocPage extends LitElement {
         const map = new Map(pages.map(p => [p.id, p]));
         this.pages = doc.pageIds.map(id => map.get(id)).filter(Boolean) as PageRecord[];
 
-        const allDocs = await db.docs.toArray();
-        const folders = new Set<string>();
-
-        for (const d of allDocs) {
-            if (d.folder) folders.add(d.folder);
-        }
-
-        this.folderSuggestions = Array.from(folders).sort();
+        // Folder names straight from the folder index (not every document with its text).
+        const folders = (await db.docs.orderBy('folder').uniqueKeys()).filter((f): f is string => typeof f === 'string' && !!f);
+        this.folderSuggestions = folders.sort();
 
         const store = getFileStore();
         for (const u of Object.values(this.thumbs)) URL.revokeObjectURL(u);
@@ -346,6 +341,13 @@ export class DocPage extends LitElement {
         showToast(t('doc.ocr_text_reset'), 'info');
     }
 
+    /** Read the pages again whose text could not be read. */
+    private async retryOcr(): Promise<void> {
+        for (const p of this.pages) if (p.ocrStatus === 'error') await db.pages.update(p.id, {ocrStatus: 'pending'});
+        await this.load();
+        void this.repo.resumePendingOcr().then(() => this.load());
+    }
+
     private async editPage(page: PageRecord): Promise<void> {
         this.busy = true;
         try {
@@ -383,7 +385,7 @@ export class DocPage extends LitElement {
             const {master, format} = ev.detail;
             const pageIndex = this.editingPage ? this.pages.findIndex(p => p.id === this.editingPage!.id) + 1 : 0;
             const own = this.editingPage ? await this.repo.pageTitle(this.editingPage.id) : null;
-            const baseName = safeName(own || `${this.doc?.title || t('scan.title')} p${Math.max(pageIndex, 1)}`);
+            const baseName = pageFileBase(this.doc?.title || t('scan.title'), pageIndex, own);
             const filename = format === 'pdf' ? `${baseName}.pdf` : `${baseName}.jpg`;
             const file = format === 'pdf'
                 ? new File([bytesToBlob(await this.buildSinglePagePdf(master.bytes), 'application/pdf')], filename, {type: 'application/pdf'})
@@ -756,6 +758,12 @@ export class DocPage extends LitElement {
                         <div class="w-4 h-4 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
                         ${t('doc.ocr_reading')}
                     </div>` : null}
+                ${this.pages.some(p => p.ocrStatus === 'error') ? html`
+                    <div class="flex items-center justify-between gap-3 text-sm text-amber-200" data-testid="ocr-failed">
+                        <span>${t('doc.ocr_failed')}</span>
+                        <button class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs min-h-[44px] shrink-0"
+                                @click=${() => this.retryOcr()}>${t('scan.try_again')}</button>
+                    </div>` : null}
                 <div class="flex flex-wrap gap-2">
                     <button class="flex-1 px-4 py-3 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-bold min-h-[48px]" @click=${() => this.copyExtractedText()}>
                         ${t('doc.copy_text')}
@@ -797,7 +805,7 @@ export class DocPage extends LitElement {
                             </div>
                         `;
                     })}
-                    ${!this.doc?.correctedOcrText?.trim() && !this.pages.some(p => p.words?.length) && !this.pages.some(p => p.ocrStatus === 'pending') ? html`
+                    ${!this.doc?.correctedOcrText?.trim() && !this.pages.some(p => p.words?.length) && !this.pages.some(p => p.ocrStatus === 'pending' || p.ocrStatus === 'error') ? html`
                         <div class="text-sm text-slate-400 italic">${t('doc.no_text')}</div>` : null}
                 </div>
             </div>

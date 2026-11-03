@@ -1,8 +1,8 @@
 // Removed in Nov 2026 (they did nothing or never worked): Vault Mode, the mirror backup
-// folder and the Quick/Manual scan mode. Their old localStorage keys are simply ignored.
+// folder, the Quick/Manual scan mode and the OCR on/off switch (every page was read anyway).
+// Their old localStorage keys are simply ignored.
 export interface AppSettings {
     requireAuth: boolean;
-    enableOcr: boolean;
     ocrLang: string;
     clearClipboardAfter60s: boolean;
 }
@@ -18,7 +18,6 @@ const ENABLED_PHRASE = 'sahifah-auth-is-enabled-strictly';
 const KEYS = {
     // We rename the key so it doesn't look like a boolean
     LOCK_INTEGRITY: 'sahifah.integrity_check',
-    ENABLE_OCR: 'sahifah.enableOcr',
     OCR_LANG: 'sahifah.ocrLang',
     CLIPBOARD_AUTO_CLEAR: 'sahifah.clipboardAutoClear',
 };
@@ -39,9 +38,6 @@ class SettingsService {
             this._enabledHash = await this._generateHash(ENABLED_PHRASE);
         }
 
-        // Default OCR to TRUE if not set
-        const ocrRaw = localStorage.getItem(KEYS.ENABLE_OCR);
-        const ocrEnabled = ocrRaw === null ? true : (ocrRaw === '1');
         const ocrLang = localStorage.getItem(KEYS.OCR_LANG) || 'ara+eng';
 
         const storedHash = localStorage.getItem(KEYS.LOCK_INTEGRITY);
@@ -49,15 +45,9 @@ class SettingsService {
 
         return {
             requireAuth: isLocked,
-            enableOcr: ocrEnabled,
             ocrLang,
             clearClipboardAfter60s: localStorage.getItem(KEYS.CLIPBOARD_AUTO_CLEAR) === '1',
         };
-    }
-
-    setOcr(enable: boolean) {
-        localStorage.setItem(KEYS.ENABLE_OCR, enable ? '1' : '0');
-        this._notify();
     }
 
     setOcrLang(lang: string) {
