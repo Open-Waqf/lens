@@ -783,7 +783,7 @@ export class PageEditor extends LitElement {
                         ${Icons.Back(i18n.getDirection() === 'rtl' ? 'w-6 h-6 rotate-180' : 'w-6 h-6')}
                     </button>
                     <div class="flex-1 min-w-0 text-sm font-semibold truncate">
-                        ${this.cropMode ? t('editor.crop') : (this.reviewLabel || t('editor.page'))}
+                        ${this.cropMode ? t('editor.crop') : this.reviewLabel}
                     </div>
                     ${this.cropMode ? html`
                         <button class="px-3 py-2 rounded-xl bg-slate-800 text-xs font-bold text-slate-200 min-h-[44px]"
@@ -797,11 +797,12 @@ export class PageEditor extends LitElement {
                             ?disabled=${this.busy || this.history.length === 0} @click=${() => this.undo()}>
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
                     </button>
-                    <button class="${tool} ${this.cropMode ? 'bg-emerald-700 text-white' : ''}" type="button"
-                            aria-label=${t('editor.crop')} aria-pressed=${this.cropMode} ?disabled=${this.busy}
-                            @click=${() => this.toggleCropMode()}>
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 3v14a1 1 0 001 1h13M3 7h14a1 1 0 011 1v13"/></svg>
-                    </button>
+                    ${this.cropMode ? null : html`
+                        <button class=${tool} type="button" aria-label=${t('editor.crop')} ?disabled=${this.busy}
+                                @click=${() => this.toggleCropMode()}>
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 3v14a1 1 0 001 1h13M3 7h14a1 1 0 011 1v13"/></svg>
+                        </button>
+                    `}
                 </div>
 
                 <!-- The stage: the document gets the rest of the screen -->

@@ -244,8 +244,10 @@ export class SettingsPage extends LitElement {
 
     private async* fileGenerator(): AsyncGenerator<ZipFileEntry> {
         const store = getFileStore();
-        const docs = await db.docs.toArray();
-        const pages = await db.pages.toArray();
+        // Items deleted with Undo still pending are already gone for the user: not backed up.
+        const docs = (await db.docs.toArray()).filter(d => !d.deletedAt);
+        const docIds = new Set(docs.map(d => d.id));
+        const pages = (await db.pages.toArray()).filter(p => !p.deletedAt && docIds.has(p.docId));
 
         // FIX 1: Math was wrong. docs.length must be part of the progress!
         this.backupTotal = docs.length + (pages.length * 2);
@@ -759,6 +761,7 @@ export class SettingsPage extends LitElement {
                         </div>
                     </button>
                 ` : null}
+                ${this.caps.isCapacitor ? null : html`
                 <button class="w-full flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-800 hover:bg-slate-900 text-start min-h-[48px]"
                         data-testid="run-storage-audit-btn" ?disabled=${this.busy || this.storageAuditBusy} @click=${() => this.runStorageAudit()}>
                     <div>
@@ -772,6 +775,7 @@ export class SettingsPage extends LitElement {
                                                 : t('settings.storage_audit_idle')}
                     </div>
                 </button>
+                `}
             </section>
         `;
     }

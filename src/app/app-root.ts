@@ -17,6 +17,7 @@ import {getPersistenceStatus, type PersistenceStatus} from '../services/storage-
 import {garbageCollectOpfsDocs} from '../services/opfs-gc';
 import {AuthService} from '../services/auth-service';
 import {sweepTempFiles} from '../services/share';
+import {purgeDeleted} from '../services/pending-delete';
 import {syncPrivacyScreen} from '../services/privacy-screen';
 import {resetAllStorage} from '../services/reset-storage';
 import {showToast} from "../components/toast-notification";
@@ -75,6 +76,8 @@ export class AppRoot extends LitElement {
         // Temporary share and backup copies left by an earlier run (the app closed while a
         // share sheet was open). Nothing is in progress yet, so this is safe now.
         void sweepTempFiles();
+        // Deletes whose Undo time ended while the app was closed.
+        void purgeDeleted();
         // Screenshots blocked only when App Lock is on (Android).
         void settings.get().then((s) => syncPrivacyScreen(s.requireAuth));
 

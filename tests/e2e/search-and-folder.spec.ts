@@ -72,11 +72,14 @@ test('Search and Folder Cascade', async ({page}) => {
     await titleInput.fill('Searchable Doc');
     await titleInput.dispatchEvent('change');
     
+    // Folder: More, then pick from a short list or make a new one (no text field in the menu).
     await page.getByTestId('btn-more').click();
-    const folderInput = page.getByPlaceholder('e.g. Finance');
-    await folderInput.fill('Taxes');
-    await folderInput.dispatchEvent('change');
-    await page.keyboard.press('Escape');
+    await page.getByTestId('btn-folder').click();
+    await page.getByRole('button', {name: 'New folder…'}).click();
+    await page.getByPlaceholder('e.g. Finance').fill('Taxes');
+    await page.getByRole('button', {name: 'Move', exact: true}).click();
+    await page.getByTestId('btn-more').click();
+    await expect(page.getByTestId('btn-folder')).toContainText('Taxes');
     await page.locator('[role=dialog]').locator('button', {hasText: 'Cancel'}).click();
     
     // 3. Search finds the document by its new title and by its folder
@@ -111,5 +114,5 @@ test('Search and Folder Cascade', async ({page}) => {
     
     await page.waitForURL('**/#/doc/**');
     await page.getByTestId('btn-more').click();
-    await expect(page.getByPlaceholder('e.g. Finance')).toHaveValue('');
+    await expect(page.getByTestId('btn-folder')).toContainText('Unsorted');
 });

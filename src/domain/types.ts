@@ -20,6 +20,10 @@ export interface DocRecord {
     searchIndex?: string;
     correctedOcrText?: string;
     vaultEnabled?: boolean;
+    /** The title was made by the app (date, or the first words read by OCR), not typed. */
+    autoTitle?: boolean;
+    /** Deleted with Undo still possible: hidden everywhere, removed for good soon after. */
+    deletedAt?: number;
 }
 
 export interface PageRecord {
@@ -34,4 +38,6 @@ export interface PageRecord {
     reviewed?: 0 | 1;
     words?: OcrWord[];
     ocrStatus?: 'pending' | 'done' | 'error';
+    /** Deleted with Undo still possible: hidden everywhere, removed for good soon after. */
+    deletedAt?: number;
 }

@@ -162,19 +162,9 @@ describe('ScanPage Component', () => {
         return el;
     }
 
-    it('renders the Welcome screen for new users (Default)', async () => {
+    it('has no welcome screen: the first visit shows the scan controls at once', async () => {
         element = await mountPage(false);
-        const welcomeTitle = element.querySelector('h1');
-        expect(welcomeTitle?.textContent).toContain('Welcome to Lens');
-    });
-
-    it('dismisses Welcome screen and shows Scan controls', async () => {
-        element = await mountPage(false);
-        const startBtn = element.querySelector('button') as HTMLButtonElement;
-        startBtn.click();
-        await element.updateComplete;
-
-        expect(localStorage.getItem('sahifah.welcomeSeen')).toBe('1');
+        expect(element.textContent).not.toContain('Welcome');
         expect(element.textContent).toContain('Open Camera');
     });
 
@@ -184,23 +174,18 @@ describe('ScanPage Component', () => {
         const openBtn = await waitForButtonWithText(element, 'Open Camera');
         openBtn.click();
 
-        // Wait for video element to appear
+        // The camera starts a moment after the video element appears.
         await waitForElement(element, 'video');
-
-        expect(mockCameraStart).toHaveBeenCalled();
+        await vi.waitFor(() => expect(mockCameraStart).toHaveBeenCalled());
         expect(element.querySelector('video')).toBeTruthy();
     });
 
-    it('on Android, the scan button always opens the native document scanner', async () => {
+    it('on Android, arriving on the scan screen opens the native scanner at once (no extra tap)', async () => {
         mockState.isNativePlatform = true;
         element = await mountPage(true);
-
-        const startBtn = await waitForButtonWithText(element, 'Start Scanner');
-        startBtn.click();
-
         await new Promise(r => setTimeout(r, 30));
-
         expect(mockState.mockScanDocument).toHaveBeenCalledTimes(1);
+        expect(mockCameraStart).not.toHaveBeenCalled();
     });
 
     it('on Android, an old "manual" scan mode setting no longer opens the in-app camera', async () => {
@@ -209,9 +194,6 @@ describe('ScanPage Component', () => {
         mockState.isNativePlatform = true;
         localStorage.setItem('sahifah.scanMode', 'manual');
         element = await mountPage(true);
-
-        const startBtn = await waitForButtonWithText(element, 'Start Scanner');
-        startBtn.click();
         await new Promise(r => setTimeout(r, 30));
 
         expect(mockState.mockScanDocument).toHaveBeenCalledTimes(1);

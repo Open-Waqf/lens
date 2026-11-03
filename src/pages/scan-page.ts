@@ -41,12 +41,12 @@ import {detectImageMime} from '../lib/image/mime';
 import {resolveScanQualityPlan} from '../lib/image/quality';
 import {pickedFileToBlob} from '../services/picked-file';
 import {safeFileName} from '../lib/file-name';
+import {deleteWithUndo, LIBRARY_CHANGED} from '../services/pending-delete';
 
 const APPEND_DOC_KEY = 'sahifah.appendToDocId';
 const AUTO_KEY = 'sahifah.autoCapture';
 const JUST_SAVED_DOC_KEY = 'sahifah.justSavedDocId';
 const REPLACE_PAGE_KEY = 'sahifah.replacePageId';
-const WELCOME_KEY = 'sahifah.welcomeSeen';
 const AUTO_CAPTURE_SETTLE_MS = 150;
 
 type StripItem = { id: string; url: string; isNew: boolean };
@@ -66,7 +66,6 @@ export class ScanPage extends LitElement {
 
     @state() private busy = false;
     @state() private error: string | null = null;
-    @state() private showWelcome = false;
     @state() private flashActive = false; // For visual feedback
 
     @state() private showPermissionError = false; // Controls inline recovery panel in idle state.
@@ -120,13 +119,9 @@ export class ScanPage extends LitElement {
         super.connectedCallback();
         window.addEventListener('hashchange', this.onHashChange);
 
-        if (!localStorage.getItem(WELCOME_KEY)) {
-            this.showWelcome = true;
-        } else {
-            await this.loadMode();
-        }
-
         const pending = takePendingImport();
+        await this.loadMode(!!pending?.length);
+
         if (pending?.length) {
             this.clearAppendKey();
             this.session.resetAll();
@@ -136,6 +131,7 @@ export class ScanPage extends LitElement {
             else await this.batchImport(pending);
         }
         ocrQueue.addEventListener('change', this.onOcrQueueChange);
+        window.addEventListener(LIBRARY_CHANGED, this.onLibraryChanged);
 
         if (Capacitor.isNativePlatform()) {
             void App.addListener('backButton', () => {
@@ -150,48 +146,25 @@ export class ScanPage extends LitElement {
         }
     }
 
+    /** Remove a page from the document being built, with Undo in a toast. */
     private async removePage(pageId: string, e?: Event) {
         if (e) e.stopPropagation(); // Stop the click from opening the editor
-
-        // Optional: Confirm before deleting to prevent accidents
-        const ok = await ConfirmModal.ask({
-            title: t('scan.delete_scan'),
-            description: t('scan.delete_body'),
-            confirm: t('common.delete'),
-            destructive: true
-        });
-        if (!ok) return;
-
         try {
-            await this.repo.deletePage(pageId);
+            await deleteWithUndo('page', [pageId]);
             this.newPageIds.delete(pageId);
-
-            // 1. Refresh to see what's left
             await this.refreshDocInfo();
-
-            // 2. Handle Empty State (Go back to Start)
             if (this.session.pageCount === 0) {
                 this.clearEditor();
                 this.session.setStage('idle');
-                return;
             }
-
-            // 3. Handle Multi-Page State
-            // If we deleted the page we were looking at, switch to the new first page.
-            if (this.editingPageId === pageId) {
-                const newFirstPage = this.strip[0];
-                if (newFirstPage) {
-                    await this.openExistingPageInEditor(newFirstPage.id);
-                } else {
-                    this.session.setStage('camera'); // Fallback
-                }
-            }
-            // If we deleted a background page, stay where we are (strip is already updated)
-
-        } catch (e) {
-            console.error("Failed to delete page", e);
+        } catch (err) {
+            console.error('Failed to delete page', err);
         }
     }
+
+    private onLibraryChanged = () => {
+        if (this.session.stage === 'idle') void this.refreshDocInfo();
+    };
 
     private onOcrQueueChange = () => {
         this.requestUpdate();
@@ -207,6 +180,7 @@ export class ScanPage extends LitElement {
         this.revokeStrip();
         this.clearImportReview();
         ocrQueue.removeEventListener('change', this.onOcrQueueChange);
+        window.removeEventListener(LIBRARY_CHANGED, this.onLibraryChanged);
         void this.appBackListener?.remove();
         this.appBackListener = null;
         this.dispatchStageChange('idle');
@@ -233,15 +207,10 @@ export class ScanPage extends LitElement {
         if (h.startsWith('#/scan')) void this.loadMode();
     };
 
-    private async finishWelcome() {
-        localStorage.setItem(WELCOME_KEY, '1');
-        this.showWelcome = false;
-        await this.loadMode();
-        // User clicked "Start", so this is explicit
-        this.beginCameraFromGesture(true);
-    }
+    // The scanner was opened by arriving here, not by a tap on this screen.
+    private autoLaunched = false;
 
-    private async loadMode(): Promise<void> {
+    private async loadMode(takenPending = false): Promise<void> {
         await this.stopCamera();
         this.stopDetector();
         this.revokeStrip();
@@ -284,6 +253,11 @@ export class ScanPage extends LitElement {
 
         if (params.get('import') === '1') {
             setTimeout(() => void this.pickFiles({multiple: !this.replacePageId}), 0);
+        } else if (this.caps.isCapacitor && !takenPending) {
+            // Android: "+" (and "Add pages", "Retake") open Google's scanner at once. The scan
+            // screen before it only held one button: a tap for nothing (Nov 2026).
+            this.autoLaunched = true;
+            setTimeout(() => void this.invokeNativeScanner(), 0);
         }
     }
 
@@ -617,6 +591,7 @@ export class ScanPage extends LitElement {
         this.busy = true;
         this.error = null;
         AuthService.ignoreNextResumeForExternalAction('native-doc-scanner', 120_000);
+        const wasAuto = this.autoLaunched;
         try {
             const limit = this.replacePageId ? 1 : 24;
             const {scannedImages} = await DocumentScanner.scanDocument({pageLimit: limit});
@@ -628,17 +603,22 @@ export class ScanPage extends LitElement {
                     const blob = await res.blob();
                     files.push(new File([blob], 'scan.jpg', {type: 'image/jpeg'}));
                 }
-                if (files.length === 1) await this.openNewBlobInEditor(files[0], null, 'scanner');
-                else await this.batchImport(files, 'scanner');
+                // Google's scanner already let the user crop, rotate, filter and review the
+                // pages: save them as they are and show the result (Share, Scan another,
+                // Done). Tapping a page still opens the editor. Nov 2026.
+                await this.batchImport(files, 'scanner');
             }
         } catch (e: any) {
             if (e?.message?.toLowerCase().includes('cancel') || e?.code === 'USER_CANCELLED') {
+                // Cancelled straight after "+": go back where the user came from.
+                if (this.autoLaunched && !this.session.hasPages) void this.exitScan();
                 return;
             }
             this.error = t('scan.quick_scan_failed', {error: toUserErrorMessage(e)});
             this.session.setStage('idle');
         } finally {
             this.busy = false;
+            if (wasAuto) this.autoLaunched = false;
         }
     }
 
@@ -843,6 +823,12 @@ export class ScanPage extends LitElement {
             }
 
             await this.refreshDocInfo();
+            if (source === 'scanner' && importedPageIds.length > 0) {
+                this.session.markCommitted();
+                this.selectedPageId = importedPageIds[importedPageIds.length - 1];
+                this.session.setStage('idle');
+                return;
+            }
             if (importedPageIds.length > 0) {
                 this.importReviewQueue = importedPageIds.slice();
                 this.importReviewTotal = importedPageIds.length;
@@ -1048,43 +1034,6 @@ export class ScanPage extends LitElement {
         `;
     }
 
-    private renderWelcome() {
-        return html`
-            <div class="min-h-full flex flex-col items-center justify-center py-10 text-center space-y-8 animate-in fade-in duration-500">
-                <div class="space-y-4">
-                    <div class="w-20 h-20 bg-slate-800 rounded-2xl flex items-center justify-center mx-auto mb-6">
-                        <svg class="w-10 h-10 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                  d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path>
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                  d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                        </svg>
-                    </div>
-                    <h1 class="text-3xl font-bold text-slate-100">${t('scan.welcome_title')}</h1>
-                    <p class="text-slate-400 max-w-xs mx-auto text-lg">
-                        ${t('scan.welcome_body')}
-                    </p>
-                </div>
-
-                <div class="space-y-4 max-w-xs w-full">
-                    <div class="flex items-start gap-3 text-start text-sm text-slate-300 bg-slate-900/50 p-4 rounded-xl">
-                        <svg class="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" fill="none" stroke="currentColor"
-                             viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                  d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
-                        </svg>
-                        <span .innerHTML=${t('scan.welcome_security')}></span>
-                    </div>
-
-                    <button class="w-full py-4 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-lg shadow-lg shadow-emerald-900/20"
-                            @click=${() => this.finishWelcome()}>
-                        ${t('scan.start_scanning')}
-                    </button>
-                </div>
-            </div>
-        `;
-    }
-
     render() {
         return html`
             ${this.renderHiddenInput()}
@@ -1093,7 +1042,6 @@ export class ScanPage extends LitElement {
     }
 
     renderContent() {
-        if (this.showWelcome) return this.renderWelcome();
 
         const stage = this.session.stage;
         const primary = 'w-full py-4 rounded-2xl bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-800 text-white font-bold text-lg shadow-lg shadow-emerald-900/20 transition-all active:scale-[0.98] min-h-[56px] disabled:opacity-50';

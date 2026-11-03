@@ -5,6 +5,8 @@ export interface ToastOptions {
     message: string;
     type?: 'success' | 'error' | 'info';
     duration?: number;
+    /** An action button in the toast, e.g. "Undo". */
+    action?: {label: string; run: () => void};
 }
 
 @customElement('toast-notification')
@@ -51,6 +53,17 @@ export class ToastNotification extends LitElement {
             align-items: center;
             gap: 10px;
             max-width: 90%;
+        }
+
+        .toast button {
+            background: none;
+            border: none;
+            color: #34d399; /* emerald-400 */
+            font: inherit;
+            font-weight: 700;
+            padding: 8px 4px 8px 12px;
+            min-height: 44px;
+            cursor: pointer;
         }
 
         .toast.success {
@@ -104,6 +117,10 @@ export class ToastNotification extends LitElement {
                     ${t.type === 'success' ? html`<span style="color:#10b981">✓</span>` : ''}
                     ${t.type === 'error' ? html`<span style="color:#ef4444">✕</span>` : ''}
                     ${t.message}
+                    ${t.action ? html`<button type="button" @click=${() => {
+                        t.action!.run();
+                        this.toasts = this.toasts.filter(x => x.id !== t.id);
+                    }}>${t.action.label}</button>` : ''}
                 </div>
             `)}
         `;
@@ -111,6 +128,6 @@ export class ToastNotification extends LitElement {
 }
 
 // Helper to trigger toasts from anywhere in the app
-export function showToast(message: string, type: 'success' | 'error' | 'info' = 'info', duration = 3000) {
-    window.dispatchEvent(new CustomEvent('show-toast', {detail: {message, type, duration}}));
+export function showToast(message: string, type: 'success' | 'error' | 'info' = 'info', duration = 3000, action?: ToastOptions['action']) {
+    window.dispatchEvent(new CustomEvent('show-toast', {detail: {message, type, duration, action}}));
 }

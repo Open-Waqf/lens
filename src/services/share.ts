@@ -50,6 +50,17 @@ async function writeTempFile(file: File, folder: string): Promise<string> {
 }
 
 /**
+ * Write a file into a fresh temporary share folder in the cache (Android) and return its
+ * path there, for handing to another app directly (Sign with Signer). sweepTempFiles()
+ * removes it at the next start.
+ */
+export async function writeShareTemp(file: File): Promise<string> {
+    const folder = `${SHARE_DIR}/${Date.now()}`;
+    await writeTempFile(file, folder);
+    return `${folder}/${safeFileName(file.name)}`;
+}
+
+/**
  * Delete temporary files left by earlier shares, backups and restores.
  *
  * Normally each one is deleted when it is done. But on Android the app can be closed while

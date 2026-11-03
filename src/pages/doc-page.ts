@@ -9,7 +9,6 @@ import {bytesToBlob} from '../lib/bytes';
 import {detectImageMime} from '../lib/image/mime';
 import {ScanRepo} from './scan/scan-repo';
 
-import {ConfirmModal} from '../components/confirm-modal';
 
 import '../components/page-editor';
 import type {PageEditorSaveDetail} from '../components/page-editor';
@@ -27,6 +26,10 @@ import {Icons} from '../components/icons';
 import {getTextDirection} from '../lib/text-direction';
 import {pageText} from '../lib/ocr-text';
 import {safeFileName as safeName} from '../lib/file-name';
+import {deleteWithUndo, LIBRARY_CHANGED} from '../services/pending-delete';
+import {ConfirmModal} from '../components/confirm-modal';
+import {ocrQueue} from '../services/ocr-queue';
+import {openInSigner, signerAvailable} from '../services/signer-handoff';
 
 @customElement('doc-page')
 export class DocPage extends LitElement {
@@ -54,7 +57,6 @@ export class DocPage extends LitElement {
     @state() private viewerErr: string | null = null;
     @state() private viewerUrl: string | null = null;
     @state() private viewerIndex = 0;
-    @state() private showOcrOverlay = false;
 
     // Zoom & Pan State
     @state() private zoomLevel = 1;
@@ -69,6 +71,7 @@ export class DocPage extends LitElement {
     @state() private searchQuery = '';
     @state() private showExtractedText = false;
     @state() private showMore = false;
+    @state() private signerInstalled = false;
     @state() private editingCorrectedText = false;
     @state() private correctedTextDraft = '';
 
@@ -80,10 +83,18 @@ export class DocPage extends LitElement {
 
     async connectedCallback(): Promise<void> {
         super.connectedCallback();
+        window.addEventListener(LIBRARY_CHANGED, this.onChanged);
+        ocrQueue.addEventListener('change', this.onChanged);
+        void signerAvailable().then((yes) => this.signerInstalled = yes);
         await this.load();
     }
 
+    // A page deleted or restored (Undo), or OCR finished: show the current state.
+    private onChanged = () => void this.load();
+
     disconnectedCallback(): void {
+        window.removeEventListener(LIBRARY_CHANGED, this.onChanged);
+        ocrQueue.removeEventListener('change', this.onChanged);
         this.revokeUrls();
         super.disconnectedCallback();
     }
@@ -252,7 +263,12 @@ export class DocPage extends LitElement {
             return;
         }
         this.doc = doc;
-        const pages = await db.pages.where('docId').equals(this.docId).sortBy('createdAt');
+        if (doc.deletedAt) {
+            this.doc = null;
+            this.pages = [];
+            return;
+        }
+        const pages = (await db.pages.where('docId').equals(this.docId).sortBy('createdAt')).filter(p => !p.deletedAt);
         const map = new Map(pages.map(p => [p.id, p]));
         this.pages = doc.pageIds.map(id => map.get(id)).filter(Boolean) as PageRecord[];
 
@@ -393,7 +409,6 @@ export class DocPage extends LitElement {
         this.viewerIndex = index;
         this.viewerOpen = true;
         this.zoomLevel = 1; // Reset zoom on page change
-        if (this.searchQuery) this.showOcrOverlay = true;
         await this.loadViewerImage();
     }
 
@@ -455,8 +470,11 @@ export class DocPage extends LitElement {
         await db.docs.put(this.doc);
     }
 
-    /** Full quality, or a smaller file for email and messaging apps with size limits. */
-    private async exportPdf(quality: PdfQuality = 'original'): Promise<void> {
+    /**
+     * Full quality, or a smaller file for email and messaging apps with size limits.
+     * target 'signer' hands the PDF straight to Open Waqf Signer instead of the share sheet.
+     */
+    private async exportPdf(quality: PdfQuality = 'original', target: 'share' | 'signer' = 'share'): Promise<void> {
         if (!this.doc) return;
 
         this._exportAbort = new AbortController();
@@ -481,7 +499,8 @@ export class DocPage extends LitElement {
             const blob = bytesToBlob(pdfBytes, 'application/pdf');
             const pdfFile = new File([blob], filename, {type: 'application/pdf'});
             AuthService.ignoreNextResumeForExternalAction('share-pdf', AuthService.SHARE_BYPASS_TTL_MS);
-            await shareFile(pdfFile, filename);
+            if (target === 'signer') await openInSigner(pdfFile);
+            else await shareFile(pdfFile, filename);
             // The PDF is not stored in the app: it is rebuilt from the pages on every export.
             // (Older versions kept a copy per export in docs/<id>/exports/; deleting a document
             // still removes it through doc.pdfPath.)
@@ -497,46 +516,46 @@ export class DocPage extends LitElement {
         }
     }
 
-    private async deletePage(pageId: string): Promise<void> {
-        const ok = await ConfirmModal.ask({
-            title: t('doc.delete_page_title'),
-            description: t('doc.delete_page_body'),
-            confirm: t('common.delete'),
-            destructive: true
+    /** Pick a folder from the ones in use, a new one, or none. */
+    private async chooseFolder(): Promise<void> {
+        if (!this.doc) return;
+        const NEW = '\u0000new', NONE = '\u0000none';
+        const choice = await ConfirmModal.choose({
+            title: t('library.move_to_folder'),
+            choices: [
+                ...this.folderSuggestions.filter(f => f !== this.doc!.folder).map(f => ({value: f, label: f})),
+                {value: NEW, label: t('doc.folder_new')},
+                ...(this.doc.folder ? [{value: NONE, label: t('library.unsorted')}] : []),
+            ],
         });
-        if (!ok) return;
-        this.busy = true;
-        try {
-            await this.repo.deletePage(pageId);
-            await this.load();
-            if (this.pages.length === 0 && this.doc) {
-                await this.repo.deleteDocCompletely(this.doc.id);
-                location.hash = '#/library';
-            }
-        } catch (e) {
-            this.error = (e as Error).message;
-        } finally {
-            this.busy = false;
+        if (choice === null) return;
+        let folder: string | null = choice;
+        if (choice === NONE) folder = null;
+        if (choice === NEW) {
+            const name = await ConfirmModal.prompt({title: t('doc.folder_new'), placeholder: t('doc.folder_placeholder'), confirm: t('library.move_confirm')});
+            if (!name?.trim()) return;
+            folder = name.trim();
         }
+        await this.saveMeta({folder});
+        await this.load();
     }
 
+    /** Delete one page with Undo. The last page takes the document with it. */
+    private async deletePage(pageId: string): Promise<void> {
+        if (!this.doc) return;
+        if (this.pages.length <= 1) {
+            await this.deleteDoc();
+            return;
+        }
+        await deleteWithUndo('page', [pageId]);
+    }
+
+    /** Delete the document with Undo, and go back to the library. */
     private async deleteDoc(): Promise<void> {
         if (!this.doc) return;
-        const ok = await ConfirmModal.ask({
-            title: t('doc.delete_doc_title'),
-            description: t('doc.delete_doc_body', {title: this.doc.title, count: this.pages.length}),
-            confirm: t('doc.delete_doc_confirm'),
-            destructive: true
-        });
-        if (!ok) return;
-        this.busy = true;
-        try {
-            await this.repo.deleteDocCompletely(this.doc.id);
-            location.hash = '#/library';
-        } catch (e) {
-            this.error = (e as Error).message;
-            this.busy = false;
-        }
+        const id = this.doc.id;
+        location.hash = '#/library';
+        await deleteWithUndo('doc', [id]);
     }
 
     private get filteredPages() {
@@ -608,7 +627,7 @@ export class DocPage extends LitElement {
                     <input class="flex-1 min-w-0 bg-transparent border border-transparent focus:border-slate-700 focus:bg-slate-900 rounded-lg px-2 py-2 text-lg font-bold text-slate-100 min-h-[44px]"
                            aria-label=${t('doc.title_label')}
                            .value=${live(this.doc.title)}
-                           @change=${(e: Event) => this.saveMeta({title: (e.target as HTMLInputElement).value})}/>
+                           @change=${(e: Event) => this.saveMeta({title: (e.target as HTMLInputElement).value, autoTitle: false})}/>
                 </div>
 
                 ${this.error ? html`
@@ -731,11 +750,16 @@ export class DocPage extends LitElement {
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                         </button>` : null}
                 </div>
+                ${this.pages.some(p => p.ocrStatus === 'pending') ? html`
+                    <div class="flex items-center gap-2 text-sm text-slate-300" data-testid="ocr-reading">
+                        <div class="w-4 h-4 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+                        ${t('doc.ocr_reading')}
+                    </div>` : null}
                 <div class="flex flex-wrap gap-2">
-                    <button class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs min-h-[44px]" @click=${() => this.copyExtractedText()}>
+                    <button class="flex-1 px-4 py-3 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-bold min-h-[48px]" @click=${() => this.copyExtractedText()}>
                         ${t('doc.copy_text')}
                     </button>
-                    <button class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs min-h-[44px]"
+                    <button class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs min-h-[48px]"
                             @click=${() => {
                                 this.correctedTextDraft = this.getExtractedTextContent();
                                 this.editingCorrectedText = !this.editingCorrectedText;
@@ -772,7 +796,7 @@ export class DocPage extends LitElement {
                             </div>
                         `;
                     })}
-                    ${!this.doc?.correctedOcrText?.trim() && !this.pages.some(p => p.words?.length) ? html`
+                    ${!this.doc?.correctedOcrText?.trim() && !this.pages.some(p => p.words?.length) && !this.pages.some(p => p.ocrStatus === 'pending') ? html`
                         <div class="text-sm text-slate-400 italic">${t('doc.no_text')}</div>` : null}
                 </div>
             </div>
@@ -786,18 +810,17 @@ export class DocPage extends LitElement {
             <div class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end" @click=${() => this.showMore = false}>
                 <div class="w-full p-4 pb-[calc(env(safe-area-inset-bottom)+16px)] bg-slate-950 border-t border-slate-800 rounded-t-2xl space-y-2"
                      role="dialog" aria-label=${t('doc.more')} @click=${(e: Event) => e.stopPropagation()}>
+                    ${this.signerInstalled ? html`
+                        <button class=${item} data-testid="btn-sign" ?disabled=${this.busy || this.pages.length === 0}
+                                @click=${() => { this.showMore = false; void this.exportPdf('original', 'signer'); }}>${t('doc.sign_with_signer')}</button>
+                    ` : null}
                     <button class=${item} ?disabled=${this.busy || this.pages.length === 0}
                             @click=${() => { this.showMore = false; void this.exportPdf('email'); }}>${t('doc.export_pdf_small')}</button>
                     <button class=${item} ?disabled=${this.busy || this.pages.length === 0}
                             @click=${() => { this.showMore = false; void this.exportImagesJpeg(); }}>${t('doc.share_images')}</button>
-                    <label class="block space-y-1 pt-1">
-                        <span class="text-xs text-slate-400 uppercase tracking-wider font-semibold">${t('doc.folder_label')}</span>
-                        <input class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 min-h-[44px]"
-                               list="folder-list" placeholder=${t('doc.folder_placeholder')}
-                               .value=${live(this.doc!.folder ?? '')}
-                               @change=${(e: Event) => this.saveMeta({folder: (e.target as HTMLInputElement).value || null})}/>
-                        <datalist id="folder-list">${this.folderSuggestions.map(f => html`<option value=${f}></option>`)}</datalist>
-                    </label>
+                    <button class=${item} data-testid="btn-folder" @click=${() => { this.showMore = false; void this.chooseFolder(); }}>
+                        ${t('doc.folder_label')}: <span class="text-emerald-400">${this.doc!.folder || t('library.unsorted')}</span>
+                    </button>
                     <button class="w-full px-4 py-3 rounded-xl border border-red-900/40 text-red-300 hover:bg-red-950/30 text-sm font-medium min-h-[48px] text-start"
                             @click=${() => { this.showMore = false; void this.deleteDoc(); }}>${t('doc.delete_doc_action')}</button>
                     <button class="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 hover:bg-slate-900 text-slate-300 text-sm min-h-[44px]"
@@ -820,11 +843,7 @@ export class DocPage extends LitElement {
                         ${Icons.Back(i18n.getDirection() === 'rtl' ? 'w-6 h-6 rotate-180' : 'w-6 h-6')}
                     </button>
                     <div class="text-sm font-medium text-slate-200">${t('doc.page_label', {count: this.viewerIndex + 1})} / ${this.pages.length}</div>
-                    <label class="flex items-center gap-2 cursor-pointer select-none px-2 min-h-[44px]">
-                        <input type="checkbox" .checked=${this.showOcrOverlay}
-                               @change=${(e: Event) => this.showOcrOverlay = (e.target as HTMLInputElement).checked}>
-                        <span class="text-xs text-emerald-400 font-medium">${t('doc.show_ocr')}</span>
-                    </label>
+                    <div class="min-w-[44px]"></div>
                 </div>
 
                 ${this.viewerErr ? html`
@@ -835,9 +854,8 @@ export class DocPage extends LitElement {
                     ${this.viewerBusy ? html`<div class="text-slate-400">${t('common.loading')}</div>` : this.viewerUrl ? html`
                         <div class="relative transition-transform duration-200 ease-out max-h-full" style="transform: scale(${this.zoomLevel})" @dblclick=${this.onDoubleTap}>
                             <img src=${this.viewerUrl} class="block max-w-full max-h-[calc(100dvh-9rem)] object-contain">
-                            ${this.showOcrOverlay && currentPage?.words ? currentPage.words.map(w => {
-                                const isMatch = q && w.text.toLowerCase().includes(q);
-                                return html`<div class="absolute ${isMatch ? 'bg-yellow-500/30 border-yellow-400' : 'bg-red-500/10 border-red-500/50'} border"
+                            ${q && currentPage?.words ? currentPage.words.filter(w => w.text.toLowerCase().includes(q)).map(w => {
+                                return html`<div class="absolute bg-yellow-500/30 border-yellow-400 border"
                                                  style="left: ${w.box[0] * 100}%; top: ${w.box[1] * 100}%; width: ${w.box[2] * 100}%; height: ${w.box[3] * 100}%;"></div>`;
                             }) : null}
                         </div>

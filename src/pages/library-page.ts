@@ -16,6 +16,7 @@ import {ImpactStyle} from "@capacitor/haptics";
 import {showToast} from "../components/toast-notification";
 import {i18n, t} from '../lib/i18n';
 import {pruneSeenDocs} from '../services/seen-docs';
+import {deleteWithUndo, LIBRARY_CHANGED} from '../services/pending-delete';
 
 // Trimmed in Nov 2026 to what most people use: one list view, folders, search. Tags, notes
 // and merging documents are no longer shown or edited. Their stored values stay in the
@@ -54,12 +55,18 @@ export class LibraryPage extends LitElement {
     @query('#load-more-sentinel') private sentinel!: HTMLElement;
 
     private _onOcrChange = () => {
+        const before = this.ocrActiveCount;
         this.ocrActiveCount = ocrQueue.activeCount;
+        // OCR finished: titles made from the text (E3) and search snippets change.
+        if (this.ocrActiveCount < before) void this.loadDocs();
     };
+
+    private _onLibraryChanged = () => void this.loadDocs();
 
     async connectedCallback() {
         super.connectedCallback();
         ocrQueue.addEventListener('change', this._onOcrChange);
+        window.addEventListener(LIBRARY_CHANGED, this._onLibraryChanged);
         this.ocrActiveCount = ocrQueue.activeCount;
 
         // Check for new doc highlight
@@ -80,6 +87,7 @@ export class LibraryPage extends LitElement {
         super.disconnectedCallback();
         for (const url of this.thumbnails.values()) URL.revokeObjectURL(url);
         ocrQueue.removeEventListener('change', this._onOcrChange);
+        window.removeEventListener(LIBRARY_CHANGED, this._onLibraryChanged);
         this.loadMoreObserver?.disconnect();
         this.selectionMode = false;
         this.selectedIds = new Set();
@@ -103,7 +111,7 @@ export class LibraryPage extends LitElement {
         this.loading = true; // Start loading
         try {
 
-            this.allDocsSource = await db.docs.orderBy('updatedAt').reverse().toArray();
+            this.allDocsSource = (await db.docs.orderBy('updatedAt').reverse().toArray()).filter(d => !d.deletedAt);
             pruneSeenDocs(this.allDocsSource.map(d => d.id));
             this.applyFilters();
         } finally {
@@ -190,25 +198,11 @@ export class LibraryPage extends LitElement {
     }
 
     private async deleteSelected() {
-        const count = this.selectedIds.size;
-        if (count === 0) return;
-
-        const ok = await ConfirmModal.ask({
-            title: count === 1 ? t('library.delete_count_one') : t('library.delete_count_other', {count}),
-            description: t('library.delete_body'),
-            confirm: t('common.delete'),
-            destructive: true
-        });
-
-        if (!ok) return;
-
-        for (const id of this.selectedIds) {
-            await this.repo.deleteDocCompletely(id);
-        }
-        showToast(t('library.deleted_count', {count}), 'info');
+        const ids = [...this.selectedIds];
+        if (ids.length === 0) return;
         this.selectedIds = new Set();
         this.selectionMode = false;
-        await this.loadDocs();
+        await deleteWithUndo('doc', ids); // hides them now; Undo in the toast
     }
 
     private get groupedDocs() {
@@ -566,7 +560,7 @@ export class LibraryPage extends LitElement {
 
     private renderDocItem(doc: DocRecord) {
         const thumb = this.thumbnails.get(doc.id);
-        const date = new Date(doc.updatedAt).toLocaleDateString(i18n.getLocale());
+        const date = new Date(doc.updatedAt).toLocaleDateString(i18n.getLocale(), {day: 'numeric', month: 'short'});
         const selected = this.selectedIds.has(doc.id);
 
         const isHighlight = this.highlightDocId === doc.id;
@@ -633,9 +627,9 @@ export class LibraryPage extends LitElement {
                 <div class="p-4 flex-1 min-w-0 flex flex-col justify-center gap-1">
                     <h3 class="text-slate-200 font-medium truncate leading-tight text-sm">${doc.title}</h3>
 
-                    <div class="flex items-center gap-2 text-[10px] text-slate-400 uppercase tracking-wider font-semibold">
+                    <div class="flex items-center gap-2 text-xs text-slate-400">
                         <span>${doc.pageIds.length === 1 ? t('library.page_count_one') : t('library.page_count_other', {count: doc.pageIds.length})}</span>
-                        <span>•</span><span>${date}</span>
+                        <span>·</span><span>${date}</span>
                     </div>
 
                     ${doc.folder ? html`

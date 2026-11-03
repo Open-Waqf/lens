@@ -9,6 +9,9 @@ import {bytesToBlob} from "../../lib/bytes";
 import {ocrQueue} from '../../services/ocr-queue';
 import {settings} from '../../services/settings';
 import {detectImageMime} from '../../lib/image/mime';
+import {titleFromText} from '../../lib/auto-title';
+import {pageText} from '../../lib/ocr-text';
+import type {OcrWord} from '../../domain/types';
 
 export type DocStripItem = { id: string; thumbBytes: Uint8Array };
 
@@ -36,6 +39,7 @@ export class ScanRepo {
             createdAt: now,
             updatedAt: now,
             pageIds: [],
+            autoTitle: true, // renamed from the OCR text later, unless the user renames it
         };
 
         await db.docs.add(doc);
@@ -46,9 +50,12 @@ export class ScanRepo {
         const doc = await db.docs.get(docId);
         if (!doc) return null;
 
-        const ids = doc.pageIds.slice(-limit);
+        // Pages deleted with Undo still pending are not shown or counted.
+        const all = await db.pages.bulkGet(doc.pageIds);
+        const visibleIds = doc.pageIds.filter((_, i) => all[i] && !all[i]!.deletedAt);
+        const ids = visibleIds.slice(-limit);
         if (ids.length === 0) {
-            return {id: doc.id, title: doc.title, pageCount: doc.pageIds.length, items: []};
+            return {id: doc.id, title: doc.title, pageCount: visibleIds.length, items: []};
         }
 
         const pages = await db.pages.bulkGet(ids);
@@ -66,7 +73,7 @@ export class ScanRepo {
             }
         }
 
-        return {id: doc.id, title: doc.title, pageCount: doc.pageIds.length, items};
+        return {id: doc.id, title: doc.title, pageCount: visibleIds.length, items};
     }
 
     async getPageImageBytes(pageId: string): Promise<Uint8Array | null> {
@@ -338,6 +345,14 @@ export class ScanRepo {
         await db.docs.update(docId, {searchIndex: fullText});
     }
 
+    /** A document still named by the app takes its name from its first page's text. */
+    private async titleFromFirstPage(docId: string, pageId: string, words: OcrWord[]): Promise<void> {
+        const doc = await db.docs.get(docId);
+        if (!doc?.autoTitle || doc.pageIds[0] !== pageId) return;
+        const title = titleFromText(pageText(words));
+        if (title && title !== doc.title) await db.docs.update(docId, {title});
+    }
+
     private async runBackgroundOcr(pageId: string, bytes: Uint8Array, w: number, h: number) {
         try {
             const blob = bytesToBlob(bytes, 'image/jpeg');
@@ -370,6 +385,7 @@ export class ScanRepo {
             const p = await db.pages.get(pageId);
             if (p) {
                 await this.rebuildDocIndex(p.docId);
+                await this.titleFromFirstPage(p.docId, pageId, words);
             }
 
             ocrQueue.completeJob(pageId, true);

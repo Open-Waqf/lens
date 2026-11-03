@@ -25,6 +25,8 @@ export type FakeAndroidOptions = {
     biometric?: {available?: boolean; succeed?: boolean};
     /** Make Filesystem.writeFile fail (for example storage full). */
     failWrite?: boolean;
+    /** Open Waqf Signer installed (Sign with Signer). Default false. */
+    signer?: boolean;
     /** Files already on the phone at start: "DATA/docs/a/pages/p.jpg" or "CACHE/x.pdf" -> base64. */
     existingFiles?: Record<string, string>;
 };
@@ -41,6 +43,7 @@ const METHODS: Record<string, string[]> = {
     FilePicker: ['pickFiles', 'pickImages', 'pickMedia'],
     NativeBiometric: ['isAvailable', 'verifyIdentity'],
     PrivacyScreen: ['setLockEnabled'],
+    SignerHandoff: ['isAvailable', 'open'],
 };
 
 const FILE_ROUTE = '/__fake_android_file__/';
@@ -134,6 +137,12 @@ export async function fakeAndroid(page: Page, options: FakeAndroidOptions = {}) 
                 case 'FilePicker.pickFiles':
                     if (!picked.length) throw Object.assign(new Error('pickFiles canceled.'), {code: 'USER_CANCELLED'});
                     return {files: picked.slice(0, o.limit || picked.length)};
+                case 'SignerHandoff.isAvailable':
+                    return {available: !!options.signer};
+                case 'SignerHandoff.open':
+                    if (!options.signer) throw new Error('signer_unavailable');
+                    if (!files[`CACHE/${o.path}`]) throw new Error('file_missing');
+                    return {};
                 case 'NativeBiometric.isAvailable':
                     return {isAvailable: bio.available, biometryType: bio.available ? 3 : 0};
                 case 'NativeBiometric.verifyIdentity':

@@ -10,30 +10,31 @@ test.beforeEach(async ({page}) => {
     await page.addInitScript(() => localStorage.setItem('sahifah.welcomeSeen', '1'));
 });
 
+/** "+": Google's scanner opens by itself, and its page is saved straight away. */
 async function scanOnePage(page: import('./support/test').Page) {
     await page.goto('/#/scan?new=1');
-    await page.getByRole('button', {name: 'Start Scanner'}).click();
-    await expect(page.locator('page-editor')).toBeVisible();
-    await page.getByRole('button', {name: 'Save Scan'}).click();
-    await expect(page.locator('page-editor')).toBeHidden();
+    await expect(page.getByTestId('btn-share-pdf')).toBeVisible();
 }
 
 test.describe('A. Android app (fake Android bridge) @phone', () => {
-    test('A.1 Quick Scan is the default on Android and opens the scanned page in the editor', async ({page}) => {
-        await fakeAndroid(page, {scan: [PAGE1]});
-        await page.goto('/#/scan?new=1');
+    test('A.1 "+" opens Google\'s scanner at once, and its pages are saved without a second review', async ({page}) => {
+        // Nov 2026: no Scan screen with one button before the scanner (E1), and no editor
+        // after it (E2): the scanner already let the user crop and review.
+        await fakeAndroid(page, {scan: [PAGE1, PAGE1]});
+        await page.goto('/#/library');
+        await page.locator('#MainScanBtn').click();
+        await expect(page.getByTestId('btn-share-pdf')).toBeVisible();
         expect(await page.evaluate(() => (window as any).Capacitor.getPlatform())).toBe('android');
-        await page.getByRole('button', {name: 'Start Scanner'}).click();
-        await expect(page.locator('page-editor')).toBeVisible();
-        const scan = (await nativeCalls(page, 'DocumentScanner'))[0];
-        expect(scan.method).toBe('scanDocument');
+        expect((await nativeCalls(page, 'DocumentScanner')).map((c) => c.method)).toEqual(['scanDocument']);
+        await expect(page.locator('page-editor')).toHaveCount(0);
+        await expect(page.locator('[data-testid=scan-strip] img')).toHaveCount(2);
     });
 
-    test('A.2 Cancelling the scanner goes back quietly, with no error', async ({page}) => {
+    test('A.2 Cancelling the scanner right after "+" goes back to the library, with no error', async ({page}) => {
         await fakeAndroid(page, {scan: []});
-        await page.goto('/#/scan?new=1');
-        await page.getByRole('button', {name: 'Start Scanner'}).click();
-        await expect(page.getByRole('button', {name: 'Start Scanner'})).toBeVisible();
+        await page.goto('/#/library');
+        await page.locator('#MainScanBtn').click();
+        await expect(page).toHaveURL(/#\/library$/);
         await expect(page.getByText(/failed/i)).toHaveCount(0);
     });
 
@@ -63,10 +64,9 @@ test.describe('A. Android app (fake Android bridge) @phone', () => {
         expect((await nativeFiles(page)).filter((f) => f.endsWith('.pdf'))).toEqual([]);
     });
 
-    test('A.5 Back on the scan screen goes to the library', async ({page}) => {
-        await fakeAndroid(page);
-        await page.goto('/#/scan?new=1');
-        await expect(page.getByRole('button', {name: 'Start Scanner'})).toBeVisible();
+    test('A.5 Back on the scan result screen goes to the library', async ({page}) => {
+        await fakeAndroid(page, {scan: [PAGE1]});
+        await scanOnePage(page);
         expect(await pressBack(page)).toBeGreaterThan(0);
         await expect(page).toHaveURL(/#\/library$/);
     });
@@ -153,5 +153,78 @@ test.describe('A. Android app (fake Android bridge) @phone', () => {
             req.onsuccess = () => { const all = req.result.transaction(['pages']).objectStore('pages').getAll(); all.onsuccess = () => resolve(all.result[0]); };
         }));
         expect([saved.width, saved.height]).toEqual([804, 1038]);
+    });
+
+    test('A.14 Sign with Signer hands the PDF straight to Signer when it is installed', async ({page}) => {
+        await fakeAndroid(page, {scan: [PAGE1], signer: true});
+        await scanOnePage(page);
+        await page.getByTestId('btn-done').click();
+        await page.getByTestId('btn-more').click();
+        await page.getByTestId('btn-sign').click();
+        await expect.poll(async () => (await nativeCalls(page, 'SignerHandoff')).filter((c) => c.method === 'open').length).toBe(1);
+        const open = (await nativeCalls(page, 'SignerHandoff')).find((c) => c.method === 'open')!;
+        expect(open.options.path).toMatch(/^share\/\d+\/.+\.pdf$/);
+        expect(await nativeCalls(page, 'Share')).toHaveLength(0); // no share sheet in between
+    });
+
+    test('A.15 Without Signer installed, there is no Sign with Signer item', async ({page}) => {
+        await fakeAndroid(page, {scan: [PAGE1], signer: false});
+        await scanOnePage(page);
+        await page.getByTestId('btn-done').click();
+        await page.getByTestId('btn-more').click();
+        await expect(page.getByTestId('btn-sign')).toHaveCount(0);
+    });
+
+    test('A.16 Deleting a document hides it at once, Undo brings it back, files stay', async ({page}) => {
+        await fakeAndroid(page, {scan: [PAGE1]});
+        await scanOnePage(page);
+        await page.getByTestId('btn-done').click();
+        await page.getByTestId('btn-more').click();
+        await page.getByRole('button', {name: 'Delete document'}).click();
+        // No question first: gone from the library, with Undo in a toast.
+        await expect(page).toHaveURL(/#\/library$/);
+        await expect(page.getByText('No scans yet')).toBeVisible();
+        await page.getByRole('button', {name: 'Undo'}).click();
+        await expect(page.locator('library-page h3')).toHaveCount(1);
+        await page.waitForTimeout(5500); // past the Undo time: nothing may be removed now
+        expect((await nativeFiles(page)).filter((f) => f.startsWith('DATA/docs/'))).toHaveLength(2);
+    });
+
+    test('A.17 Without Undo, the document and its files are removed when the time runs out', async ({page}) => {
+        await fakeAndroid(page, {scan: [PAGE1]});
+        await scanOnePage(page);
+        await page.getByTestId('btn-done').click();
+        await page.getByTestId('btn-more').click();
+        await page.getByRole('button', {name: 'Delete document'}).click();
+        await expect(page.getByText('No scans yet')).toBeVisible();
+        await expect.poll(async () => (await nativeFiles(page)).filter((f) => f.startsWith('DATA/docs/')), {timeout: 10_000}).toEqual([]);
+        const docs = await page.evaluate(() => new Promise<number>((resolve) => {
+            const r = indexedDB.open('sahifah-lens');
+            r.onsuccess = () => { const c = r.result.transaction(['docs']).objectStore('docs').count(); c.onsuccess = () => resolve(c.result); };
+        }));
+        expect(docs).toBe(0);
+    });
+
+    test('A.18 A delete cut short by closing the app is finished at the next start', async ({page}) => {
+        await fakeAndroid(page, {scan: [PAGE1]});
+        await scanOnePage(page);
+        // Mark the document deleted (as the Undo delete does), then "close" the app at once.
+        await page.evaluate(() => new Promise<void>((resolve) => {
+            const r = indexedDB.open('sahifah-lens');
+            r.onsuccess = () => {
+                const tx = r.result.transaction(['docs'], 'readwrite');
+                const store = tx.objectStore('docs');
+                store.getAll().onsuccess = (e: any) => { for (const d of e.target.result) store.put({...d, deletedAt: Date.now()}); };
+                tx.oncomplete = () => resolve();
+            };
+        }));
+        // Start again on the library (on the scan screen Lens would open the scanner again).
+        // The in-memory fake files are gone after a reload, so check the database.
+        await page.goto('/#/library');
+        await page.reload();
+        await expect.poll(() => page.evaluate(() => new Promise<number>((resolve) => {
+            const r = indexedDB.open('sahifah-lens');
+            r.onsuccess = () => { const c = r.result.transaction(['docs']).objectStore('docs').count(); c.onsuccess = () => resolve(c.result); };
+        }))).toBe(0);
     });
 });
