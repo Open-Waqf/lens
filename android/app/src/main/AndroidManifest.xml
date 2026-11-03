@@ -32,6 +32,12 @@
         </provider>
     </application>
 
+    <!-- Apps Lens may hand a PDF to ("Sign with Signer"). Android 11+ hides other apps otherwise. -->
+    <queries>
+        <package android:name="org.openwaqf.signer" />
+        <package android:name="org.openwaqf.signer.dev" />
+    </queries>
+
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
