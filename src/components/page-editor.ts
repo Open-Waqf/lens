@@ -103,7 +103,12 @@ export class PageEditor extends LitElement {
 
     /** The crop is shown and crossed (not just "not loaded yet"). */
     private get isQuadInvalid(): boolean {
-        return !!this.quad && !isQuadConvex(this.quad);
+        return !!this.quad && !this.quadOk(this.quad);
+    }
+
+    /** At least 500 px² of crop, or 5% of a photo smaller than that. */
+    private quadOk(q: Quad): boolean {
+        return isQuadConvex(q, Math.min(500, this.baseW * this.baseH * 0.05));
     }
 
     private history: Array<{ quad: Quad; filter: FilterMode; rotation: 0 | 90 | 180 | 270 }> = [];
@@ -306,7 +311,7 @@ export class PageEditor extends LitElement {
         const sx = canvas.width / this.baseW;
         const sy = canvas.height / this.baseH;
 
-        const isValid = isQuadConvex(q);
+        const isValid = this.quadOk(q);
         ctx.lineWidth = 3 * dpr;
         ctx.strokeStyle = isValid ? 'rgba(16,185,129,0.95)' : 'rgba(239,68,68,0.95)';
         ctx.fillStyle = isValid ? 'rgba(16,185,129,0.95)' : 'rgba(239,68,68,0.95)';
@@ -638,7 +643,7 @@ export class PageEditor extends LitElement {
         try {
             await this.settle();
             if (!this.sourceBitmap || !this.quad) throw new Error(t('editor.load_failed'));
-            if (!isQuadConvex(this.quad)) throw new Error(t('editor.invalid_selection'));
+            if (!this.quadOk(this.quad)) throw new Error(t('editor.invalid_selection'));
             const mappedQuad = this.mapQuadToSource(this.quad);
             const rawSize = computeOutputSize(mappedQuad);
             const qualityPlan = resolveScanQualityPlan({
@@ -690,7 +695,7 @@ export class PageEditor extends LitElement {
         try {
             await this.settle();
             if (!this.sourceBitmap || !this.quad) throw new Error(t('editor.load_failed'));
-            if (!isQuadConvex(this.quad)) throw new Error(t('editor.invalid_selection'));
+            if (!this.quadOk(this.quad)) throw new Error(t('editor.invalid_selection'));
             const mappedQuad = this.mapQuadToSource(this.quad);
             const rawSize = computeOutputSize(mappedQuad);
             const qualityPlan = resolveScanQualityPlan({

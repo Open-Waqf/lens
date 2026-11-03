@@ -115,6 +115,8 @@ test('core flow works offline and does not attempt external network', async ({pa
     });
 
     await expect(page.locator('page-editor')).toBeVisible({timeout: 15000});
+    // Set the crop once the editor has loaded and looked for edges, or it resets it.
+    await expect(page.getByTestId('editor-loading')).toBeHidden({timeout: 15000});
     await page.evaluate(() => {
         const el = document.querySelector('page-editor') as any;
         if (!el) return;

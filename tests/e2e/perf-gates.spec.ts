@@ -297,6 +297,8 @@ test('PERF-OCR-001 OCR 1-page document <= 30s @perf', async ({page}) => {
     });
 
     await expect(page.locator('page-editor')).toBeVisible({timeout: 15000});
+    // Set the crop once the editor has loaded and looked for edges, or it resets it.
+    await expect(page.getByTestId('editor-loading')).toBeHidden({timeout: 15000});
     await page.evaluate(() => {
         const el = document.querySelector('page-editor') as { quad?: unknown; requestUpdate?: () => void } | null;
         if (!el) return;

@@ -44,7 +44,12 @@ export function lerpQuad(a: Quad, b: Quad, t: number): Quad {
     return [mix(a[0], b[0]), mix(a[1], b[1]), mix(a[2], b[2]), mix(a[3], b[3])];
 }
 
-export function isQuadConvex(q: Quad): boolean {
+/**
+ * A crop that can be cut out: its corners go round one way, and it is not collapsed.
+ * `minArea` is the smallest area allowed; the editor passes one that suits the photo, so a
+ * small photo (under about 23 x 23 px) can still be saved whole (Nov 2026).
+ */
+export function isQuadConvex(q: Quad, minArea = 500): boolean {
     const crossProduct = (a: Point, b: Point, c: Point) => {
         return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
     };
@@ -61,7 +66,7 @@ export function isQuadConvex(q: Quad): boolean {
     if (!(positive || negative)) return false;
 
     // Also ensure it's not too thin or collapsed
-    if (quadArea(q) < 500) return false;
+    if (quadArea(q) < minArea) return false;
 
     return true;
 }

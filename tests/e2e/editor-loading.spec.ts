@@ -51,4 +51,7 @@ test('E.2 a photo with no page edges to find still gets its preview (no endless 
     await (await chooser).setFiles({name: 'blank.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')});
     await expect(page.locator('page-editor')).toBeVisible();
     await expect(page.getByTestId('editor-loading')).toBeHidden({timeout: 15_000});
+    // And a photo that small can be saved whole (its crop is not "too small").
+    await expect(page.getByRole('button', {name: 'Save Scan'})).toBeEnabled();
+    await expect(page.getByTestId('invalid-warning')).toHaveCount(0);
 });
