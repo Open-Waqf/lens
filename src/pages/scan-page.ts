@@ -32,6 +32,10 @@ import {showToast} from '../components/toast-notification';
 import {toUserErrorMessage} from '../lib/user-error';
 import {shareFile} from '../services/share';
 import {PDFDocument} from 'pdf-lib';
+import {buildPdfForDoc} from '../lib/pdf';
+import {db} from '../services/db';
+import {getFileStore} from '../services/filestore';
+import {bytesToBlob as toBlob} from '../lib/bytes';
 
 import {detectImageMime} from '../lib/image/mime';
 import {resolveScanQualityPlan} from '../lib/image/quality';
@@ -68,7 +72,6 @@ export class ScanPage extends LitElement {
     @state() private showPermissionError = false; // Controls inline recovery panel in idle state.
 
     @state() private docTitle: string | null = null;
-    @state() private targetDocTitle: string | null = null;
 
     @state() private strip: StripItem[] = [];
     private newPageIds = new Set<string>();
@@ -101,6 +104,7 @@ export class ScanPage extends LitElement {
     @state() private lastDetect: DetectedQuad | null = null;
     @state() private smoothedQuad: Quad | null = null;
     @state() private editorInitialQuad: Quad | null = null;
+    @state() private editorSource: 'scanner' | 'camera' | 'file' = 'file';
 
     private stableSince = 0;
     private cooldownUntil = 0;
@@ -126,8 +130,6 @@ export class ScanPage extends LitElement {
         if (pending?.length) {
             this.clearAppendKey();
             this.session.resetAll();
-
-            this.targetDocTitle = null;
             this.docTitle = null;
 
             if (pending.length === 1) await this.openNewBlobInEditor(pending[0]);
@@ -269,13 +271,10 @@ export class ScanPage extends LitElement {
         this.session.resetAll();
         this.session.setAppend(appendId);
         this.session.setStage('idle');
-
-        this.targetDocTitle = null;
         this.docTitle = null;
 
         if (appendId) {
             const doc = await this.repo.getDoc(appendId);
-            this.targetDocTitle = doc?.title ?? t('common.document');
             this.docTitle = doc?.title ?? t('common.document');
             this.session.markCommitted();
             await this.refreshDocInfo();
@@ -367,12 +366,13 @@ export class ScanPage extends LitElement {
         this.importReviewIndex = 0;
     }
 
-    private async openNewBlobInEditor(blob: Blob, initialQuad: Quad | null = null): Promise<void> {
+    private async openNewBlobInEditor(blob: Blob, initialQuad: Quad | null = null, source: 'scanner' | 'camera' | 'file' = 'file'): Promise<void> {
         this.showPermissionError = false;
         await this.stopCamera();
         this.captured = blob;
         this.editingPageId = null;
         this.editorInitialQuad = initialQuad;
+        this.editorSource = source;
         this.session.setStage('edit');
         this.editorKey++;
     }
@@ -510,6 +510,29 @@ export class ScanPage extends LitElement {
         }
     };
 
+    /** Share the whole document as one PDF, right after scanning: no detour via the library. */
+    private async sharePdf(): Promise<void> {
+        const docId = this.session.docId;
+        if (!docId || this.busy) return;
+        this.busy = true;
+        this.error = null;
+        try {
+            const doc = await this.repo.getDoc(docId);
+            if (!doc) return;
+            const pages = await db.pages.where('docId').equals(docId).toArray();
+            const byId = new Map(pages.map(p => [p.id, p]));
+            const ordered = doc.pageIds.map(id => byId.get(id)).filter((p): p is NonNullable<typeof p> => !!p);
+            const bytes = await buildPdfForDoc(getFileStore(), ordered, {quality: 'original'});
+            const name = `${safeFileName(doc.title)}.pdf`;
+            AuthService.ignoreNextResumeForExternalAction('share-scan-pdf', AuthService.SHARE_BYPASS_TTL_MS);
+            await shareFile(new File([toBlob(bytes, 'application/pdf')], name, {type: 'application/pdf'}), name);
+        } catch (e) {
+            this.error = toUserErrorMessage(e);
+        } finally {
+            this.busy = false;
+        }
+    }
+
     private async buildSinglePagePdf(imageBytes: Uint8Array): Promise<Uint8Array> {
         const pdf = await PDFDocument.create();
         const image = await pdf.embedJpg(imageBytes);
@@ -605,8 +628,8 @@ export class ScanPage extends LitElement {
                     const blob = await res.blob();
                     files.push(new File([blob], 'scan.jpg', {type: 'image/jpeg'}));
                 }
-                if (files.length === 1) await this.openNewBlobInEditor(files[0]);
-                else await this.batchImport(files);
+                if (files.length === 1) await this.openNewBlobInEditor(files[0], null, 'scanner');
+                else await this.batchImport(files, 'scanner');
             }
         } catch (e: any) {
             if (e?.message?.toLowerCase().includes('cancel') || e?.code === 'USER_CANCELLED') {
@@ -679,7 +702,7 @@ export class ScanPage extends LitElement {
                 canvas.toBlob((b) => (b ? resolve(b) : reject(new Error(t('scan.capture_failed')))), 'image/jpeg', 0.95),
             );
 
-            await this.openNewBlobInEditor(blob, detectedQuadForEditor);
+            await this.openNewBlobInEditor(blob, detectedQuadForEditor, 'camera');
         } catch (e) {
             this.error = toUserErrorMessage(e);
         } finally {
@@ -769,7 +792,7 @@ export class ScanPage extends LitElement {
         this.beginCameraFromGesture(true);
     };
 
-    private async batchImport(files: File[]): Promise<void> {
+    private async batchImport(files: File[], source: 'scanner' | 'file' = 'file'): Promise<void> {
         this.busy = true;
         this.error = null;
         try {
@@ -801,7 +824,7 @@ export class ScanPage extends LitElement {
             const filesToImport = files.slice(0, remaining);
             const importedPageIds: string[] = [];
             for (const file of filesToImport) {
-                const qualityPlan = await this.resolveImportQualityPlan(file);
+                const qualityPlan = await this.resolveImportQualityPlan(file, source === 'scanner' ? 'original' : 'archive');
                 const {master, thumb} = await processPhoto({
                     blob: file,
                     rotation: 0,
@@ -973,12 +996,12 @@ export class ScanPage extends LitElement {
         }
     }
 
-    private async resolveImportQualityPlan(file: Blob): Promise<ReturnType<typeof resolveScanQualityPlan>> {
+    private async resolveImportQualityPlan(file: Blob, preset: 'archive' | 'original' = 'archive'): Promise<ReturnType<typeof resolveScanQualityPlan>> {
         const bmp = await createImageBitmap(file);
         try {
             return resolveScanQualityPlan({
                 action: 'save',
-                preset: 'archive',
+                preset,
                 filter: 'original',
                 rawWidth: bmp.width,
                 rawHeight: bmp.height,
@@ -998,100 +1021,25 @@ export class ScanPage extends LitElement {
         `;
     }
 
-    private renderBanner() {
-        if (this.replacePageId) {
-            return html`
-                <div class="p-3 rounded-xl border border-amber-900 bg-amber-950 flex items-center justify-between gap-3">
-                    <div class="min-w-0">
-                        <div class="text-sm font-bold text-amber-100">${t('scan.retake_mode')}</div>
-                        <div class="text-xs text-amber-200/70">${t('scan.retake_body')}</div>
-                    </div>
-                    <button class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
-                            @click=${() => void this.exitScan()}>
-                        ${t('common.cancel')}
-                    </button>
-                </div>
-            `;
-        }
-
-        if (this.session.isAppend) {
-            const title = this.docTitle ?? this.targetDocTitle ?? t('common.document');
-            return html`
-                <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 flex items-center justify-between gap-3">
-                    <div class="min-w-0">
-                        <div class="text-xs text-slate-400">${t('scan.adding_to')}</div>
-                        <div class="text-sm text-slate-100 truncate">${title}</div>
-                        <div class="text-xs text-slate-400">${t('scan.page_count', {count: this.session.pageCount})}</div>
-                    </div>
-                    <div class="flex gap-2">
-                        <button class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
-                                ?disabled=${this.session.pageCount === 0} @click=${() => this.openDocument()}>
-                            ${t('common.open')}
-                        </button>
-                        <button class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
-                                @click=${() => void this.exitScan()}>
-                            ${this.session.exitLabel}
-                        </button>
-                    </div>
-                </div>
-            `;
-        }
-        if (!this.session.hasPages) return null;
-        const title = this.docTitle ?? t('common.document');
-        return html`
-            <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 flex items-center justify-between gap-3">
-                <div class="min-w-0">
-                    <div class="text-xs text-slate-400">${t('scan.building_doc')}</div>
-                    <div class="text-sm text-slate-100 truncate">${title}</div>
-                    <div class="text-xs text-slate-400">${t('scan.page_count', {count: this.session.pageCount})}</div>
-                </div>
-                <div class="flex gap-2">
-                    <button class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-60"
-                            ?disabled=${this.session.pageCount === 0} @click=${() => this.openDocument()}>
-                        ${t('common.open')}
-                    </button>
-                    <button class="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-sm"
-                            @click=${() => void this.exitScan()}>
-                        ${this.session.exitLabel}
-                    </button>
-                </div>
-            </div>
-        `;
-    }
-
+    /** The pages scanned so far, as a grid of thumbnails. */
     private renderStrip() {
         if (!this.strip.length) return null;
         const selected = this.editingPageId || this.selectedPageId;
-
         return html`
-            <div class="flex gap-4 overflow-x-auto py-3 px-4 no-scrollbar snap-x items-start">
-                        ${this.strip.map((it, idx) => html`
-                            <div class="relative shrink-0 snap-center group pt-2">
-
-                                <button class="relative block rounded-lg border ${selected === it.id ? 'border-emerald-500 ring-2 ring-emerald-500/20' : 'border-slate-800'} overflow-hidden transition-all active:scale-95 bg-black"
-                                        style="width: 84px; height: 108px;"
-                                        title=${t('scan.edit_page')}
-                                        aria-label=${t('scan.edit_page')}
-                                        @click=${() => void this.openExistingPageInEditor(it.id)}>
-
-                            <img src=${it.url} class="w-full h-full object-cover opacity-90 group-hover:opacity-100"
-                                 alt=${t('scan.thumbnail_alt', {index: idx + 1})}/>
-
-                            <div class="absolute bottom-1 right-1 text-[9px] font-bold text-white bg-black/60 px-1.5 py-0.5 rounded backdrop-blur-sm">
-                                ${idx + 1}
-                            </div>
-
-                            ${it.isNew ? html`
-                                <span class="absolute top-1 left-1 text-[8px] px-1.5 py-0.5 rounded bg-emerald-700 text-white font-bold shadow-sm">${t('common.new')}</span>
-                            ` : null}
+            <div class="grid gap-3 ${this.strip.length === 1 ? 'grid-cols-1 max-w-[12rem] mx-auto w-full' : 'grid-cols-2'}" data-testid="scan-strip">
+                ${this.strip.map((it, idx) => html`
+                    <div class="relative">
+                        <button class="relative block w-full aspect-[3/4] rounded-xl border-2 ${selected === it.id ? 'border-emerald-500' : 'border-slate-800'} overflow-hidden bg-black active:scale-95 transition-transform"
+                                title=${t('scan.edit_page')} aria-label=${t('scan.edit_page')}
+                                @click=${() => void this.openExistingPageInEditor(it.id)}>
+                            <img src=${it.url} class="w-full h-full object-cover" alt=${t('scan.thumbnail_alt', {index: idx + 1})}/>
+                            <div class="absolute bottom-1 left-1 text-[11px] font-bold text-white bg-black/60 px-1.5 py-0.5 rounded">${idx + 1}</div>
                         </button>
-
-                        <button class="absolute top-0 right-[-6px] w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center shadow-md z-10 active:scale-90 transition-transform border-2 border-slate-950"
+                        <button class="absolute -top-2 -right-2 w-8 h-8 bg-slate-800 text-slate-100 rounded-full flex items-center justify-center shadow-md border border-slate-600 active:scale-90 transition-transform"
                                 aria-label=${t('scan.remove_page')}
                                 @click=${(e: Event) => this.removePage(it.id, e)}>
-                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3"
-                                      d="M6 18L18 6M6 6l12 12"></path>
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path>
                             </svg>
                         </button>
                     </div>
@@ -1148,16 +1096,39 @@ export class ScanPage extends LitElement {
         if (this.showWelcome) return this.renderWelcome();
 
         const stage = this.session.stage;
+        const primary = 'w-full py-4 rounded-2xl bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-800 text-white font-bold text-lg shadow-lg shadow-emerald-900/20 transition-all active:scale-[0.98] min-h-[56px] disabled:opacity-50';
+        const secondary = 'flex-1 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold min-h-[48px] disabled:opacity-50';
+
+        if (stage === 'edit') {
+            const review = this.importReviewTotal > 0
+                    ? `${t('scan.review_title')} ${t('scan.review_pages', {current: this.importReviewIndex, total: this.importReviewTotal})}`
+                    : '';
+            return html`
+                ${keyed(this.editorKey, html`
+                    <page-editor
+                            .blob=${this.captured!}
+                            .initialQuad=${this.editorInitialQuad}
+                            .source=${this.editorSource}
+                            .reviewLabel=${review}
+                            ?disableAutoDetect=${!!this.editingPageId || !!this.editorInitialQuad}
+                            @page-editor-save=${this.onEditorSave}
+                            @page-editor-share=${this.onEditorShare}
+                            @page-editor-cancel=${this.onEditorCancel}
+                    ></page-editor>
+                `)}
+            `;
+        }
+
+        const title = this.replacePageId ? t('scan.retake') : (this.session.isAppend ? t('scan.add_pages') : t('scan.title'));
         return html`
-            <div class="space-y-4 pt-6">
+            <div class="flex flex-col gap-4 pt-4 min-h-[calc(100dvh-8rem)]">
                 <div class="flex items-center justify-between px-1">
-                    <div class="text-2xl font-bold tracking-tight">
-                        ${this.replacePageId ? t('scan.retake') : (this.session.isAppend ? t('scan.add_pages') : t('scan.title'))}
-                    </div>
+                    <h1 class="text-2xl font-bold tracking-tight">${title}</h1>
                     ${!this.caps.isCapacitor ? html`
-                        <div class="flex items-center gap-3 bg-slate-900/80 px-4 py-1.5 rounded-full border border-slate-800">
-                            <span class="text-[10px] font-bold uppercase tracking-widest text-slate-400">${t('scan.auto_capture')}</span>
-                            <button class="relative h-5 w-10 rounded-full transition-colors ${this.autoCapture ? 'bg-emerald-600' : 'bg-slate-700'}"
+                        <label class="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-slate-400">
+                            ${t('scan.auto_capture')}
+                            <button class="relative h-5 w-10 rounded-full transition-colors ${this.autoCapture ? 'bg-emerald-700' : 'bg-slate-700'}"
+                                    aria-label=${t('scan.auto_capture')} aria-pressed=${this.autoCapture}
                                     @click=${() => {
                                         this.autoCapture = !this.autoCapture;
                                         try {
@@ -1165,168 +1136,145 @@ export class ScanPage extends LitElement {
                                         } catch {
                                         }
                                     }}>
-                                <span class="sr-only">${t('scan.auto_capture')}</span>
                                 <span class="absolute top-0.5 left-0.5 ${this.autoCapture ? 'translate-x-5' : 'translate-x-0'} inline-block h-4 w-4 bg-white rounded-full transition duration-200"></span>
                             </button>
-                        </div>
+                        </label>
                     ` : null}
                 </div>
 
                 ${this.error ? html`
-                    <div class="p-3 rounded-lg bg-red-950/40 border border-red-900 text-red-200">${this.error}
-                    </div>` : null}
+                    <div class="p-3 rounded-lg bg-red-950/40 border border-red-900 text-red-200">${this.error}</div>` : null}
 
-                ${this.renderBanner()} ${this.renderStrip()}
+                ${stage === 'camera' ? this.renderCamera() : null}
 
-                ${stage === 'idle' ? html`
-                    <div class="p-10 border-2 border-dashed border-slate-800 rounded-[2.5rem] flex flex-col items-center justify-center space-y-8 bg-slate-900/10">
-                        <div class="w-20 h-20 bg-emerald-950/30 text-emerald-500 rounded-3xl flex items-center justify-center">
-                            <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                ${stage === 'idle' && this.session.hasPages ? html`
+                    <!-- Pages so far, then what to do with them -->
+                    <div class="text-sm text-slate-400 px-1">
+                        ${this.docTitle ?? t('common.document')} · ${this.session.pageCount === 1 ? t('library.page_count_one') : t('library.page_count_other', {count: this.session.pageCount})}
+                    </div>
+                    ${this.renderStrip()}
+                    <div class="mt-auto space-y-3 pb-2">
+                        ${this.replacePageId ? html`
+                            <button class=${primary} type="button" @click=${() => void this.exitScan()}>${t('common.cancel')}</button>
+                        ` : html`
+                            ${this.session.isAppend ? null : html`
+                                <button class=${primary} type="button" data-testid="btn-share-pdf"
+                                        ?disabled=${this.busy} @click=${() => void this.sharePdf()}>
+                                    ${this.busy ? t('common.processing') : t('scan.share_pdf')}
+                                </button>
+                            `}
+                            <div class="flex gap-3">
+                                <button class=${secondary} type="button" data-testid="btn-scan-another"
+                                        ?disabled=${this.busy || !this.session.canAddPage} @click=${this.onTryCameraClick}>
+                                    ${t('scan.scan_another')}
+                                </button>
+                                <button class=${secondary} type="button" data-testid="btn-done"
+                                        ?disabled=${this.busy} @click=${() => this.openDocument()}>
+                                    ${this.session.isAppend ? t('scan.back_to_document') : t('scan.done')}
+                                </button>
+                            </div>
+                            <button class="w-full py-3 text-slate-400 font-semibold hover:text-white transition-colors min-h-[44px]"
+                                    type="button" ?disabled=${this.busy} @click=${this.onImportClick}>
+                                ${t('scan.import_docs')}
+                            </button>
+                        `}
+                    </div>
+                ` : null}
+
+                ${stage === 'idle' && !this.session.hasPages ? html`
+                    <!-- Nothing scanned yet: one big button, no boxes -->
+                    <div class="flex-1 flex flex-col items-center justify-center text-center gap-6 py-6">
+                        ${this.replacePageId ? html`
+                            <div class="text-sm text-slate-300">${t('scan.retake_body')}</div>
+                        ` : html`
+                            <svg class="w-14 h-14 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
                                       d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path>
                             </svg>
-                        </div>
-                        <div class="w-full space-y-3">
-                            ${this.busy ? html`
-                                <div class="w-full py-5 rounded-[1.5rem] border border-slate-800 bg-slate-900/70 text-slate-200 text-center font-semibold">
-                                    ${t('scan.importing_files')}
+                            <p class="text-slate-300 max-w-xs">${this.caps.isCapacitor ? t('scan.mode_quick_desc') : t('scan.idle_hint_web')}</p>
+                        `}
+                    </div>
+                    <div class="space-y-2 pb-2">
+                        ${this.busy ? html`
+                            <div class="w-full py-4 rounded-2xl border border-slate-800 bg-slate-900/70 text-slate-200 text-center font-semibold">
+                                ${t('scan.importing_files')}
+                            </div>
+                        ` : this.showPermissionError ? html`
+                            <div class="p-3 rounded-xl border border-amber-900/40 bg-amber-950/20 text-amber-200 space-y-2">
+                                <div class="text-sm font-semibold">${t('scan.permission_title')}</div>
+                                <div class="text-xs text-amber-100/90">${t('scan.permission_body')}</div>
+                                <div class="flex gap-2 pt-1">
+                                    <button class="flex-1 py-2 rounded-lg bg-amber-600/90 hover:bg-amber-500 text-slate-950 text-sm font-semibold min-h-[44px]"
+                                            type="button" @click=${this.onTryCameraClick}>${t('scan.try_again')}</button>
+                                    <button class="flex-1 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 text-sm font-semibold min-h-[44px]"
+                                            type="button" ?disabled=${this.busy} @click=${this.onImportClick}>${t('scan.import_files')}</button>
                                 </div>
-                            ` : html`
-                            ${this.showPermissionError ? html`
-                                <div class="p-3 rounded-xl border border-amber-900/40 bg-amber-950/20 text-amber-200 space-y-2">
-                                    <div class="text-sm font-semibold">${t('scan.permission_title')}</div>
-                                    <div class="text-xs text-amber-100/90">${t('scan.permission_body')}</div>
-                                    <div class="flex gap-2 pt-1">
-                                        <button class="flex-1 py-2 rounded-lg bg-amber-600/90 hover:bg-amber-500 text-slate-950 text-sm font-semibold min-h-[44px]"
-                                                type="button"
-                                                @click=${this.onTryCameraClick}>
-                                            ${t('scan.try_again')}
-                                        </button>
-                                        <button class="flex-1 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 text-sm font-semibold min-h-[44px]"
-                                                type="button"
-                                                ?disabled=${this.busy}
-                                                @click=${this.onImportClick}>
-                                            ${t('scan.import_files')}
-                                        </button>
-                                    </div>
-                                </div>
-                            ` : html`
-                                <button class="w-full py-5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 rounded-[1.5rem] font-bold text-xl shadow-lg shadow-emerald-900/20 transition-all active:scale-95"
-                                        type="button"
-                                        @click=${this.onTryCameraClick}>
-                                    ${this.caps.isCapacitor ? t('scan.start_scanner') : t('scan.open_camera')}
-                                </button>
-                                ${this.caps.isCapacitor ? html`
-                                    <div class="text-[11px] text-slate-400 text-center px-1">
-                                        ${t('scan.mode_quick_desc')}
-                                    </div>
-                                ` : null}
-                                <button class="w-full py-4 text-slate-400 font-semibold hover:text-white transition-colors"
-                                        type="button"
-                                        ?disabled=${this.busy}
-                                        @click=${this.onImportClick}>
-                                    ${t('scan.import_docs')}
-                                </button>
-                            `}
-                            `}
-                        </div>
+                            </div>
+                        ` : html`
+                            <button class=${primary} type="button" @click=${this.onTryCameraClick}>
+                                ${this.caps.isCapacitor ? t('scan.start_scanner') : t('scan.open_camera')}
+                            </button>
+                        `}
+                        <button class="w-full py-3 text-slate-400 font-semibold hover:text-white transition-colors min-h-[44px]"
+                                type="button" ?disabled=${this.busy} @click=${this.onImportClick}>
+                            ${t('scan.import_docs')}
+                        </button>
+                        ${this.session.isAppend || this.replacePageId ? html`
+                            <button class="w-full py-3 text-slate-400 font-semibold hover:text-white min-h-[44px]" type="button"
+                                    @click=${() => void this.exitScan()}>${this.session.exitLabel}</button>
+                        ` : null}
                     </div>
                 ` : null}
+            </div>
+        `;
+    }
 
-                ${stage === 'camera' ? html`
-                    <div class="space-y-8">
-                        <div class="aspect-[3/4] rounded-[2.5rem] overflow-hidden bg-black relative border border-slate-800 shadow-2xl">
-                            <video class="w-full h-full object-cover pointer-events-none select-none" autoplay playsinline muted></video>
-
-                            <scan-overlay
-                                    class="pointer-events-none"
-                                    .detected=${this.lastDetect}
-                                    .quad=${this.smoothedQuad}
-                                    .guidance=${this.guidance}
-                                    .videoW=${this.videoW}
-                                    .videoH=${this.videoH}>
-                            </scan-overlay>
-
-                            <div class="absolute inset-0 bg-white transition-opacity duration-150 pointer-events-none ${this.flashActive ? 'opacity-90' : 'opacity-0'}"></div>
-
-                            ${this.camera.torchSupported ? html`
-                                <button class="absolute top-6 right-6 p-4 rounded-full bg-black/40 backdrop-blur-xl border border-white/10"
-                                        aria-label=${t('scan.toggle_torch')}
-                                        @click=${async () => {
-                                            try {
-                                                await this.camera.toggleTorch();
-                                                this.requestUpdate();
-                                            } catch {
-                                            }
-                                        }}>
-                                    <svg class="w-6 h-6 ${this.camera.torchOn ? 'text-yellow-400 fill-current' : 'text-white'}"
-                                         fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                              d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                                    </svg>
-                                </button>
-                            ` : null}
-                        </div>
-
-                        <div class="flex items-center justify-between px-10 pb-10">
-                            <button class="p-5 text-slate-400 active:text-white"
-                                    type="button"
-                                    aria-label=${t('scan.import_files')}
-                                    ?disabled=${this.busy}
-                                    @click=${this.onImportClick}>
-                                <svg class="w-9 h-9" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                          d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
-                                </svg>
-                            </button>
-
-                            <button aria-label=${t('scan.capture')}
-                                    class="w-24 h-24 rounded-full border-4 border-white/20 p-2 active:scale-90 transition-transform bg-slate-900/50"
-                                    @click=${() => void this.capturePhoto()}>
-                                <div class="w-full h-full rounded-full bg-white shadow-xl"></div>
-                            </button>
-
-                            <button class="p-5 text-slate-400 active:text-white"
-                                    aria-label=${t('scan.done')}
-                                    @click=${() => void this.exitScan()}>
-                                ${this.session.hasPages
-                                        ? html`
-                                            <div class="w-10 h-10 bg-emerald-500 rounded-2xl flex items-center justify-center text-slate-950 font-black text-sm shadow-lg shadow-emerald-500/20">
-                                                ${this.session.pageCount}
-                                            </div>`
-                                        : html`
-                                            <svg class="w-9 h-9" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                                      d="M6 18L18 6M6 6l12 12"></path>
-                                            </svg>`}
-                            </button>
-                        </div>
-                    </div>
-                ` : null}
-
-                ${stage === 'edit' ? html`
-                    <div class="space-y-3 pb-24">
-                        ${this.importReviewTotal > 0 ? html`
-                            <div class="p-3 rounded-xl border border-slate-800 bg-slate-950 text-slate-200 flex items-center justify-between gap-3">
-                                <div class="text-sm">${t('scan.review_title')} <span
-                                        class="text-slate-400">${t('scan.review_pages', {
-                                            current: this.importReviewIndex,
-                                            total: this.importReviewTotal
-                                        })}</span></div>
-                                <div class="text-xs text-slate-400">${t('scan.review_save_continue')}</div>
-                            </div>` : null}
-                        ${keyed(this.editorKey, html`
-                            <page-editor
-                                    .blob=${this.captured!}
-                                    .initialQuad=${this.editorInitialQuad}
-                                    ?disableAutoDetect=${!!this.editingPageId || !!this.editorInitialQuad}
-                                    @page-editor-save=${this.onEditorSave}
-                                    @page-editor-share=${this.onEditorShare}
-                                    @page-editor-cancel=${this.onEditorCancel}
-                            ></page-editor>
-                        `)}
-                    </div>
-                ` : null}
+    /** The live camera (web only): the view, the torch, the shutter. */
+    private renderCamera() {
+        return html`
+            <div class="space-y-6">
+                <div class="aspect-[3/4] rounded-2xl overflow-hidden bg-black relative border border-slate-800">
+                    <video class="w-full h-full object-cover pointer-events-none select-none" autoplay playsinline muted></video>
+                    <scan-overlay class="pointer-events-none" .detected=${this.lastDetect} .quad=${this.smoothedQuad}
+                                  .guidance=${this.guidance} .videoW=${this.videoW} .videoH=${this.videoH}></scan-overlay>
+                    <div class="absolute inset-0 bg-white transition-opacity duration-150 pointer-events-none ${this.flashActive ? 'opacity-90' : 'opacity-0'}"></div>
+                    ${this.camera.torchSupported ? html`
+                        <button class="absolute top-4 right-4 p-3 rounded-full bg-black/40 backdrop-blur-xl border border-white/10"
+                                aria-label=${t('scan.toggle_torch')}
+                                @click=${async () => {
+                                    try {
+                                        await this.camera.toggleTorch();
+                                        this.requestUpdate();
+                                    } catch {
+                                    }
+                                }}>
+                            <svg class="w-6 h-6 ${this.camera.torchOn ? 'text-yellow-400 fill-current' : 'text-white'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                            </svg>
+                        </button>
+                    ` : null}
+                </div>
+                <div class="flex items-center justify-between px-6">
+                    <button class="p-4 text-slate-300 active:text-white min-w-[44px] min-h-[44px]" type="button"
+                            aria-label=${t('scan.import_files')} ?disabled=${this.busy} @click=${this.onImportClick}>
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                        </svg>
+                    </button>
+                    <button aria-label=${t('scan.capture')}
+                            class="w-20 h-20 rounded-full border-4 border-white/20 p-2 active:scale-90 transition-transform bg-slate-900/50"
+                            @click=${() => void this.capturePhoto()}>
+                        <div class="w-full h-full rounded-full bg-white shadow-xl"></div>
+                    </button>
+                    <button class="p-4 text-slate-300 active:text-white min-w-[44px] min-h-[44px]" aria-label=${t('scan.done')}
+                            @click=${() => void this.exitScan()}>
+                        ${this.session.hasPages
+                                ? html`<div class="w-10 h-10 bg-emerald-700 rounded-xl flex items-center justify-center text-white font-black text-sm">${this.session.pageCount}</div>`
+                                : html`<svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>`}
+                    </button>
+                </div>
             </div>
         `;
     }

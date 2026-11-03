@@ -50,8 +50,8 @@ test.describe('A. Android app (fake Android bridge) @phone', () => {
     test('A.4 Export PDF hands one PDF to the share sheet and deletes the temporary copy after', async ({page}) => {
         await fakeAndroid(page, {scan: [PAGE1]});
         await scanOnePage(page);
-        await page.getByRole('button', {name: 'Open'}).click();
-        await page.getByRole('button', {name: 'Export PDF'}).click();
+        await page.getByTestId('btn-done').click();
+        await page.getByTestId('btn-share-pdf').click();
         await expect.poll(async () => (await nativeCalls(page, 'Share')).length).toBe(1);
         const share = (await nativeCalls(page, 'Share'))[0];
         expect(share.options.files).toHaveLength(1);
@@ -103,11 +103,11 @@ test.describe('A. Android app (fake Android bridge) @phone', () => {
     test('A.9 An Arabic title stays Arabic in the shared file name', async ({page}) => {
         await fakeAndroid(page, {scan: [PAGE1]});
         await scanOnePage(page);
-        await page.getByRole('button', {name: 'Open'}).click();
+        await page.getByTestId('btn-done').click();
         const title = page.getByRole('textbox').first();
         await title.fill('عقد الإيجار: نوفمبر');
         await title.blur();
-        await page.getByRole('button', {name: 'Export PDF'}).click();
+        await page.getByTestId('btn-share-pdf').click();
         await expect.poll(async () => (await nativeCalls(page, 'Share')).length).toBe(1);
         const file = decodeURIComponent((await nativeCalls(page, 'Share'))[0].options.files[0].split('/').pop());
         expect(file).toBe('عقد الإيجار- نوفمبر.pdf');
@@ -130,9 +130,9 @@ test.describe('A. Android app (fake Android bridge) @phone', () => {
         await fakeAndroid(page);
         await page.goto('/#/settings');
         await expect.poll(async () => (await nativeCalls(page, 'PrivacyScreen')).map((c) => c.options.enabled)).toEqual([false]);
-        await page.getByRole('button', {name: 'App Lock'}).click();
+        await page.getByRole('switch', {name: 'App Lock'}).click();
         await expect.poll(async () => (await nativeCalls(page, 'PrivacyScreen')).map((c) => c.options.enabled)).toEqual([false, true]);
-        await page.getByRole('button', {name: 'App Lock'}).click();
+        await page.getByRole('switch', {name: 'App Lock'}).click();
         await expect.poll(async () => (await nativeCalls(page, 'PrivacyScreen')).map((c) => c.options.enabled)).toEqual([false, true, false]);
     });
 
@@ -141,5 +141,17 @@ test.describe('A. Android app (fake Android bridge) @phone', () => {
         await fakeAndroid(page);
         await page.goto('/#/library');
         await expect.poll(async () => (await nativeCalls(page, 'PrivacyScreen')).map((c) => c.options.enabled)).toEqual([true]);
+    });
+
+    test('A.13 A Quick Scan page is saved as the scanner made it: no upscaling, no sharpening', async ({page}) => {
+        // Google's scanner already crops, straightens and cleans the page. Before Nov 2026
+        // the editor still upscaled it to 1800 px and sharpened it ("archive" preset).
+        await fakeAndroid(page, {scan: [PAGE1]}); // page1.jpg is 804 x 1038
+        await scanOnePage(page);
+        const saved = await page.evaluate(() => new Promise<any>((resolve) => {
+            const req = indexedDB.open('sahifah-lens');
+            req.onsuccess = () => { const all = req.result.transaction(['pages']).objectStore('pages').getAll(); all.onsuccess = () => resolve(all.result[0]); };
+        }));
+        expect([saved.width, saved.height]).toEqual([804, 1038]);
     });
 });

@@ -36,11 +36,26 @@ export class PageEditor extends LitElement {
         return this;
     }
 
+    connectedCallback() {
+        super.connectedCallback();
+        // The editor is a full-screen layer. The host element itself is that layer, so it
+        // has a real size (tests and screen readers see it) and the page behind cannot scroll.
+        this.classList.add('fixed', 'inset-0', 'z-40', 'flex', 'flex-col', 'bg-black', 'text-slate-100');
+        this.style.paddingTop = 'env(safe-area-inset-top)';
+        this.style.paddingBottom = 'env(safe-area-inset-bottom)';
+    }
+
     @property({type: Boolean}) extractText = true;
+    // Shown above the image while several imported pages are reviewed one by one ("2/5").
+    @property({type: String}) reviewLabel = '';
     @property({attribute: false}) blob!: Blob;
     @property({attribute: false}) filter: FilterMode = 'original';
     @property({type: Boolean}) disableAutoDetect = false;
     @property({attribute: false}) initialQuad: Quad | null = null;
+    // Where the image comes from. 'scanner' = Google's document scanner (Quick Scan): the
+    // page is already found, straightened and cleaned, so it is saved as it is (no upscale,
+    // no sharpening, no edge detection), unless the user picks a filter. Nov 2026.
+    @property({type: String}) source: 'scanner' | 'camera' | 'file' = 'file';
 
     @state() private rotation: 0 | 90 | 180 | 270 = 0;
     // `busy` = saving or sharing: the only time the action buttons are disabled.
@@ -48,6 +63,8 @@ export class PageEditor extends LitElement {
     // (Nov 2026: a tap during that work used to do nothing, with no feedback).
     @state() private busy = false;
     @state() private detecting = false;
+    // Crop mode: the image with its four corner handles replaces the result preview.
+    @state() private cropMode = false;
     private loading: Promise<void> | null = null;
     private detection: Promise<void> | null = null;
     @state() private err: string | null = null;
@@ -56,7 +73,6 @@ export class PageEditor extends LitElement {
 
     private sourceBitmap: ImageBitmap | null = null;
     private baseCanvas: HTMLCanvasElement | null = null;
-    @state() private thumbUrl: string | null = null;
 
     private baseW = 0;
     private baseH = 0;
@@ -120,21 +136,6 @@ export class PageEditor extends LitElement {
         return `left:${left}px;top:${top}px;`;
     }
 
-    private getCssFilter(mode: string): string {
-        switch (mode) {
-            case 'grayscale':
-                return 'grayscale(100%)';
-            case 'bw':
-                return 'grayscale(100%) contrast(150%) brightness(90%)';
-            case 'magic':
-                return 'contrast(110%) saturate(130%) sepia(10%)';
-            case 'whiteboard':
-                return 'grayscale(20%) brightness(110%) contrast(120%)';
-            default:
-                return 'none';
-        }
-    }
-
     private pushHistory(): void {
         if (!this.quad) return;
         if (this.history.length > 80) this.history.shift();
@@ -178,6 +179,14 @@ export class PageEditor extends LitElement {
     updated(ch: Map<string, unknown>) {
         if (ch.has('blob')) this.loading = this.loadBlob();
         if (ch.has('filter')) this.queuePreview();
+        if (ch.has('cropMode')) {
+            if (this.cropMode) this.drawEdges();
+            else this.queuePreview();
+        }
+    }
+
+    private toggleCropMode(): void {
+        this.cropMode = !this.cropMode;
     }
 
     reset() {
@@ -219,7 +228,7 @@ export class PageEditor extends LitElement {
             await this.updateComplete;
             this.drawEdges();
 
-            if (!this.disableAutoDetect && !this.initialQuad) {
+            if (!this.disableAutoDetect && !this.initialQuad && this.source !== 'scanner') {
                 this.detection = this.autoDetectEdges();
             } else {
                 this.queuePreview();
@@ -252,23 +261,14 @@ export class PageEditor extends LitElement {
         this.baseW = w;
         this.baseH = h;
 
-        this.updateThumbUrl(c);
-    }
-
-    private updateThumbUrl(source: HTMLCanvasElement) {
-        const t = document.createElement('canvas');
-        const scale = 160 / Math.max(source.width, source.height);
-        t.width = source.width * scale;
-        t.height = source.height * scale;
-        t.getContext('2d')?.drawImage(source, 0, 0, t.width, t.height);
-        this.thumbUrl = t.toDataURL('image/jpeg', 0.8);
     }
 
     private drawEdges(): void {
         const canvas = this.edgesEl;
         if (!canvas || !this.baseCanvas || !this.quad) return;
         const maxW = canvas.parentElement?.clientWidth ?? 320;
-        const scale = Math.min(1, maxW / this.baseW);
+        const maxH = canvas.parentElement?.clientHeight ?? 480;
+        const scale = Math.min(1, maxW / this.baseW, maxH / this.baseH);
         const cssW = Math.max(1, Math.round(this.baseW * scale));
         const cssH = Math.max(1, Math.round(this.baseH * scale));
 
@@ -543,7 +543,7 @@ export class PageEditor extends LitElement {
             // Wait for container to have a real layout width — fires instantly if already laid out.
             const cw = await this._waitForContainerWidth(out);
             if (!cw) return;
-            const maxH = window.innerHeight * 0.65; // Matches Crop view constraint
+            const maxH = out.parentElement?.clientHeight || window.innerHeight * 0.65;
 
             // 2. Calculate aspect-ratio preserving dimensions
             const ratio = outSize.w / outSize.h;
@@ -622,7 +622,7 @@ export class PageEditor extends LitElement {
             const rawSize = computeOutputSize(mappedQuad);
             const qualityPlan = resolveScanQualityPlan({
                 action: 'save',
-                preset: 'archive',
+                preset: this.source === 'scanner' ? 'original' : 'archive',
                 filter: this.filter,
                 rawWidth: rawSize.w,
                 rawHeight: rawSize.h,
@@ -689,7 +689,7 @@ export class PageEditor extends LitElement {
             const rawSize = computeOutputSize(mappedQuad);
             const qualityPlan = resolveScanQualityPlan({
                 action: 'share',
-                preset: 'share',
+                preset: this.source === 'scanner' ? 'original' : 'share',
                 filter: this.filter,
                 rawWidth: rawSize.w,
                 rawHeight: rawSize.h,
@@ -767,200 +767,145 @@ export class PageEditor extends LitElement {
     }
 
     render() {
+        const chip = (active: boolean) => `px-4 py-2 rounded-full text-sm font-semibold transition-colors min-h-[44px] ${active ? 'bg-emerald-700 text-white' : 'bg-slate-800 text-slate-200 hover:bg-slate-700'}`;
+        const tool = 'p-3 rounded-xl text-slate-200 hover:bg-slate-800 active:scale-95 transition-transform min-w-[44px] min-h-[44px] flex items-center justify-center disabled:opacity-40';
         return html`
             ${this.err ? html`
-                <div class="fixed top-4 left-4 right-4 z-[100] p-4 rounded-xl bg-red-950/90 backdrop-blur border border-red-900 text-red-100 shadow-xl flex items-center justify-between animate-bounce">
+                <div class="fixed top-4 left-4 right-4 z-[100] p-4 rounded-xl bg-red-950/90 backdrop-blur border border-red-900 text-red-100 shadow-xl flex items-center justify-between">
                     <span>${this.err}</span>
                     <button aria-label=${t('editor.clear_error')} class="ml-2 font-bold" @click=${() => this.err = null}>✕</button>
                 </div>` : null}
 
-            <div class="flex flex-col min-h-dvh gap-6 p-4 pb-32 bg-black text-slate-100">
-
-                <div class="flex flex-col gap-3">
-                    <div class="flex items-center justify-between px-1">
-                        <div class="text-xs font-bold text-slate-400 uppercase tracking-widest">${t('editor.crop_rotate')}</div>
-                        <div class="flex gap-2">
-                            <button aria-label=${t('editor.auto_detect_edges')}
-                                    class="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-400 active:scale-95 transition-transform border border-slate-700 hover:text-white"
-                                    ?disabled=${this.busy || this.detecting}
-                                    @click=${() => { this.detection = this.autoDetectEdges(); }}>
-                                ${t('editor.auto_short')}
-                            </button>
-                            <button class="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-bold text-slate-400 active:scale-95 transition-transform border border-slate-700 hover:text-white"
-                                    aria-label=${t('editor.rotate_90')}
-                                    @click=${() => this.rotate90()}>
-                                ⟳ 90°
-                            </button>
-                            <button class="p-1.5 rounded-lg bg-slate-800 text-slate-400 active:scale-95 transition-transform border border-slate-700 hover:text-white"
-                                    aria-label=${t('editor.undo')}
-                                    title=${t('editor.undo')}
-                                    ?disabled=${this.busy || this.history.length === 0}
-                                    @click=${() => this.undo()}>
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                          d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path>
-                                </svg>
-                            </button>
-                        </div>
+            <div class="flex-1 min-h-0 flex flex-col">
+                <!-- One row of controls: back, what this is, crop tools -->
+                <div class="flex items-center gap-1 px-2 py-1 shrink-0">
+                    <button class=${tool} type="button" aria-label=${t('common.back')} ?disabled=${this.busy} @click=${this.onCancel}>
+                        ${Icons.Back(i18n.getDirection() === 'rtl' ? 'w-6 h-6 rotate-180' : 'w-6 h-6')}
+                    </button>
+                    <div class="flex-1 min-w-0 text-sm font-semibold truncate">
+                        ${this.cropMode ? t('editor.crop') : (this.reviewLabel || t('editor.page'))}
                     </div>
+                    ${this.cropMode ? html`
+                        <button class="px-3 py-2 rounded-xl bg-slate-800 text-xs font-bold text-slate-200 min-h-[44px]"
+                                aria-label=${t('editor.auto_detect_edges')} ?disabled=${this.busy || this.detecting}
+                                @click=${() => { this.detection = this.autoDetectEdges(); }}>${t('editor.auto_short')}</button>
+                    ` : null}
+                    <button class=${tool} type="button" aria-label=${t('editor.rotate_90')} ?disabled=${this.busy} @click=${() => this.rotate90()}>
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h5M20 20v-5h-5M5.6 9A8 8 0 0119 7.6M18.4 15A8 8 0 015 16.4"/></svg>
+                    </button>
+                    <button class=${tool} type="button" aria-label=${t('editor.undo')} title=${t('editor.undo')}
+                            ?disabled=${this.busy || this.history.length === 0} @click=${() => this.undo()}>
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+                    </button>
+                    <button class="${tool} ${this.cropMode ? 'bg-emerald-700 text-white' : ''}" type="button"
+                            aria-label=${t('editor.crop')} aria-pressed=${this.cropMode} ?disabled=${this.busy}
+                            @click=${() => this.toggleCropMode()}>
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 3v14a1 1 0 001 1h13M3 7h14a1 1 0 011 1v13"/></svg>
+                    </button>
+                </div>
 
-                    <div class="relative w-full flex justify-center bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 min-h-[50vh] mb-4 pb-[max(8px,env(safe-area-inset-bottom))]">
-                        <canvas data-edges
-                                class="max-w-full max-h-[70vh] w-auto h-auto object-contain select-none z-10"
+                <!-- The stage: the document gets the rest of the screen -->
+                <div class="relative flex-1 min-h-0 flex items-center justify-center overflow-hidden">
+                    ${this.cropMode ? html`
+                        <canvas data-edges class="max-w-full max-h-full w-auto h-auto object-contain select-none z-10"
                                 style="touch-action: pan-y;"></canvas>
-
                         ${[0, 1, 2, 3].map(i => html`
-                            <div
-                                    data-testid="corner-handle-${i}"
-                                    class="absolute z-[45] min-w-[60px] min-h-[60px] w-[60px] h-[60px] pointer-events-auto"
-                                    style="${this.getCornerHandleStyle(i)} touch-action:none;"
-                                    aria-label=${t('scan.edit_page')}
-                                    @pointerdown=${(ev: PointerEvent) => this.onHandlePointerDown(i, ev)}></div>
+                            <div data-testid="corner-handle-${i}"
+                                 class="absolute z-[45] min-w-[60px] min-h-[60px] w-[60px] h-[60px] pointer-events-auto"
+                                 style="${this.getCornerHandleStyle(i)} touch-action:none;"
+                                 aria-label=${t('scan.edit_page')}
+                                 @pointerdown=${(ev: PointerEvent) => this.onHandlePointerDown(i, ev)}></div>
                         `)}
-
                         <div class=${['absolute top-4 right-4 rounded-full overflow-hidden border-4 border-white shadow-2xl z-[45] w-32 h-32 pointer-events-none transition-opacity duration-200', this.showMagnify ? 'opacity-100' : 'opacity-0'].join(' ')}>
                             <canvas data-magnify class="block w-full h-full bg-black"></canvas>
                         </div>
-
-                        ${this.isQuadInvalid ? html`
-                            <div data-testid="invalid-warning" class="absolute bottom-4 left-1/2 -translate-x-1/2 z-[45] px-4 py-2 bg-red-600/90 text-white text-xs font-bold rounded-full shadow-lg backdrop-blur-sm flex items-center gap-2">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                                </svg>
-                                ${t('editor.invalid_selection')}
-                            </div>
-                        ` : null}
-                    </div>
-                </div>
-
-                <div class="flex flex-col gap-3">
-                    <div class="text-xs font-bold text-slate-400 uppercase tracking-widest px-1">${t('editor.filter')}</div>
-                    <div class="flex overflow-x-auto gap-3 pb-2 -mx-1 px-1 no-scrollbar snap-x">
-                        ${FILTERS.map(({mode, labelKey}) => html`
-                            <button @click=${() => {
-                                this.pushHistory();
-                                this.filter = mode;
-                                this.queuePreview();
-                                void haptics.impact(ImpactStyle.Light);
-                            }}
-                                    class="flex flex-col items-center gap-2 min-w-[70px] snap-start group relative">
-
-                                <div class="relative w-16 h-16 rounded-xl overflow-hidden border-2 transition-all duration-200 
-                                    ${this.filter === mode
-                                        ? 'border-emerald-500 scale-105 shadow-[0_0_15px_rgba(16,185,129,0.4)]'
-                                        : 'border-slate-800 opacity-70 group-hover:opacity-100 group-hover:border-slate-600'}">
-
-                                    ${this.thumbUrl ? html`
-                                        <img src=${this.thumbUrl}
-                                             class="w-full h-full object-cover"
-                                             style="filter: ${this.getCssFilter(mode)}">
-                                    ` : html`
-                                        <div class="w-full h-full bg-slate-900 animate-pulse"></div>`}
-
-                                    ${this.filter === mode ? html`
-                                        <div class="absolute inset-0 bg-emerald-500/20 flex items-center justify-center">
-                                            <div class="bg-emerald-500 rounded-full p-0.5 shadow-lg">
-                                                <span class="text-slate-900">${Icons.Check('w-3 h-3 block')}</span>
-                                            </div>
-                                        </div>
-                                    ` : null}
-                                </div>
-
-                                <span class="text-[10px] font-bold tracking-wide uppercase transition-colors ${this.filter === mode ? 'text-emerald-400' : 'text-slate-400'}">
-                                    ${t(labelKey)}
-                                </span>
-                            </button>
-                        `)}
-                    </div>
-                </div>
-
-                <div class="flex flex-col gap-3">
-                    <div class="text-xs font-bold text-slate-400 uppercase tracking-widest px-1">${t('editor.final_result')}</div>
-                    <div class="relative w-full flex justify-center bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 group">
-                        <canvas data-preview class="block max-w-full object-contain"
+                    ` : html`
+                        <canvas data-preview class="block max-w-full max-h-full object-contain"
                                 style="image-rendering: high-quality; backface-visibility: hidden;"></canvas>
                         ${!this.sourceBitmap ? html`
-                            <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-400 min-h-[200px]">
+                            <div class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-400">
                                 <div class="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
                                 <span class="text-xs font-bold uppercase tracking-wider">${t('common.loading')}</span>
                             </div>` : null}
-                    </div>
-                </div>
-
-                <div class="flex flex-col gap-4 pt-2 pb-36">
-                    <label class="flex items-center gap-3 p-4 rounded-xl bg-slate-900/50 border border-slate-800 cursor-pointer select-none transition-colors hover:bg-slate-900">
-                        <input type="checkbox"
-                               class="w-5 h-5 rounded border-slate-700 bg-slate-800 text-emerald-600 focus:ring-emerald-500 focus:ring-offset-0"
-                               .checked=${this.extractText}
-                               @change=${(e: Event) => this.extractText = (e.target as HTMLInputElement).checked}>
-                        <div class="flex-1">
-                            <div class="text-sm font-bold text-slate-200">${t('editor.extract_text')}</div>
-                            <div class="text-[10px] text-slate-400">${t('editor.extract_text_desc')}</div>
-                        </div>
-                    </label>
-
-                    <div class="fixed left-0 right-0 bottom-0 z-40 bg-slate-950/95 backdrop-blur-md border-t border-slate-800 pb-[env(safe-area-inset-bottom)]">
-                        <div class="max-w-7xl mx-auto px-4 py-3 space-y-2">
-                        <div class="flex items-center gap-2">
-                        <button class="flex-1 px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-300 font-bold tracking-wide transition-colors min-h-[44px] flex items-center justify-center"
-                                type="button"
-                                aria-label=${t('common.back')}
-                                ?disabled=${this.busy} @click=${this.onCancel}>
-                            <span class="inline-flex items-center justify-center shrink-0">${Icons.Back(i18n.getDirection() === 'rtl' ? 'w-5 h-5 block rotate-180' : 'w-5 h-5 block')}</span>
-                            <span class="sr-only">${t('common.back')}</span>
-                        </button>
-                        <button aria-label=${t('common.share_now')}
-                                class="flex-1 px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-200 font-bold tracking-wide transition-colors min-h-[44px] flex items-center justify-center"
-                                type="button"
-                                ?disabled=${this.busy || this.isQuadInvalid}
-                                @click=${() => this.showShareSheet = true}>
-                            <span class="inline-flex items-center justify-center shrink-0">${Icons.Share('w-5 h-5 block')}</span>
-                            <span class="sr-only">${t('common.share_now')}</span>
-                        </button>
-                        <button aria-label=${t('scan.save_scan')}
-                                class="flex-[1.2] px-4 py-3 rounded-xl bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-700 active:scale-95 transition-all text-white font-bold tracking-wide shadow-lg shadow-emerald-900/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 min-h-[44px]"
-                                type="button"
-                                ?disabled=${this.busy || this.isQuadInvalid} @click=${() => void this.onSave()}>
-                            ${this.busy
-                                    ? html`
-                                        <div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                                        <span class="sr-only">${t('scan.save_scan')}</span>`
-                                    : html`<span class="inline-flex items-center justify-center shrink-0">${Icons.Check('w-5 h-5 block')}</span><span class="sr-only">${t('scan.save_scan')}</span>`}
-                        </button>
-                        </div>
-                        </div>
-                    </div>
-
-                    ${this.showShareSheet ? html`
-                        <div class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end"
-                             @click=${() => this.showShareSheet = false}>
-                            <div class="w-full p-4 pb-[calc(env(safe-area-inset-bottom)+16px)] bg-slate-950 border-t border-slate-800 rounded-t-2xl space-y-3"
-                                 @click=${(e: Event) => e.stopPropagation()}>
-                                <div class="text-sm font-semibold text-slate-200">${t('scan.share_as_title')}</div>
-                                <button class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-100 text-sm font-medium min-h-[44px]"
-                                        ?disabled=${this.busy}
-                                        @click=${() => void this.shareAs('jpg')}>
-                                    ${t('scan.share_as_jpg')}
-                                </button>
-                                <button class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-100 text-sm font-medium min-h-[44px]"
-                                        ?disabled=${this.busy}
-                                        @click=${() => void this.shareAs('pdf')}>
-                                    ${t('scan.share_as_pdf')}
-                                </button>
-                                <button class="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 hover:bg-slate-900 text-slate-300 text-sm min-h-[44px]"
-                                        @click=${() => this.showShareSheet = false}>
-                                    ${t('common.cancel')}
-                                </button>
-                            </div>
+                    `}
+                    ${this.isQuadInvalid ? html`
+                        <div data-testid="invalid-warning" class="absolute bottom-4 left-1/2 -translate-x-1/2 z-[45] px-4 py-2 bg-red-600/90 text-white text-xs font-bold rounded-full shadow-lg backdrop-blur-sm flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                            </svg>
+                            ${t('editor.invalid_selection')}
                         </div>
                     ` : null}
+                </div>
+
+                <!-- Filters: three chips, nothing hidden -->
+                ${this.cropMode ? null : html`
+                    <div class="flex justify-center gap-2 px-4 py-2 shrink-0" role="group" aria-label=${t('editor.filter')}>
+                        ${FILTERS.map(({mode, labelKey}) => html`
+                            <button type="button" class=${chip(this.filter === mode)} aria-pressed=${this.filter === mode}
+                                    @click=${() => {
+                                        if (this.filter === mode) return;
+                                        this.pushHistory();
+                                        this.filter = mode;
+                                        this.queuePreview();
+                                        void haptics.impact(ImpactStyle.Light);
+                                    }}>${t(labelKey)}</button>
+                        `)}
+                    </div>
+                `}
+
+                <!-- The main actions, always on the bottom edge -->
+                <div class="flex items-center gap-2 px-4 py-2 shrink-0 border-t border-slate-800 bg-slate-950">
+                    ${this.cropMode ? html`
+                        <button class="flex-1 px-4 py-3 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-bold min-h-[48px]"
+                                type="button" ?disabled=${this.isQuadInvalid} @click=${() => this.toggleCropMode()}>
+                            ${t('editor.crop_done')}
+                        </button>
+                    ` : html`
+                        <button class="flex-1 px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold min-h-[48px] flex items-center justify-center gap-2"
+                                type="button" aria-label=${t('common.share_now')}
+                                ?disabled=${this.busy || this.isQuadInvalid} @click=${() => this.showShareSheet = true}>
+                            ${Icons.Share('w-5 h-5 block')}<span>${t('common.share_now')}</span>
+                        </button>
+                        <button class="flex-[1.4] px-4 py-3 rounded-xl bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-800 text-white font-bold min-h-[48px] flex items-center justify-center gap-2 disabled:opacity-50"
+                                type="button" aria-label=${t('scan.save_scan')}
+                                ?disabled=${this.busy || this.isQuadInvalid} @click=${() => void this.onSave()}>
+                            ${this.busy
+                                    ? html`<div class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>`
+                                    : Icons.Check('w-5 h-5 block')}
+                            <span>${t('scan.save_scan')}</span>
+                        </button>
+                    `}
+                </div>
+
+                ${this.showShareSheet ? html`
+                    <div class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end"
+                         @click=${() => this.showShareSheet = false}>
+                        <div class="w-full p-4 pb-[calc(env(safe-area-inset-bottom)+16px)] bg-slate-950 border-t border-slate-800 rounded-t-2xl space-y-3"
+                             @click=${(e: Event) => e.stopPropagation()}>
+                            <div class="text-sm font-semibold text-slate-200">${t('scan.share_as_title')}</div>
+                            <button class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-100 text-sm font-medium min-h-[44px]"
+                                    ?disabled=${this.busy} @click=${() => void this.shareAs('pdf')}>
+                                ${t('scan.share_as_pdf')}
+                            </button>
+                            <button class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-slate-100 text-sm font-medium min-h-[44px]"
+                                    ?disabled=${this.busy} @click=${() => void this.shareAs('jpg')}>
+                                ${t('scan.share_as_jpg')}
+                            </button>
+                            <button class="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 hover:bg-slate-900 text-slate-300 text-sm min-h-[44px]"
+                                    @click=${() => this.showShareSheet = false}>
+                                ${t('common.cancel')}
+                            </button>
+                        </div>
+                    </div>
+                ` : null}
             </div>
         `;
     }
 }
 
 function fullQuad(w: number, h: number): Quad {
-    return [{x: 0, y: 0}, {x: w - 1, y: 0}, {x: w - 1, y: h - 1}, {x: 0, y: h - 1}];
+    return [{x: 0, y: 0}, {x: w, y: 0}, {x: w, y: h}, {x: 0, y: h}];
 }
 
 function rot90(p: Point, oldH: number): Point {
