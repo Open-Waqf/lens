@@ -15,7 +15,11 @@ export function titleFromText(text: string): string | null {
     const first = lines.findIndex(wordy);
     if (first < 0) return null;
     let title = lines[first];
-    if (title.length < 12 && lines[first + 1] && wordy(lines[first + 1])) title += ' ' + lines[first + 1];
+    const next = lines[first + 1];
+    if (title.length < 12 && next && wordy(next)) {
+        // "Facture" over "Facture n° 2026-1103": the second line already says it.
+        title = next.toLowerCase().startsWith(title.toLowerCase()) ? next : `${title} ${next}`;
+    }
     if (title.length > 60) {
         const cut = title.slice(0, 60);
         const space = cut.lastIndexOf(' ');

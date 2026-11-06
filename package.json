@@ -19,6 +19,7 @@
     "test:perf": "playwright test --project=desktop --grep @perf",
     "test:android": "node scripts/test-android.mjs",
     "test:no-telemetry": "node scripts/check-no-telemetry.mjs",
+    "play:screenshots": "npm run build && playwright test -c playwright.store.config.ts",
     "vault:verify": "node scripts/slbk-verify.mjs",
     "android:run": "node scripts/run-android.mjs",
     "android:live": "node scripts/run-android.mjs --live",

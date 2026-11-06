@@ -627,7 +627,7 @@ export class LibraryPage extends LitElement {
                 </div>
 
                 <div class="p-4 flex-1 min-w-0 flex flex-col justify-center gap-1">
-                    <h3 class="text-slate-200 font-medium truncate leading-tight text-sm">${doc.title}</h3>
+                    <h3 class="text-slate-200 font-medium truncate leading-tight text-sm" dir="auto">${doc.title}</h3>
 
                     <div class="flex items-center gap-2 text-xs text-slate-400">
                         <span>${doc.pageIds.length === 1 ? t('library.page_count_one') : t('library.page_count_other', {count: doc.pageIds.length})}</span>

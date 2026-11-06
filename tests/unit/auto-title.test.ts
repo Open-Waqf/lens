@@ -3,8 +3,13 @@ import {titleFromText} from '../../src/lib/auto-title';
 
 describe('titleFromText: a document name from its OCR text', () => {
     it('takes the first line of words, and the next one when the first is short', () => {
-        expect(titleFromText('Facture\nFacture n° 2026-1103. Société Exemple SARL')).toBe('Facture Facture n° 2026-1103. Société Exemple SARL');
+        expect(titleFromText('Invoice\nSociété Exemple SARL, Paris')).toBe('Invoice Société Exemple SARL, Paris');
         expect(titleFromText('Rental agreement between the parties\nSecond line')).toBe('Rental agreement between the parties');
+    });
+
+    it('does not double a heading that the next line starts with (Nov 2026)', () => {
+        expect(titleFromText('Facture\nFacture n° 2026-1103. Société Exemple SARL')).toBe('Facture n° 2026-1103. Société Exemple SARL');
+        expect(titleFromText('عقد\nعقد إيجار المحل التجاري')).toBe('عقد إيجار المحل التجاري');
     });
 
     it('skips dates, amounts and page numbers at the top', () => {

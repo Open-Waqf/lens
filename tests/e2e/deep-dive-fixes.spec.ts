@@ -160,3 +160,16 @@ test('D.9 renaming does not write back old search text that OCR replaced meanwhi
         q.onsuccess = () => { const r = q.result.transaction(['docs']).objectStore('docs').get('s1'); r.onsuccess = () => { q.result.close(); resolve([r.result.title, r.result.searchIndex]); }; };
     }))).toEqual(['New', 'after ocr']);
 });
+
+test('D.10 a French name in the Arabic app follows its own direction @rtl-only', async ({page}) => {
+    await page.addInitScript(() => localStorage.setItem('sahifah.locale', 'ar'));
+    await seed(page, [{id: 'fr1', title: 'Facture n° 2026-1103. Société Exemple SARL, 12 rue de la Liberté', folder: null, tags: [], pageIds: [], createdAt: 1, updatedAt: 1}], []);
+    await page.reload();
+    const h3 = page.locator('library-page h3').first();
+    await expect(h3).toContainText('Facture');
+    expect(await h3.evaluate((el) => getComputedStyle(el).direction)).toBe('ltr');
+    await page.goto('/#/doc/fr1');
+    const title = page.locator('doc-page input').first();
+    await expect(title).toHaveValue(/^Facture/);
+    expect(await title.evaluate((el) => getComputedStyle(el).direction)).toBe('ltr');
+});

@@ -108,6 +108,7 @@ npm run check          # before every commit: typecheck, translations, unit and 
 | `npm run test:android` | phone tests on the USB phone (see [docs/TESTING.md](docs/TESTING.md)) |
 | `npm run release -- --dry-run` | show what a release would do; without `--dry-run` it releases (website + Android bundle) |
 | `npm run android:release` | only the signed Android bundle for Play Console (unlock the key vault first) |
+| `npm run play:screenshots` | the Play Store pictures from the real app, English and Arabic, into ~/Downloads/lens-review/play-store/screenshots/ |
 
 How the tests work: [docs/TESTING.md](docs/TESTING.md). Upgrading packages:
 [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md). Timing gates: [docs/perf.md](docs/perf.md).

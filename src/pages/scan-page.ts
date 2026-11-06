@@ -1104,7 +1104,7 @@ export class ScanPage extends LitElement {
                 ${stage === 'idle' && this.session.hasPages ? html`
                     <!-- Pages so far, then what to do with them -->
                     <div class="text-sm text-slate-400 px-1">
-                        ${this.docTitle ?? t('common.document')} · ${this.session.pageCount === 1 ? t('library.page_count_one') : t('library.page_count_other', {count: this.session.pageCount})}
+                        <span dir="auto">${this.docTitle ?? t('common.document')}</span> · ${this.session.pageCount === 1 ? t('library.page_count_one') : t('library.page_count_other', {count: this.session.pageCount})}
                     </div>
                     ${this.renderStrip()}
                     <div class="mt-auto space-y-3 pb-2">

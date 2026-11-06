@@ -634,6 +634,7 @@ export class DocPage extends LitElement {
                     </a>
                     <input class="flex-1 min-w-0 bg-transparent border border-transparent focus:border-slate-700 focus:bg-slate-900 rounded-lg px-2 py-2 text-lg font-bold text-slate-100 min-h-[44px]"
                            aria-label=${t('doc.title_label')}
+                           style="direction: ${getTextDirection(this.titleDraft ?? this.doc.title)}; text-align: start;"
                            .value=${live(this.titleDraft ?? this.doc.title)}
                            @focus=${(e: Event) => this.titleDraft = (e.target as HTMLInputElement).value}
                            @input=${(e: Event) => this.titleDraft = (e.target as HTMLInputElement).value}
